@@ -157,7 +157,7 @@ mod tests {
     }
 
     /// The real layout on a real machine, against the real limit.
-    fn real_socket_path_len(home: &str, app: &str, id: &str, socket: &str) -> usize {
+    fn measured_socket_path_len(home: &str, app: &str, id: &str, socket: &str) -> usize {
         let root = Path::new(home)
             .join("Library/Application Support")
             .join("Agent Profiles")
@@ -180,10 +180,24 @@ mod tests {
             dir.display().to_string().len() + "/1.13-main.sock".len()
         );
         assert!(fits_within(dir, MACOS_SOCKET_PATH_LIMIT));
-        assert_eq!(
-            fits_within(dir, MACOS_SOCKET_PATH_LIMIT),
-            socket_path_len(dir) <= MACOS_SOCKET_PATH_LIMIT
-        );
+    }
+
+    #[test]
+    fn fits_within_pins_the_boundary_at_the_limit() {
+        // A comparison against `fits_within`'s own `<=` body would be tautological
+        // — it can't fail unless the two sides fall out of sync, which is a compile
+        // error, not a test failure. Pin the real boundary instead: a path whose
+        // socket path lands exactly on the limit must fit, and one byte more must not.
+        let prefix = "/Users/x/p/";
+        let pad_len = MACOS_SOCKET_PATH_LIMIT - SOCKET_NAME_BUDGET - prefix.len();
+
+        let exactly_at_limit = PathBuf::from(format!("{prefix}{}", "n".repeat(pad_len)));
+        assert_eq!(socket_path_len(&exactly_at_limit), MACOS_SOCKET_PATH_LIMIT);
+        assert!(fits_within(&exactly_at_limit, MACOS_SOCKET_PATH_LIMIT));
+
+        let one_byte_over = PathBuf::from(format!("{prefix}{}", "n".repeat(pad_len + 1)));
+        assert_eq!(socket_path_len(&one_byte_over), MACOS_SOCKET_PATH_LIMIT + 1);
+        assert!(!fits_within(&one_byte_over, MACOS_SOCKET_PATH_LIMIT));
     }
 
     #[test]
@@ -202,7 +216,7 @@ mod tests {
     #[test]
     fn a_profile_leaves_room_for_the_socket_an_app_puts_inside_it() {
         // VS Code's is the longest of the ones measured.
-        let len = real_socket_path_len("/Users/husni", "code", "9f3c1a7e", "1.13-main.sock");
+        let len = measured_socket_path_len("/Users/husni", "code", "9f3c1a7e", "1.13-main.sock");
         assert!(
             len <= MACOS_SOCKET_PATH_LIMIT,
             "a profile path must leave room for a socket, got {len}"
@@ -213,7 +227,7 @@ mod tests {
     fn there_is_headroom_for_a_long_user_name() {
         // The home directory is not ours to choose, so the layout has to survive
         // a name considerably longer than the author's.
-        let len = real_socket_path_len(
+        let len = measured_socket_path_len(
             "/Users/christopher.anderson",
             "code",
             "9f3c1a7e",
