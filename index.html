@@ -10,23 +10,15 @@
   </head>
   <body>
     <main class="container">
-      <header class="page-header">
-        <div class="brand-mark" aria-hidden="true"><span>ap</span></div>
-        <div>
-          <p class="eyebrow">Profile cabinet</p>
-          <h1>Agent Profiles</h1>
-          <p class="lede">Keep each coding agent workspace separate and ready to open.</p>
-        </div>
+      <header class="status-line">
+        <p id="status" aria-live="polite">0 profiles · 0 running</p>
+        <!-- The path lives in a `bdi` so it keeps its own left-to-right ordering
+             inside a right-to-left box. The box is right-to-left so the ellipsis
+             eats the start of the path rather than the meaningful tail. -->
+        <p id="data-root" title=""><bdi></bdi></p>
       </header>
 
-      <section class="profiles-section" aria-labelledby="profiles-heading">
-        <div class="section-heading">
-          <div>
-            <p class="eyebrow">Your workspaces</p>
-            <h2 id="profiles-heading">Profiles</h2>
-          </div>
-          <span id="profile-count" class="count-badge" aria-live="polite">0</span>
-        </div>
+      <section class="profiles-section" aria-label="Profiles">
         <div id="error" class="error" role="alert" hidden></div>
         <div id="apps" aria-live="polite"></div>
       </section>

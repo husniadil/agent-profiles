@@ -3,6 +3,8 @@ import "./styles.css";
 import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
 
+import { formatBytes, statusLine } from "./format";
+
 type ProfileView = {
   id: string;
   app_id: string;
@@ -10,6 +12,7 @@ type ProfileView = {
   path: string;
   is_default: boolean;
   shares_account: boolean;
+  running: boolean;
 };
 
 type AppView = {
@@ -20,7 +23,9 @@ type AppView = {
 };
 
 const appsElement = document.querySelector<HTMLDivElement>("#apps");
-const countElement = document.querySelector<HTMLSpanElement>("#profile-count");
+const statusElement = document.querySelector<HTMLParagraphElement>("#status");
+const dataRootElement = document.querySelector<HTMLParagraphElement>("#data-root");
+const dataRootTextElement = document.querySelector<HTMLElement>("#data-root bdi");
 const errorElement = document.querySelector<HTMLDivElement>("#error");
 const addForm = document.querySelector<HTMLFormElement>("#add-profile-form");
 const labelInput = document.querySelector<HTMLInputElement>("#new-label");
@@ -29,7 +34,9 @@ const addErrorElement = document.querySelector<HTMLDivElement>("#add-error");
 
 if (
   !appsElement ||
-  !countElement ||
+  !statusElement ||
+  !dataRootElement ||
+  !dataRootTextElement ||
   !errorElement ||
   !addForm ||
   !labelInput ||
@@ -40,7 +47,9 @@ if (
 }
 
 const appsContainer = appsElement;
-const profileCount = countElement;
+const statusText = statusElement;
+const dataRootBox = dataRootElement;
+const dataRootText = dataRootTextElement;
 const errorBox = errorElement;
 const profileForm = addForm;
 const profileLabelInput = labelInput;
@@ -75,16 +84,38 @@ function clearAddError(): void {
   addErrorBox.hidden = true;
 }
 
-function formatBytes(bytes: number): string {
-  if (bytes < 1024) return `${bytes} B`;
-  const units = ["KB", "MB", "GB", "TB"];
-  let value = bytes;
-  let unit = -1;
-  do {
-    value /= 1024;
-    unit += 1;
-  } while (value >= 1024 && unit < units.length - 1);
-  return `${value.toFixed(value >= 10 ? 0 : 1)} ${units[unit]}`;
+// Sizes arrive one row at a time, so the total is held here and the line is
+// redrawn as it fills in.
+let sizeTotal: number | null = null;
+
+function paintStatus(apps: AppView[]): void {
+  const available = apps.filter((app) => app.unavailable === null);
+  const profiles = available.reduce((total, app) => total + app.profiles.length, 0);
+  const running = available.reduce(
+    (total, app) => total + app.profiles.filter((p) => p.running).length,
+    0,
+  );
+  const line = statusLine(profiles, running, sizeTotal);
+  // The line is a polite live region and it is repainted on every render — and,
+  // once the sizes arrive, once per row. Rewriting identical text still counts as
+  // a change to a screen reader, so an unchanged line is left alone rather than
+  // read out again.
+  if (statusText.textContent !== line) statusText.textContent = line;
+}
+
+// The data root does not change while the app runs, so it is asked for once.
+async function loadDataRoot(): Promise<void> {
+  try {
+    const root = await invoke<string>("data_root");
+    dataRootText.textContent = root;
+    // The line is ellipsised to one line, so the full value has to stay
+    // reachable somewhere. The tooltip belongs on the box, not the `bdi`.
+    dataRootBox.title = root;
+  } catch {
+    // Not worth the error banner: the window works perfectly without knowing
+    // where the files are, and the banner is reserved for actions that failed.
+    dataRootText.textContent = "";
+  }
 }
 
 function makeTextElement(tag: "h3" | "h4" | "p" | "span", className: string, text: string): HTMLElement {
@@ -145,10 +176,12 @@ function profileCard(profile: ProfileView, position: number): HTMLLIElement {
 function render(apps: AppView[]): void {
   appsContainer.replaceChildren();
 
+  // A fresh render restarts the measuring, so the total stops claiming what the
+  // previous list added up to.
+  sizeTotal = null;
+  paintStatus(apps);
+
   const available = apps.filter((app) => app.unavailable === null);
-  profileCount.textContent = String(
-    available.reduce((total, app) => total + app.profiles.length, 0),
-  );
 
   // Nothing installed is the only case worth explaining. With one app working,
   // the other's absence is not an error — it is simply not installed.
@@ -387,8 +420,10 @@ void listen("window-shown", () => {
   clearError();
   clearAddError();
   void loadProfiles();
+  void loadDataRoot();
   void loadAutostart();
 });
 
 void loadProfiles();
+void loadDataRoot();
 void loadAutostart();
