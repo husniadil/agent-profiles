@@ -135,7 +135,6 @@ Confirmed by the harness driving real installations of the supported application
 - [x] Account identity read from both shapes of file — a top-level field for Claude, a nested one for ChatGPT
 - [x] A profile launches, and a process scan attributes that pid back to it — for the argument-only app and for the argument-plus-environment one
 - [x] The designation takes effect: the launched app writes its state into the profile directory, not the stock one
-- [x] Quit terminates the instance and it disappears from the process table
 - [x] **Two apps run side by side, and neither app's process is ever attributed to the other** — the premise the whole design rests on
 - [x] A profile path leaves room for the socket an application creates inside it, verified by launching one at the real profile path
 - [x] A profile deleted after quitting leaves nothing behind

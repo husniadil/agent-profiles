@@ -69,39 +69,6 @@ fn handle_menu_event(app: &tauri::AppHandle, id: &str) -> Result<()> {
                 }
             }
         }
-        Some(("quit", app_id, profile_id)) => {
-            let pid = live_pid(app, app_id, profile_id)?;
-            let product = {
-                let state = state(app)?;
-                state.app(app_id)?.spec.product
-            };
-            let app = app.clone();
-            let worker_app = app.clone();
-            let thread = std::thread::Builder::new()
-                .name("agent-profiles-quit".into())
-                .spawn(move || {
-                    let result = (|| -> Result<()> {
-                        let state = state(&worker_app)?;
-                        state.platform.quit(pid)?;
-                        tray::rebuild(&worker_app)?;
-                        Ok(())
-                    })();
-                    if let Err(error) = result {
-                        eprintln!("tray quit action failed: {error}");
-                        let reason = format!("Could not quit {product}: {error}");
-                        if let Err(rebuild_error) =
-                            tray::rebuild_with_error(&worker_app, Some(&reason))
-                        {
-                            eprintln!("tray rebuild failed: {rebuild_error}");
-                        }
-                    }
-                });
-            if let Err(error) = thread {
-                let reason = format!("Could not start quit worker: {error}");
-                eprintln!("{reason}");
-                tray::rebuild_with_error(&app, Some(&reason))?;
-            }
-        }
         // Headers, error rows and anything else carrying a colon are inert.
         Some(_) => {}
         None if id == "manage" => {

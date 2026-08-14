@@ -141,14 +141,6 @@ pub fn menu_rows(
                 text: format!("{indent}{marker} {}{suffix}", profile.label),
                 enabled: enabled && action != "running",
             });
-
-            if pid.is_some() {
-                rows.push(MenuRow {
-                    id: row_id("quit", section.spec.id, &profile.id),
-                    text: format!("{indent}      Quit {}", profile.label),
-                    enabled,
-                });
-            }
         }
     }
 
@@ -384,24 +376,26 @@ mod tests {
     }
 
     #[test]
-    fn a_running_profile_also_offers_a_quit_row_right_after_it() {
-        let sections = vec![section(&app_spec::CLAUDE, profiles(&["Kerja"]))];
-        let rows = menu_rows(&sections, &[running("claude", "/p/id0")], None);
-        let at = rows
-            .iter()
-            .position(|r| r.id == "focus:claude:id0")
-            .unwrap();
-        assert_eq!(rows[at + 1].id, "quit:claude:id0");
-        assert!(rows[at + 1].text.contains("Quit"));
+    fn a_profile_offers_one_row_and_never_a_quit_beside_it() {
+        // Quitting an app belongs to the app, not to this menu: a row that ends
+        // someone's editor from a menu they opened to switch profiles is a
+        // destructive action sitting where a navigational one was expected.
+        // Running or not makes no difference to how many rows a profile gets.
+        for processes in [vec![running("claude", "/p/id0")], vec![]] {
+            let sections = vec![section(&app_spec::CLAUDE, profiles(&["Kerja"]))];
+            let expected = sections[0].profiles.len();
+            let rows = menu_rows(&sections, &processes, None);
+            assert_eq!(rows.len(), expected, "one profile is one row");
+            assert!(!rows.iter().any(|r| r.id.starts_with("quit:")));
+        }
     }
 
     #[test]
-    fn a_stopped_profile_offers_launch_and_no_quit_row() {
+    fn a_stopped_profile_offers_launch() {
         let sections = vec![section(&app_spec::CLAUDE, profiles(&["Kerja"]))];
         let rows = menu_rows(&sections, &[], None);
         let row = rows.iter().find(|r| r.id == "launch:claude:id0").unwrap();
         assert!(row.text.contains('○'));
-        assert!(!rows.iter().any(|r| r.id.starts_with("quit:")));
     }
 
     #[test]

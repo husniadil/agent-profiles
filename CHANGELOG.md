@@ -28,9 +28,13 @@ The management window redesigned around what this app actually holds: paths, pro
 
 - Every colour pairing in the window now clears WCAG AA for its role. Several did not: the app name that says whose profiles a group holds read at 2.4:1, and the red that reports an unusable data root read at 4.3:1 against the page.
 
+### Removed
+
+- **The `Quit <profile>` row in the tray menu.** Quitting an application belongs to that application: the row put a destructive action directly beneath the navigational one it looked like, in a menu opened to switch between profiles. Focus and Launch stay, and so does **Quit Agent Profiles**, which ends this app rather than one of the agents it manages. Deletion still refuses while a profile is running, and still says so.
+
 ### Note
 
-The tray menu is unchanged. It is a native platform menu built from plain text rows, so there is no stylesheet to apply; it already follows the system theme by being a system menu, and it already carried the running marker the window's new dot matches.
+The rest of the tray menu is unchanged. It is a native platform menu built from plain text rows, so there is no stylesheet to apply; it already follows the system theme by being a system menu, and it already carried the running marker the window's new dot matches.
 
 ## [0.2.0] — 2026-08-14
 
