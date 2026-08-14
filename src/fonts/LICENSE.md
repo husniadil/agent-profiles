@@ -1,8 +1,10 @@
 Archivo and IBM Plex Mono are used here under the SIL Open Font License 1.1.
-Full text: https://scripts.sil.org/OFL
+The full licence text sits beside this file, in `OFL.txt`.
 
-Archivo — Omnibus-Type, https://github.com/Omnibus-Type/Archivo
-IBM Plex Mono — IBM, https://github.com/IBM/plex
+Archivo — Copyright 2020 The Archivo Project Authors, https://github.com/Omnibus-Type/Archivo
+IBM Plex Mono — Copyright 2017 IBM Corp., https://github.com/IBM/plex
 
-Vendored as latin-subset woff2 rather than fetched at runtime: this is a desktop
-app and must render the same offline as online.
+Both are vendored as latin-subset woff2 rather than fetched at runtime: this is a
+desktop app and must render the same offline as online. The licence text is
+vendored for the same reason — a link is not the text, and the OFL asks for the
+text to travel with the fonts.
