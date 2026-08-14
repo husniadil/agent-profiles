@@ -127,7 +127,7 @@ async function loadDataRoot(): Promise<void> {
   }
 }
 
-function makeTextElement(tag: "h3" | "h4" | "p" | "span", className: string, text: string): HTMLElement {
+function makeTextElement(tag: "h2" | "h3" | "p" | "span", className: string, text: string): HTMLElement {
   const element = document.createElement(tag);
   element.className = className;
   element.textContent = text;
@@ -255,7 +255,7 @@ function render(apps: AppView[]): void {
     group.className = "app-group";
     // A heading only earns its space once there is a second app to tell apart.
     if (available.length > 1) {
-      group.append(makeTextElement("h4", "app-heading", app.label));
+      group.append(makeTextElement("h2", "app-heading", app.label));
     }
     const list = document.createElement("ul");
     list.className = "profile-list";

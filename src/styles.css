@@ -219,15 +219,26 @@ h1 {
 }
 
 .app-heading {
-  margin: 0 0 0.6rem;
+  display: flex;
+  align-items: center;
+  gap: 0.86rem;
+  margin: 1.57rem 0 0.43rem;
   font-family: var(--wide);
-  font-size: 0.78rem;
+  font-variation-settings: "wdth" 115;
+  font-size: 0.79rem;
   font-weight: 600;
-  letter-spacing: 0.08em;
+  letter-spacing: 0.14em;
   text-transform: uppercase;
   /* Not `--ink-3`: this carries the app name, which is the only thing telling a
      reader whose profiles these are. On the canvas that grey reads at 2.4:1. */
   color: var(--ink-2);
+}
+
+.app-heading::after {
+  content: "";
+  flex: 1;
+  height: 1px;
+  background: var(--hairline);
 }
 
 .app-picker select {
