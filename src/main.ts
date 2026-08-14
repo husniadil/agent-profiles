@@ -405,6 +405,24 @@ function render(apps: AppView[]): void {
   void measureSizes(pass);
 }
 
+/// What to call the machine this is running on.
+///
+/// The socket path limit and the empty state both name the system rather than
+/// saying "this computer", because a person recognises their own platform and a
+/// number attached to it reads as a fact about their machine. Taken from the
+/// webview's own user agent: the backend knows the platform, but not in any form
+/// the window is told about, and a command to ask would be a round trip for a
+/// word. Falls back to the neutral phrasing on anything unrecognised.
+function systemNames(): { system: string; machine: string } {
+  const agent = navigator.userAgent;
+  if (agent.includes("Mac OS X") || agent.includes("Macintosh")) {
+    return { system: "macOS", machine: "this Mac" };
+  }
+  if (agent.includes("Windows")) return { system: "Windows", machine: "this PC" };
+  if (agent.includes("Linux")) return { system: "Linux", machine: "this computer" };
+  return { system: "this system", machine: "this computer" };
+}
+
 /// The window with nothing to manage.
 ///
 /// The apps are named from what the backend actually looked for rather than
@@ -420,7 +438,7 @@ function emptyState(found: number, apps: AppView[]): HTMLElement {
     makeTextElement(
       "p",
       "empty-body",
-      `Agent Profiles runs the coding agents already installed on this computer — ${names}. Install one, then reopen this window.`,
+      `Agent Profiles runs the coding agents already installed on ${systemNames().machine} — ${names}. Install one, then reopen this window.`,
     ),
   );
   return empty;
@@ -572,7 +590,7 @@ async function loadBudget(): Promise<void> {
   budgetFill.classList.toggle("over", over);
   budgetNote.textContent = over
     ? `${budget.used_bytes - limit} bytes over the limit`
-    : `socket path budget · this system stops at ${limit}`;
+    : `socket path budget · ${systemNames().system} stops at ${limit}`;
   budgetNote.classList.toggle("over", over);
   budgetCount.replaceChildren(
     makeTextElement("b", "", String(budget.used_bytes)),
@@ -670,9 +688,10 @@ async function startDelete(profile: ProfileView, content: HTMLElement): Promise<
     makeTextElement("strong", "", profile.label),
     " and the ",
     makeTextElement("strong", "figure", formatBytes(size)),
-    " in ",
-    makeTextElement("strong", "figure", shortenPath(profile.path)),
-    ". This can’t be undone.",
+    // "its folder" rather than the path: the row this panel opens under is
+    // already showing that path, two lines above, and repeating it here pushes
+    // the sentence to three lines for a fact the reader is looking at.
+    " in its folder. This can’t be undone.",
   );
   panel.append(question);
 

@@ -519,14 +519,13 @@ select {
   flex: 1;
 }
 
-/* The picker is as wide as the app name it holds, not a share of the row: the
-   name field is the one that earns the space. */
+/* The picker takes an equal share of the row, as the mockup has it. It is only
+   ever on screen when a second app is installed, so when it is there it is a
+   real question and gets the same weight as the name beside it. The span exists
+   only so the pair can be hidden together. */
 .compose-row .app-picker {
-  flex: none;
-}
-
-.compose-row select.field {
-  width: auto;
+  flex: 1;
+  min-width: 0;
 }
 
 .budget {
