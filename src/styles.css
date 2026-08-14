@@ -398,7 +398,10 @@ h1 {
   border: 0;
   border-radius: 0.43rem;
   background: transparent;
-  color: var(--ink-3);
+  /* Quiet, but these are controls: `--ink-3` on the hovered row is 2.9:1, under
+     the 3:1 an interactive element owes the eye. They only appear on hover in
+     the first place, so there is no resting clutter to hold them back from. */
+  color: var(--ink-2);
 }
 
 .row-icon:hover {
