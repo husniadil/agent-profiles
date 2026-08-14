@@ -14,11 +14,9 @@
     "windows": [
       {
         "title": "Agent Profiles",
-        "width": 800,
+        "width": 560,
         "height": 480,
-        "minWidth": 560,
-        "minHeight": 420,
-        "resizable": true,
+        "resizable": false,
         "maximizable": false,
         "visible": false
       }
