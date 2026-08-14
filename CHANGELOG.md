@@ -4,9 +4,14 @@ Notable changes, newest first. This project follows [Semantic Versioning](https:
 
 ## [Unreleased]
 
-The management window redesigned around what this app actually holds: paths, profile ids, running processes and byte counts. Every existing behaviour is kept; only the presentation changes.
+The management window rebuilt. Every existing behaviour is kept; only the presentation changes.
+
+> **Note:** the entries below describe the window as it stood partway through this work — achromatic, hand-built DOM. It was subsequently rebuilt in React with [beUI](https://beui.dev) components, and colour now carries **profile identity**: each profile has a stable hue shown as a chip with its initial, while running, shared sign-in and destructive keep their own fixed colours. These notes need rewriting against the shipped design before this section is released.
 
 ### Added
+
+- **The window opens at 800×480** rather than 800×600. The old height left a band of empty page below the content; the list now stretches to fill whatever height the window has, scrolling inside its own frame, with the New profile form and the Start at login bar pinned below it.
+- **The maximize button is disabled.** This is a fixed-purpose window opened from the tray for a few seconds; a zoomed full-screen state serves nothing. It still resizes freely. On macOS the green title-bar button greys out; on Linux Tauri does not support the setting, so the window can still be maximized there.
 
 - **The socket path budget is drawn under the add form**: the directory a new profile would get, a meter, and `89 / 104 bytes`. On a home directory too long to host a profile it says so, in red, before anything has been typed — where previously the refusal only arrived after the profile was submitted. It is a property of the data root, not of the name: a profile directory is named after a generated id, so the number cannot move as you type and a long label is never the reason a profile is refused.
 - **A profile can be opened from the management window**, not only from the tray. The row's open action launches the profile, or focuses it if it is already running, deciding from a fresh process scan rather than from what the window last drew.
