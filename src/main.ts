@@ -84,22 +84,25 @@ function clearAddError(): void {
   addErrorBox.hidden = true;
 }
 
-// Sizes arrive one row at a time, so the total is held here and the line is
-// redrawn as it fills in.
+// The line is drawn from the list that is on screen, so the list lives here
+// beside the total rather than being passed in: the sizes arrive long after
+// `render` has returned, and a repaint that needed the list handed to it would
+// mean keeping a second copy of it somewhere just to say the same thing again.
+let statusApps: AppView[] = [];
 let sizeTotal: number | null = null;
 
-function paintStatus(apps: AppView[]): void {
-  const available = apps.filter((app) => app.unavailable === null);
+function paintStatus(): void {
+  const available = statusApps.filter((app) => app.unavailable === null);
   const profiles = available.reduce((total, app) => total + app.profiles.length, 0);
   const running = available.reduce(
     (total, app) => total + app.profiles.filter((p) => p.running).length,
     0,
   );
   const line = statusLine(profiles, running, sizeTotal);
-  // The line is a polite live region and it is repainted on every render — and,
-  // once the sizes arrive, once per row. Rewriting identical text still counts as
-  // a change to a screen reader, so an unchanged line is left alone rather than
-  // read out again.
+  // The line is a polite live region: it is repainted once per render, and once
+  // more when the sizes have all arrived. Rewriting identical text still counts
+  // as a change to a screen reader, so an unchanged line is left alone rather
+  // than read out again.
   if (statusText.textContent !== line) statusText.textContent = line;
 }
 
@@ -132,19 +135,40 @@ function makeTextElement(tag: "h3" | "h4" | "p" | "span", className: string, tex
   return element;
 }
 
-function profileCard(profile: ProfileView, position: number): HTMLLIElement {
+function iconButton(name: string, label: string, path: string, onClick: () => void): HTMLButtonElement {
+  const button = document.createElement("button");
+  button.type = "button";
+  button.className = `row-icon row-icon-${name}`;
+  button.title = label;
+  // The picture is the whole control, so the name has to reach a screen reader
+  // some other way. `title` covers the pointer; this covers everything else.
+  button.setAttribute("aria-label", label);
+  button.innerHTML = `<svg viewBox="0 0 16 16" width="14" height="14" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="1.25" stroke-linecap="round" stroke-linejoin="round">${path}</svg>`;
+  button.addEventListener("click", onClick);
+  return button;
+}
+
+const ICON_OPEN = `<path d="M9 3h4v4"/><path d="M13 3 7.5 8.5"/><path d="M11 9.5V13H3V5h3.5"/>`;
+const ICON_RENAME = `<path d="M10.5 2.5 13.5 5.5 6 13H3v-3z"/><path d="M9 4 12 7"/>`;
+const ICON_DELETE = `<path d="M3 4.5h10"/><path d="M6.5 4.5V3h3v1.5"/><path d="M4.5 4.5 5 13.5h6l.5-9"/>`;
+
+function profileCard(profile: ProfileView): HTMLLIElement {
   const item = document.createElement("li");
   item.className = "profile-card";
 
-  const index = makeTextElement("span", "profile-index", String(position).padStart(2, "0"));
+  const dot = document.createElement("span");
+  dot.className = profile.running ? "run-dot run-dot-live" : "run-dot";
+  // Colour alone is never the message: the same fact is in the title, and the
+  // status line counts it in words.
+  dot.title = profile.running ? "running" : "not running";
+
   const content = document.createElement("div");
   content.className = "profile-content";
   const title = document.createElement("div");
   title.className = "profile-title";
   title.append(makeTextElement("h3", "profile-label", profile.label));
-  if (profile.is_default) {
-    title.append(makeTextElement("span", "status-badge status-default", "Default"));
-  }
+  // The `Default` badge is gone: this profile is recognisable from being the
+  // one with no delete action, and a badge that repeats that is decoration.
   if (profile.shares_account) {
     title.append(makeTextElement("span", "status-badge status-warning", "same account"));
   }
@@ -155,38 +179,59 @@ function profileCard(profile: ProfileView, position: number): HTMLLIElement {
   path.title = profile.path;
   content.append(path);
 
+  // Size and actions share one slot: the size is what the row says at rest, the
+  // icons are what it offers when reached for.
+  const trailing = document.createElement("div");
+  trailing.className = "profile-trailing";
+
+  const size = makeTextElement("span", "profile-size", "—");
+  size.dataset.appId = profile.app_id;
+  size.dataset.profileId = profile.id;
+  trailing.append(size);
+
   const actions = document.createElement("div");
   actions.className = "profile-actions";
-
-  const renameButton = document.createElement("button");
-  renameButton.className = "button button-quiet";
-  renameButton.type = "button";
-  renameButton.textContent = "Rename";
-  renameButton.addEventListener("click", () => startRename(profile, content));
-  actions.append(renameButton);
-
+  actions.append(
+    iconButton("open", `Open ${profile.label}`, ICON_OPEN, () => void openProfile(profile)),
+    iconButton("rename", `Rename ${profile.label}`, ICON_RENAME, () => startRename(profile, content)),
+  );
   // The Default profile is the app's own existing installation, so its directory
   // is never ours to delete. Its label is still just a label.
   if (!profile.is_default) {
-    const deleteButton = document.createElement("button");
-    deleteButton.className = "button button-danger";
-    deleteButton.type = "button";
-    deleteButton.textContent = "Delete";
-    deleteButton.addEventListener("click", () => startDelete(profile, content));
-    actions.append(deleteButton);
+    actions.append(
+      iconButton("delete", `Delete ${profile.label}`, ICON_DELETE, () => void startDelete(profile, content)),
+    );
   }
+  trailing.append(actions);
 
-  item.append(index, content, actions);
+  item.append(dot, content, trailing);
   return item;
 }
+
+async function openProfile(profile: ProfileView): Promise<void> {
+  try {
+    await invoke("open_profile", { appId: profile.app_id, id: profile.id });
+    clearError();
+    await loadProfiles();
+  } catch (error) {
+    showError(error);
+  }
+}
+
+// Every render retires whatever measuring was still running: a walk started for
+// the previous list can still be waiting on the disk when a profile is deleted,
+// and its bytes belong to a list that is no longer on screen.
+let renderPass = 0;
 
 function render(apps: AppView[]): void {
   appsContainer.replaceChildren();
 
+  const pass = (renderPass += 1);
   // A fresh render restarts the measuring, so the total stops claiming what the
   // previous list added up to.
   sizeTotal = null;
-  paintStatus(apps);
+  statusApps = apps;
+  paintStatus();
 
   const available = apps.filter((app) => app.unavailable === null);
 
@@ -213,12 +258,52 @@ function render(apps: AppView[]): void {
     }
     const list = document.createElement("ul");
     list.className = "profile-list";
-    app.profiles.forEach((profile, index) => list.append(profileCard(profile, index + 1)));
+    for (const profile of app.profiles) list.append(profileCard(profile));
     group.append(list);
     appsContainer.append(group);
   }
 
   renderAppChoices(available);
+  void measureSizes(pass);
+}
+
+/// Filling in the size of every row, one row at a time, after the list is drawn.
+///
+/// Sequentially rather than all at once: each of these is a walk of a whole
+/// profile directory, and a dozen of them in flight together turns opening the
+/// window into a disk storm. Top to bottom also reads as progress.
+async function measureSizes(pass: number): Promise<void> {
+  const cells = appsContainer.querySelectorAll<HTMLElement>(".profile-size");
+  // The running sum belongs to this pass alone. Held in module state it would be
+  // shared with whatever render replaced us, and the bytes of a profile that has
+  // since been deleted would be added to the new list's total.
+  let total = 0;
+  let complete = true;
+
+  for (const cell of cells) {
+    const appId = cell.dataset.appId ?? "";
+    const id = cell.dataset.profileId ?? "";
+    try {
+      const bytes = await invoke<number>("profile_size_bytes", { appId, id });
+      // The list this cell belongs to has been replaced; the cell is detached and
+      // the bytes are about a row nobody is looking at.
+      if (pass !== renderPass) return;
+      cell.textContent = formatBytes(bytes);
+      total += bytes;
+    } catch {
+      if (pass !== renderPass) return;
+      // No banner: a size that could not be read is not an action that failed,
+      // and the row still says everything else it has to say. The remaining rows
+      // are still worth filling in, so the walk carries on — but the total is
+      // now unknowable, and a total missing a profile is a wrong total.
+      cell.textContent = "—";
+      complete = false;
+    }
+  }
+
+  if (pass !== renderPass || !complete) return;
+  sizeTotal = total;
+  paintStatus();
 }
 
 // The picker is only a question when there is more than one answer.
