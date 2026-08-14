@@ -4,7 +4,31 @@ Notable changes, newest first. This project follows [Semantic Versioning](https:
 
 ## [Unreleased]
 
-Nothing yet.
+The management window redesigned around what this app actually holds: paths, profile ids, running processes and byte counts. Every existing behaviour is kept; only the presentation changes.
+
+### Added
+
+- **The socket path budget is drawn under the add form**: the directory a new profile would get, a meter, and `89 / 104 bytes`. On a home directory too long to host a profile it says so, in red, before anything has been typed — where previously the refusal only arrived after the profile was submitted. It is a property of the data root, not of the name: a profile directory is named after a generated id, so the number cannot move as you type and a long label is never the reason a profile is refused.
+- **A profile can be opened from the management window**, not only from the tray. The row's open action launches the profile, or focuses it if it is already running, deciding from a fresh process scan rather than from what the window last drew.
+- **A running dot on every row.** Running state used to be visible only in the tray.
+
+### Changed
+
+- The window is achromatic and follows the system theme, with full light and dark palettes. Colour is reserved for state — green for running, amber for a shared sign-in, red for destructive — so nothing else in the window is coloured. The window previously painted one fixed warm palette regardless of the system.
+- Paths, ids, sizes and byte counts are set in a monospace face; the wordmark and section labels in a wide grotesque. Both typefaces are vendored into the bundle rather than fetched, so the window renders the same offline.
+- **The three-line page header is one status line**: profile count, running count, total size on disk, and the data root. The window previously carried an eyebrow, a heading and a lede before the first row, then a second heading below that.
+- **Profile rows carry their size on disk** in place of the `01 / 02` index column. The index numbered rows in an order that meant nothing and changed when a profile was deleted; the size is the number the delete confirmation already computes.
+- **Open, rename and delete are icons**, shown on hover or keyboard focus in the slot the size occupies at rest, so the row's width never changes. The rename and delete confirmations keep their words — an action that destroys 1.4 GB should be read, not recognised from a picture.
+- The `Default` badge is gone: that profile is recognisable from being the one with no delete action. The shared-sign-in badge stays, and gains a border so it is findable on an achromatic surface.
+- The total size on disk is published only once every profile has been measured. A total that counts half the profiles is a wrong number stated confidently.
+
+### Fixed
+
+- Every colour pairing in the window now clears WCAG AA for its role. Several did not: the app name that says whose profiles a group holds read at 2.4:1, and the red that reports an unusable data root read at 4.3:1 against the page.
+
+### Note
+
+The tray menu is unchanged. It is a native platform menu built from plain text rows, so there is no stylesheet to apply; it already follows the system theme by being a system menu, and it already carried the running marker the window's new dot matches.
 
 ## [0.2.0] — 2026-08-14
 
