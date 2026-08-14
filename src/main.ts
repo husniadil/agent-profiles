@@ -92,9 +92,8 @@ let statusApps: AppView[] = [];
 let sizeTotal: number | null = null;
 
 function paintStatus(): void {
-  const available = statusApps.filter((app) => app.unavailable === null);
-  const profiles = available.reduce((total, app) => total + app.profiles.length, 0);
-  const running = available.reduce(
+  const profiles = statusApps.reduce((total, app) => total + app.profiles.length, 0);
+  const running = statusApps.reduce(
     (total, app) => total + app.profiles.filter((p) => p.running).length,
     0,
   );
@@ -230,10 +229,12 @@ function render(apps: AppView[]): void {
   // A fresh render restarts the measuring, so the total stops claiming what the
   // previous list added up to.
   sizeTotal = null;
-  statusApps = apps;
-  paintStatus();
 
+  // The line only ever describes apps that are actually installed, and so does
+  // the list below it, so the filter runs once and both read the same answer.
   const available = apps.filter((app) => app.unavailable === null);
+  statusApps = available;
+  paintStatus();
 
   // Nothing installed is the only case worth explaining. With one app working,
   // the other's absence is not an error — it is simply not installed.
