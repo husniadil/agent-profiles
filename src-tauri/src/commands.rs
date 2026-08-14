@@ -55,13 +55,21 @@ pub fn to_views(
 
 #[derive(Serialize, Clone)]
 pub struct SocketBudget {
-    /// The directory a profile added now would get. Drawn verbatim.
-    pub path: String,
-    /// How long the socket path inside it would be.
-    pub used: usize,
-    /// `None` on Windows, where named pipes live outside the profile and there
-    /// is no budget to keep. The window draws nothing at all in that case.
-    pub limit: Option<usize>,
+    /// The directory a profile added now would get, with the id standing in as
+    /// a placeholder of the right width rather than a real one — the id is not
+    /// drawn until the profile exists. `x` is outside the lowercase hex alphabet
+    /// `fresh_id` draws from, so this can never name a profile that turns up on
+    /// disk. Drawn verbatim, but as an illustration of the length, not a path to
+    /// go looking for.
+    pub profile_dir: String,
+    /// How long the socket path *inside* that directory would be — the directory
+    /// plus the longest socket name an app puts in it, so it is a little longer
+    /// than `profile_dir` itself. This is the number the meter fills.
+    pub used_bytes: usize,
+    /// What `used_bytes` is measured against. `None` on Windows, where named
+    /// pipes live outside the profile and there is no budget to keep. The window
+    /// draws nothing at all in that case.
+    pub limit_bytes: Option<usize>,
 }
 
 /// The socket budget for the next profile of this app.
@@ -72,9 +80,9 @@ pub struct SocketBudget {
 pub(crate) fn budget_for(paths: &Paths) -> SocketBudget {
     let sample = paths.profile_dir(&"x".repeat(crate::profile_store::ID_LEN));
     SocketBudget {
-        path: sample.display().to_string(),
-        used: crate::paths::socket_path_len(&sample),
-        limit: crate::paths::SOCKET_PATH_LIMIT,
+        profile_dir: sample.display().to_string(),
+        used_bytes: crate::paths::socket_path_len(&sample),
+        limit_bytes: crate::paths::SOCKET_PATH_LIMIT,
     }
 }
 
@@ -159,10 +167,15 @@ pub fn list_apps(state: tauri::State<AppState>) -> Result<Vec<AppView>, String> 
     for runtime in &state.apps {
         let unavailable = state.availability(runtime);
         if unavailable.is_none() {
-            targets.push(
-                crate::instance_manager::scan_target(&*state.platform, runtime.spec)
-                    .map_err(|e| e.to_string())?,
-            );
+            // Failing to describe what to look for is dropped for the same reason
+            // failing to look is, below. Deliberately the opposite of `tray.rs`,
+            // which propagates instead — and rightly, because a tray that cannot
+            // scan cannot tell launch from focus and would offer the wrong action,
+            // whereas the window only loses a dot.
+            if let Ok(target) = crate::instance_manager::scan_target(&*state.platform, runtime.spec)
+            {
+                targets.push(target);
+            }
         }
         apps.push((runtime, unavailable));
     }
@@ -407,22 +420,29 @@ mod tests {
     }
 
     #[test]
+    fn the_budget_spells_out_the_whole_path_it_measures() {
+        // Written out as a literal rather than rebuilt from `profile_dir` and
+        // `socket_path_len` — the latter would restate `budget_for`'s own body and
+        // could not fail. This version breaks if the `p/` layout, the id width or
+        // the socket-name budget ever move, which is exactly what it is for.
+        let budget = budget_for(&Paths::new("/root/claude"));
+
+        assert_eq!(budget.profile_dir, "/root/claude/p/xxxxxxxx");
+        assert_eq!(
+            budget.used_bytes,
+            "/root/claude/p/xxxxxxxx".len() + "/1.13-main.sock".len()
+        );
+        assert_eq!(budget.limit_bytes, crate::paths::SOCKET_PATH_LIMIT);
+    }
+
+    #[test]
     fn the_budget_measures_a_profile_that_does_not_exist_yet() {
         // Nothing may be created just to answer "would one fit?".
         let d = tempfile::tempdir().unwrap();
         let paths = Paths::new(d.path().join("root"));
-        let budget = budget_for(&paths);
 
-        assert_eq!(
-            budget.used,
-            crate::paths::socket_path_len(
-                &paths.profile_dir(&"x".repeat(crate::profile_store::ID_LEN))
-            )
-        );
-        assert!(budget
-            .path
-            .ends_with(&"x".repeat(crate::profile_store::ID_LEN)));
-        assert_eq!(budget.limit, crate::paths::SOCKET_PATH_LIMIT);
+        budget_for(&paths);
+
         assert!(
             !paths.profiles_dir().exists(),
             "asking must not create anything"
@@ -439,8 +459,16 @@ mod tests {
         let created = store.add("Work", &paths).unwrap();
 
         assert_eq!(
-            budget_for(&paths).used,
+            budget_for(&paths).used_bytes,
             crate::paths::socket_path_len(&created.path)
+        );
+        // The sample path pads with `x`, which is safe only because `fresh_id`
+        // draws lowercase hex. Swapping it for base32 or base58 would let the
+        // illustration collide with a real profile directory; fail here first.
+        assert!(
+            !created.id.contains('x'),
+            "the sample id is no longer impossible: {}",
+            created.id
         );
     }
 
@@ -448,11 +476,18 @@ mod tests {
     fn a_cramped_root_reports_over_its_limit() {
         // The whole point of drawing the meter: a home directory long enough that
         // no profile can be created must say so before the user types a name.
+        //
+        // Asserted against the macOS number directly rather than against whatever
+        // this platform's limit happens to be, so the assertion actually runs on
+        // Windows CI instead of being skipped there — the same reason `paths.rs`
+        // split `fits_within` out from the platform question.
         let paths = Paths::new(format!("/Users/{}/agent-profiles/claude", "n".repeat(120)));
-        let budget = budget_for(&paths);
-        if let Some(limit) = budget.limit {
-            assert!(budget.used > limit, "got {} against {limit}", budget.used);
-        }
+        let used = budget_for(&paths).used_bytes;
+        assert!(
+            used > crate::paths::MACOS_SOCKET_PATH_LIMIT,
+            "got {used} against {}",
+            crate::paths::MACOS_SOCKET_PATH_LIMIT
+        );
     }
 
     #[test]
