@@ -34,12 +34,23 @@ export function identityColor(appId: string, profileId: string): string {
   return `var(--id-${identityIndex(appId, profileId)})`;
 }
 
-/// The letters the chip carries: one, or two when the label is two words.
+/// Whether a word contributes a letter to the chip.
+///
+/// `Client — Northwind` is three words by whitespace, and the middle one is a
+/// dash. Taking the first two words blindly draws `C—`, which is not initials
+/// but punctuation wearing a circle. Only words that start with a letter or a
+/// digit count, so the same label gives `CN`.
+function isNameWord(word: string): boolean {
+  const first = [...word][0];
+  return first !== undefined && /\p{L}|\p{N}/u.test(first);
+}
+
+/// The letters the chip carries: one, or two when the label names two things.
 ///
 /// Spread rather than indexed so an emoji or an accented letter is one
 /// character rather than half of a surrogate pair.
 export function initials(label: string): string {
-  const words = label.trim().split(/\s+/).filter(Boolean);
+  const words = label.trim().split(/\s+/).filter(isNameWord);
   if (words.length === 0) return "?";
   const first = [...words[0]][0] ?? "?";
   if (words.length === 1) return first.toLocaleUpperCase();

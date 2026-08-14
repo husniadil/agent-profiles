@@ -1,6 +1,6 @@
 "use client"
 
-import { useEffect, useRef, type ComponentPropsWithoutRef } from "react"
+import { useEffect, useRef, useState, type ComponentPropsWithoutRef } from "react"
 import { useInView, useMotionValue, useSpring } from "motion/react"
 
 import { cn } from "@/lib/utils"
@@ -13,6 +13,14 @@ interface NumberTickerProps extends ComponentPropsWithoutRef<"span"> {
   decimalPlaces?: number
 }
 
+/// Vendored from MagicUI, with one change: the resting text is the real value.
+///
+/// Upstream renders `startValue` and only writes the true number once the spring
+/// has run. That makes the figure on screen conditional on an animation, and the
+/// animation is conditional on the element being in view with rAF running —
+/// neither of which holds while this window is hidden, which is most of its life.
+/// A count that reads 0 because nothing animated is simply wrong. So the span
+/// renders the value, and the spring jumps back to the start before climbing.
 export function NumberTicker({
   value,
   startValue = 0,
@@ -30,11 +38,34 @@ export function NumberTicker({
   })
   const isInView = useInView(ref, { once: true, margin: "0px" })
 
+  // This window spends most of its life hidden behind a tray icon, and a hidden
+  // document gets no animation frames — so a spring started now would jump to
+  // its starting value and freeze there, leaving a count of 0 on screen until
+  // something else moved. Wait until the window is actually being looked at.
+  const [awake, setAwake] = useState(() => !document.hidden)
+  useEffect(() => {
+    if (awake) return
+    const wake = () => {
+      if (!document.hidden) setAwake(true)
+    }
+    document.addEventListener("visibilitychange", wake)
+    return () => document.removeEventListener("visibilitychange", wake)
+  }, [awake])
+
+  const format = (latest: number) =>
+    Intl.NumberFormat("en-US", {
+      minimumFractionDigits: decimalPlaces,
+      maximumFractionDigits: decimalPlaces,
+    }).format(Number(latest.toFixed(decimalPlaces)))
+
   useEffect(() => {
     let timer: ReturnType<typeof setTimeout> | null = null
 
-    if (isInView) {
+    if (isInView && awake) {
       timer = setTimeout(() => {
+        // Jump to the start without animating, then climb. The resting text is
+        // already the answer, so this is the one frame where it steps back.
+        springValue.jump(direction === "down" ? value : startValue)
         motionValue.set(direction === "down" ? startValue : value)
       }, delay * 1000)
     }
@@ -68,7 +99,7 @@ export function NumberTicker({
       )}
       {...props}
     >
-      {startValue}
+      {format(value)}
     </span>
   )
 }

@@ -53,7 +53,10 @@ export function BudgetMeter({ budget, appLabel }: { budget: SocketBudget; appLab
             className="block h-full rounded-full transition-[width] duration-200 ease-out"
             style={{
               width: `${Math.min(100, (budget.used_bytes / limit) * 100)}%`,
-              background: over ? "var(--danger)" : "var(--accent)",
+              // Neutral until it is a problem. The accent is oxblood, and a bar
+              // that reads as damage while the budget is perfectly healthy
+              // teaches the reader to ignore the one time it turns red.
+              background: over ? "var(--danger)" : "var(--ink-3)",
             }}
           />
         </div>

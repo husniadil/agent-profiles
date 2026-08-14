@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef } from "react";
 import { useReducedMotion } from "motion/react";
 
 import { AnimatedListItem } from "@/components/magicui/animated-list";
@@ -6,31 +6,33 @@ import { ProfileRow } from "@/components/ProfileRow";
 import type { AppView } from "@/lib/api";
 import type { Sizes } from "@/hooks/useSizes";
 
-/// How the rows arrive: one after another, a beat apart.
+/// Which rows are new since the last time this list was drawn.
 ///
-/// This is MagicUI's `AnimatedList` behaviour with its one assumption removed.
-/// That component is built for a notification stack — it reverses its children
-/// so the newest lands on top — and a profile list is not a stack: the Default
-/// profile is first because it is first. So the reveal is counted here and each
-/// row is still handed to MagicUI's `AnimatedListItem` to make its entrance.
+/// Deliberately not a staggered entrance on every load. This window is opened
+/// for a couple of seconds to get into a profile, and rows that animate in each
+/// time are choreography the reader has to wait out. Worse, gating them on a
+/// timer means a throttled window renders an *empty* list rather than a plain
+/// one — the reveal has to enhance something already on screen, never replace it.
 ///
-/// It only ever counts up. Opening, renaming or deleting a profile reloads the
-/// list, and re-staggering the same rows every time would be motion that says
-/// nothing.
-function useReveal(count: number, still: boolean, step = 45): number {
-  const [shown, setShown] = useState(0);
+/// A row that was not here a moment ago is different: that is the profile you
+/// just added, and saying so is state, which is the only thing motion is for.
+function useArrivals(ids: string[]): Set<string> {
+  const seen = useRef<Set<string> | null>(null);
+  const arrivals = useRef<Set<string>>(new Set());
+
+  // First list wins silently: everything already there is not an arrival.
+  if (seen.current === null) {
+    seen.current = new Set(ids);
+  } else {
+    const fresh = ids.filter((id) => !seen.current!.has(id));
+    if (fresh.length > 0) arrivals.current = new Set(fresh);
+  }
 
   useEffect(() => {
-    if (still) {
-      setShown(count);
-      return;
-    }
-    if (shown >= count) return;
-    const timer = setTimeout(() => setShown((seen) => seen + 1), shown === 0 ? 0 : step);
-    return () => clearTimeout(timer);
-  }, [shown, count, step, still]);
+    for (const id of ids) seen.current!.add(id);
+  }, [ids]);
 
-  return Math.min(shown, count);
+  return arrivals.current;
 }
 
 export function ProfileList({
@@ -87,11 +89,11 @@ function Rows({
   clearError: () => void;
 }) {
   const still = useReducedMotion() ?? false;
-  const shown = useReveal(app.profiles.length, still);
+  const arrivals = useArrivals(app.profiles.map((profile) => profile.id));
 
   return (
     <ul>
-      {app.profiles.slice(0, shown).map((profile) => {
+      {app.profiles.map((profile) => {
         const row = (
           <ProfileRow
             profile={profile}
@@ -101,8 +103,11 @@ function Rows({
             clearError={clearError}
           />
         );
+        const arriving = !still && arrivals.has(profile.id);
         return (
-          <li key={profile.id}>{still ? row : <AnimatedListItem>{row}</AnimatedListItem>}</li>
+          <li key={profile.id}>
+            {arriving ? <AnimatedListItem>{row}</AnimatedListItem> : row}
+          </li>
         );
       })}
     </ul>
