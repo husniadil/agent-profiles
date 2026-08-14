@@ -594,9 +594,20 @@ textarea {
   margin: 0;
 }
 
+/* The window is 800px wide, which is exactly wide enough for both halves and
+   not a pixel more. Left to itself the counts wrap and `on disk` lands under
+   the path; the counts are the shorter, fixed-length half, so they hold their
+   width and the root — already ellipsised — absorbs whatever is left. */
+#status {
+  flex: none;
+  white-space: nowrap;
+}
+
 /* The root is reference, not a heading: it is the longest string in the window
    and the least often read. */
 #data-root {
+  flex: 1;
+  min-width: 0;
   color: var(--ink-3);
   overflow: hidden;
   text-overflow: ellipsis;
