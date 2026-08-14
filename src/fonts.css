@@ -1,0 +1,24 @@
+/* Vendored, not fetched. This is a desktop app: a font that only arrives when
+   the machine is online is a window that looks different offline. */
+
+@font-face {
+  font-family: "Archivo";
+  src: url("./fonts/Archivo-Variable.woff2") format("woff2");
+  font-weight: 400 800;
+  font-stretch: 62% 125%;
+  font-display: block;
+}
+
+@font-face {
+  font-family: "IBM Plex Mono";
+  src: url("./fonts/IBMPlexMono-Regular.woff2") format("woff2");
+  font-weight: 400;
+  font-display: block;
+}
+
+@font-face {
+  font-family: "IBM Plex Mono";
+  src: url("./fonts/IBMPlexMono-Medium.woff2") format("woff2");
+  font-weight: 500;
+  font-display: block;
+}
