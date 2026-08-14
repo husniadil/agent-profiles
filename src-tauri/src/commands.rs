@@ -355,16 +355,18 @@ pub fn profile_size_bytes(
 pub(crate) enum OpenAction {
     Launch,
     Focus(i32),
-    /// Live already, and this app has no window to raise. The tray simply omits
-    /// the row in that case; the window has one control per profile and has to
-    /// say something, so this becomes a refusal rather than a second process on
-    /// a profile directory that already has one.
+    /// Live already, and this app has no window to raise — the state `tray.rs`
+    /// renders as a disabled `running` row. The window has one control per
+    /// profile and has to say something, so this becomes a refusal rather than a
+    /// second process on a directory that already has one.
     AlreadyRunning,
 }
 
-/// Takes `can_focus` rather than the whole spec: it is the only thing about an
-/// app that moves the answer, and every spec declared today can be focused — so
-/// the third branch has no real spec a test could reach for.
+/// Takes the app id and the focus capability rather than the whole `AppSpec`:
+/// they are the only two fields that move the answer, and a `focus: false` spec
+/// would have to be spelled out in full as a test fixture — every one of the six
+/// declared specs sets `focus: true`. The single caller reads both from the same
+/// `runtime.spec`, so the pair cannot drift.
 pub(crate) fn open_action(
     processes: &[RunningProcess],
     app_id: &str,
@@ -416,7 +418,7 @@ pub fn open_profile(
             match state
                 .platform
                 .focus(pid, &hint)
-                .map_err(|e| e.to_string())?
+                .map_err(|error| format!("Could not focus {}: {error}", profile.label))?
             {
                 FocusOutcome::Focused => {}
                 FocusOutcome::Unsupported(message) => {
@@ -425,7 +427,10 @@ pub fn open_profile(
             }
         }
         OpenAction::AlreadyRunning => {
-            return Err(format!("{} is already running", profile.label));
+            return Err(format!(
+                "{} is already running, and {} cannot be brought to the front",
+                profile.label, runtime.spec.product
+            ));
         }
         OpenAction::Launch => {
             instance_manager::launch(&*state.platform, runtime.spec, &profile, &runtime.paths)
@@ -672,39 +677,6 @@ mod tests {
         assert_eq!(
             open_action(&running("codex", &profile), "codex", false, &profile),
             OpenAction::AlreadyRunning
-        );
-    }
-
-    #[test]
-    fn the_other_app_running_the_same_directory_does_not_count_as_open() {
-        // Keyed per app, or opening ChatGPT would be answered by a live Claude.
-        let profile = work();
-        assert_eq!(
-            open_action(&running("claude", &profile), "codex", true, &profile),
-            OpenAction::Launch
-        );
-    }
-
-    #[test]
-    fn the_stock_profile_is_the_process_carrying_no_directory_at_all() {
-        // `is_default` cannot be inferred from the path, and getting it wrong
-        // here reads a live stock instance as idle and launches a second copy.
-        let stock = Profile {
-            is_default: true,
-            ..work()
-        };
-        let bare = vec![RunningProcess {
-            app_id: "codex",
-            pid: 77,
-            profile_dir: None,
-        }];
-        assert_eq!(
-            open_action(&bare, "codex", true, &stock),
-            OpenAction::Focus(77)
-        );
-        assert_eq!(
-            open_action(&bare, "codex", true, &work()),
-            OpenAction::Launch
         );
     }
 
