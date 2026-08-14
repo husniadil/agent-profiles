@@ -24,11 +24,7 @@
       </section>
 
       <section class="add-section" aria-labelledby="add-heading">
-        <div>
-          <p class="eyebrow">Make room for another sign-in</p>
-          <h2 id="add-heading">Add a profile</h2>
-          <p class="helper">Choose a label you will recognize. Account details stay inside the app itself.</p>
-        </div>
+        <h2 id="add-heading" class="app-heading">Add a profile</h2>
         <div class="add-column">
           <form id="add-profile-form" class="add-form">
             <span class="app-picker" hidden>
@@ -44,6 +40,19 @@
                the form to be off screen, so a rejected label looked like a
                button that did nothing. -->
           <div id="add-error" class="error error-inline" role="alert" hidden></div>
+          <div id="budget" class="budget" hidden>
+            <p id="budget-path" class="budget-path"></p>
+            <div class="budget-bar"><span id="budget-fill"></span></div>
+            <p class="budget-legend">
+              <span id="budget-note"></span>
+              <span id="budget-count"></span>
+            </p>
+            <!-- Over budget means no profile can be created on this machine at
+                 all, which is too important to leave as a colour change nobody
+                 is looking at. The visible legend says it in place; this says it
+                 out loud, and only in the case that warrants interrupting. -->
+            <p id="budget-alert" class="sr-only" role="alert"></p>
+          </div>
         </div>
       </section>
       <section class="settings-section" id="autostart-section" aria-labelledby="settings-heading" hidden>

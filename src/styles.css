@@ -176,8 +176,10 @@ h1 {
   margin-bottom: 1.15rem;
 }
 
+/* `.add-section h2` was here too. Its heading is now an `.app-heading` — a
+   section label of the same rank as an app group's — and this rule outranks the
+   class on specificity, so leaving it would have drawn that label at 2.35rem. */
 .section-heading h2,
-.add-section h2,
 .settings-section h2 {
   margin-bottom: 0;
   font-size: clamp(1.7rem, 4vw, 2.35rem);
@@ -481,13 +483,20 @@ h1 {
   margin-bottom: 0;
 }
 
+/* One column now the prose is gone. The heading is a label for what is under it,
+   the way an app group's heading labels its list, and its hairline rule wants
+   the full width to run to. Beside the form it would have been bottom-aligned
+   against the meter instead, with the rule stopping in the middle of the page. */
 .add-section {
   display: grid;
-  grid-template-columns: minmax(0, 1fr) minmax(16rem, 1.05fr);
-  gap: 2rem;
-  align-items: end;
+  gap: 0.86rem;
   padding: 1.8rem 0 2.4rem;
   border-top: 1px solid var(--line);
+}
+
+/* The section's own padding sets the distance from the rule above it. */
+.add-section .app-heading {
+  margin-top: 0;
 }
 
 .helper {
@@ -694,4 +703,55 @@ textarea {
      path itself sits in a `bdi`, which keeps its own left-to-right ordering. */
   direction: rtl;
   text-align: right;
+}
+
+/* A constant of the data root, not a typing indicator: the profile directory is
+   named after a generated id, so this number cannot move as a label is typed. */
+.budget {
+  margin-top: 0.71rem;
+  font-family: var(--mono);
+  font-size: 0.79rem;
+  /* Not `--ink-3`: this sits on the canvas, where that grey reads at 2.4:1 —
+     4.2:1 even in dark, still under the 4.5:1 text of this size owes. */
+  color: var(--ink-2);
+}
+
+.budget p {
+  margin: 0;
+}
+
+.budget-path {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.budget-bar {
+  height: 0.29rem;
+  margin: 0.43rem 0 0.29rem;
+  border-radius: 0.14rem;
+  background: var(--sunken);
+  overflow: hidden;
+}
+
+/* Not `--ink-4`: the fill is the whole reading, and against the track it sits in
+   that grey is 1.8:1 — well under the 3:1 a non-text control owes the eye. */
+.budget-bar > span {
+  display: block;
+  height: 100%;
+  background: var(--ink-2);
+}
+
+.budget-legend {
+  display: flex;
+  justify-content: space-between;
+  gap: 0.86rem;
+}
+
+.budget-over .budget-bar > span {
+  background: var(--danger);
+}
+
+.budget-over .budget-legend {
+  color: var(--danger);
 }

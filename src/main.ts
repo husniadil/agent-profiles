@@ -22,6 +22,8 @@ type AppView = {
   profiles: ProfileView[];
 };
 
+type SocketBudget = { profile_dir: string; used_bytes: number; limit_bytes: number | null };
+
 const appsElement = document.querySelector<HTMLDivElement>("#apps");
 const statusElement = document.querySelector<HTMLParagraphElement>("#status");
 const dataRootElement = document.querySelector<HTMLParagraphElement>("#data-root");
@@ -31,6 +33,12 @@ const addForm = document.querySelector<HTMLFormElement>("#add-profile-form");
 const labelInput = document.querySelector<HTMLInputElement>("#new-label");
 const appSelect = document.querySelector<HTMLSelectElement>("#new-app");
 const addErrorElement = document.querySelector<HTMLDivElement>("#add-error");
+const budgetElement = document.querySelector<HTMLDivElement>("#budget");
+const budgetPathElement = document.querySelector<HTMLParagraphElement>("#budget-path");
+const budgetFillElement = document.querySelector<HTMLSpanElement>("#budget-fill");
+const budgetNoteElement = document.querySelector<HTMLSpanElement>("#budget-note");
+const budgetCountElement = document.querySelector<HTMLSpanElement>("#budget-count");
+const budgetAlertElement = document.querySelector<HTMLParagraphElement>("#budget-alert");
 
 if (
   !appsElement ||
@@ -41,7 +49,13 @@ if (
   !addForm ||
   !labelInput ||
   !appSelect ||
-  !addErrorElement
+  !addErrorElement ||
+  !budgetElement ||
+  !budgetPathElement ||
+  !budgetFillElement ||
+  !budgetNoteElement ||
+  !budgetCountElement ||
+  !budgetAlertElement
 ) {
   throw new Error("Agent Profiles management window is missing required elements");
 }
@@ -55,6 +69,12 @@ const profileForm = addForm;
 const profileLabelInput = labelInput;
 const profileAppSelect = appSelect;
 const addErrorBox = addErrorElement;
+const budgetBox = budgetElement;
+const budgetPath = budgetPathElement;
+const budgetFill = budgetFillElement;
+const budgetNote = budgetNoteElement;
+const budgetCount = budgetCountElement;
+const budgetAlert = budgetAlertElement;
 
 function errorMessage(error: unknown): string {
   return error instanceof Error ? error.message : String(error);
@@ -327,6 +347,69 @@ function renderAppChoices(available: AppView[]): void {
   // control that could only fail.
   const section = profileForm.closest("section") as HTMLElement | null;
   if (section) section.hidden = available.length === 0;
+  void loadBudget();
+}
+
+/// Hiding the meter, for every reason there is not one to draw.
+function hideBudget(): void {
+  budgetBox.hidden = true;
+  // A verdict left in the live region would be read out the next time anything
+  // touched it, long after it stopped being true of the selected app.
+  budgetAlert.textContent = "";
+}
+
+/// The socket-path budget for the app currently selected in the picker.
+///
+/// Not wired to the label field, and deliberately so: `ProfileStore::add` names
+/// a profile directory after a generated id, never after what was typed, so the
+/// number cannot move as the user types. It is a property of the data root — on
+/// most machines a comfortable constant, and on a long home directory the reason
+/// no profile can be created at all.
+async function loadBudget(): Promise<void> {
+  const appId = profileAppSelect.value;
+  if (!appId) {
+    hideBudget();
+    return;
+  }
+  let budget: SocketBudget;
+  try {
+    budget = await invoke<SocketBudget>("socket_budget", { appId });
+  } catch {
+    // No banner, for the same reason the data root has none: this is a reading
+    // the window offers, not an action the user asked for and did not get.
+    hideBudget();
+    return;
+  }
+  // The picker moved on while this was in flight. Two apps sit at two depths, so
+  // an answer about the one that was selected a moment ago is the wrong number
+  // under the app that is selected now.
+  if (profileAppSelect.value !== appId) return;
+  const limit = budget.limit_bytes;
+  // Windows puts its named pipes outside the profile, so there is no budget to
+  // keep and a meter there would invent a limit that means nothing.
+  if (limit === null) {
+    hideBudget();
+    return;
+  }
+
+  const over = budget.used_bytes > limit;
+  budgetBox.hidden = false;
+  budgetBox.classList.toggle("budget-over", over);
+  // `profile_dir` carries a placeholder id of the right width, not a directory
+  // that exists — see the doc comment on the Rust struct. It is drawn because
+  // its *length* is the whole subject, and the shape is what makes that legible.
+  budgetPath.textContent = budget.profile_dir;
+  // Ellipsised to one line like every other path in the window, so the value has
+  // to stay reachable somewhere.
+  budgetPath.title = budget.profile_dir;
+  budgetFill.style.width = `${Math.min(100, (budget.used_bytes / limit) * 100)}%`;
+  budgetNote.textContent = over
+    ? `no room for the socket apps create inside a profile — ${budget.used_bytes - limit} bytes over`
+    : `socket path budget · this system stops at ${limit}`;
+  budgetCount.textContent = `${budget.used_bytes} / ${limit} bytes`;
+  budgetAlert.textContent = over
+    ? `This folder is too deep for ${budget.used_bytes - limit} bytes of the socket path a profile needs. No profile can be added here.`
+    : "";
 }
 
 /// Rename and delete both used to call `window.prompt` / `window.confirm`.
@@ -461,7 +544,12 @@ async function addProfile(event: SubmitEvent): Promise<void> {
 // verdict is stale, and leaving it on screen invites the reader to believe the
 // new label was rejected too.
 profileLabelInput.addEventListener("input", clearAddError);
-profileAppSelect.addEventListener("change", clearAddError);
+// Switching app switches which data root the meter is about — the two apps sit
+// at different depths under the same root, so the number is not the same twice.
+profileAppSelect.addEventListener("change", () => {
+  clearAddError();
+  void loadBudget();
+});
 
 // A desktop app has no business offering "Reload" or "Inspect Element" on
 // right-click. Keep the caret menu inside text fields, where it is useful.
