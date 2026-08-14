@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { listen } from "@tauri-apps/api/event";
 import { homeDir } from "@tauri-apps/api/path";
 
@@ -25,6 +25,33 @@ export type AppData = {
   listVersion: number;
 };
 
+/// Everything about a list that the window actually draws.
+///
+/// Used to decide whether an arriving list is news. Polling for liveness means
+/// most answers are identical to the last one, and setting state anyway would
+/// hand `available` a new identity every few seconds — which is the array the
+/// size measurement keys its generations on, so it would retire and restart a
+/// directory walk on a timer for no reason.
+function signature(apps: AppView[]): string {
+  return apps
+    .map(
+      (app) =>
+        `${app.id}|${app.unavailable ?? ""}|` +
+        app.profiles
+          .map((p) => `${p.id},${p.label},${p.running ? 1 : 0},${p.shares_account ? 1 : 0}`)
+          .join(";"),
+    )
+    .join("//");
+}
+
+/// How often the window re-asks who is running, while someone is looking at it.
+///
+/// `running` is a snapshot taken when the list is read. Without this, quitting
+/// an agent while this window is open leaves its row claiming RUNNING until the
+/// window is closed and reopened — the tray rescans on every hover and the
+/// window would be the one surface telling a stale story.
+const LIVENESS_POLL_MS = 2500;
+
 export function useAppData(): AppData {
   const [apps, setApps] = useState<AppView[]>([]);
   const [dataRoot, setDataRoot] = useState("");
@@ -35,15 +62,49 @@ export function useAppData(): AppData {
 
   const fail = useCallback((cause: unknown) => setError(api.errorMessage(cause)), []);
 
+  const drawn = useRef("");
+
   const reload = useCallback(async () => {
     try {
-      setApps(await api.listApps());
-      setListVersion((version) => version + 1);
+      const next = await api.listApps();
+      const mark = signature(next);
+      if (mark !== drawn.current) {
+        drawn.current = mark;
+        setApps(next);
+        setListVersion((version) => version + 1);
+      }
       setError(null);
     } catch (cause) {
       fail(cause);
     }
   }, [fail]);
+
+  /// A quiet re-read of who is running, only while the window is on screen.
+  ///
+  /// A hidden window is not being read, and the scan costs a process sweep, so
+  /// there is nothing to keep fresh for a reader who is not there. It picks up
+  /// again on the next visibility change, and `window-shown` reloads anyway.
+  useEffect(() => {
+    let timer: ReturnType<typeof setInterval> | null = null;
+
+    const start = () => {
+      if (timer !== null || document.hidden) return;
+      timer = setInterval(() => void reload(), LIVENESS_POLL_MS);
+    };
+    const stop = () => {
+      if (timer === null) return;
+      clearInterval(timer);
+      timer = null;
+    };
+    const follow = () => (document.hidden ? stop() : start());
+
+    follow();
+    document.addEventListener("visibilitychange", follow);
+    return () => {
+      stop();
+      document.removeEventListener("visibilitychange", follow);
+    };
+  }, [reload]);
 
   // Asked for again on every visit rather than cached. The root cannot change
   // while the app runs, so this is not about freshness — it is the retry for a
