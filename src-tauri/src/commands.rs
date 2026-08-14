@@ -432,7 +432,9 @@ mod tests {
             budget.used_bytes,
             "/root/claude/p/xxxxxxxx".len() + "/1.13-main.sock".len()
         );
-        assert_eq!(budget.limit_bytes, crate::paths::SOCKET_PATH_LIMIT);
+        // `limit_bytes` is deliberately not asserted here: against
+        // `SOCKET_PATH_LIMIT` it would restate `budget_for`'s own body, and it is
+        // already pinned non-vacuously by `a_cramped_root_reports_over_its_limit`.
     }
 
     #[test]
@@ -465,8 +467,16 @@ mod tests {
         // The sample path pads with `x`, which is safe only because `fresh_id`
         // draws lowercase hex. Swapping it for base32 or base58 would let the
         // illustration collide with a real profile directory; fail here first.
+        //
+        // Asserted as a character class rather than as "contains no `x`": one
+        // random id drawn from base32 has no `x` about four times in five, so
+        // the narrower check would pass through the very change it guards and
+        // read as a flake when it finally fired.
         assert!(
-            !created.id.contains('x'),
+            created
+                .id
+                .chars()
+                .all(|c| c.is_ascii_digit() || ('a'..='f').contains(&c)),
             "the sample id is no longer impossible: {}",
             created.id
         );
