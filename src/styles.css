@@ -124,7 +124,7 @@ select:focus-visible {
 
 .eyebrow {
   margin: 0 0 0.4rem;
-  color: var(--ink-3);
+  color: var(--ink-2);
   font-family: var(--wide);
   font-size: 0.68rem;
   font-weight: 800;
@@ -197,7 +197,9 @@ h1 {
   background: var(--ink);
   font-family: var(--mono);
   font-size: 0.8rem;
-  font-weight: 700;
+  /* Only 400 and 500 of the mono are vendored, and `font-synthesis: none` means
+     a heavier number here would quietly render at 500 rather than being faked. */
+  font-weight: 500;
 }
 
 .error {
@@ -223,7 +225,9 @@ h1 {
   font-weight: 600;
   letter-spacing: 0.08em;
   text-transform: uppercase;
-  color: var(--ink-3);
+  /* Not `--ink-3`: this carries the app name, which is the only thing telling a
+     reader whose profiles these are. On the canvas that grey reads at 2.4:1. */
+  color: var(--ink-2);
 }
 
 .app-picker select {
@@ -273,7 +277,7 @@ h1 {
   color: var(--ink-3);
   font-family: var(--mono);
   font-size: 0.72rem;
-  font-weight: 600;
+  font-weight: 500;
   letter-spacing: 0.08em;
 }
 
@@ -328,9 +332,14 @@ h1 {
   background: var(--sunken);
 }
 
+/* The only badge with an edge. Two profiles sharing one sign-in is a surprise,
+   and on an achromatic surface the fill alone is 1.09:1 against the card — the
+   pill effectively disappears and the warning rests on 0.63rem of text. The
+   border gives the eye a shape to find without painting the surface. */
 .status-warning {
   color: var(--warning);
   background: var(--sunken);
+  box-shadow: inset 0 0 0 1px var(--warning);
 }
 
 .profile-actions {
