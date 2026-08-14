@@ -78,7 +78,7 @@ export default function App() {
           onError={fail}
         />
 
-        <div className="flex flex-col gap-3 p-3">
+        <div className="flex flex-col gap-2 p-2">
           <ErrorBanner message={data.error} />
 
           {available.length === 0 ? (

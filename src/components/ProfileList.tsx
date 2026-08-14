@@ -48,14 +48,14 @@ export function ProfileList({
   clearError: () => void;
 }) {
   return (
-    <div className="rounded-xl border border-hairline bg-surface p-1.5 shadow-card">
+    <div className="rounded-xl border border-hairline bg-surface p-1 shadow-card">
       {apps.map((app, index) => (
         <section key={app.id} className={index > 0 ? "mt-1" : undefined}>
           {/* A heading only earns its space once there is a second app to tell
               apart. With one app installed the list is simply the list. */}
           {apps.length > 1 ? (
-            <div className="flex items-center gap-2.5 px-2 pt-2 pb-1">
-              <h2 className="font-wide text-[11px] font-semibold tracking-[0.06em] text-ink-2 uppercase [font-stretch:112%]">
+            <div className="flex items-center gap-2 px-2 pt-1.5 pb-0.5">
+              <h2 className="font-wide text-[10px] font-semibold tracking-[0.06em] text-ink-2 uppercase [font-stretch:112%]">
                 {app.label}
               </h2>
               <span aria-hidden="true" className="h-px flex-1 bg-hairline" />

@@ -31,8 +31,8 @@ export function BudgetMeter({ budget, appLabel }: { budget: SocketBudget; appLab
 
   return (
     <>
-      <div className="relative mt-3 overflow-hidden rounded-lg bg-sunken p-2.5">
-        <p className="truncate font-mono text-[11px] text-ink" title={budget.profile_dir}>
+      <div className="relative mt-2.5 overflow-hidden rounded-lg bg-sunken p-2">
+        <p className="truncate font-mono text-[10.5px] text-ink" title={budget.profile_dir}>
           {inside ? (
             <>
               <span className="text-ink-2">{shortenPath(names.dataRoot, names)}/</span>
@@ -44,7 +44,7 @@ export function BudgetMeter({ budget, appLabel }: { budget: SocketBudget; appLab
         </p>
 
         <div
-          className="mt-2 h-1.5 overflow-hidden rounded-full bg-line"
+          className="mt-1.5 h-1 overflow-hidden rounded-full bg-line"
           role="meter"
           aria-label="Socket path budget"
           aria-valuenow={budget.used_bytes}
@@ -63,7 +63,7 @@ export function BudgetMeter({ budget, appLabel }: { budget: SocketBudget; appLab
           />
         </div>
 
-        <div className="mt-1.5 flex items-baseline justify-between gap-3 text-[11px]">
+        <div className="mt-1.5 flex items-baseline justify-between gap-3 text-[10.5px]">
           <span
             className={cn("truncate", over ? "font-medium" : "text-ink-2")}
             style={over ? { color: danger } : undefined}
@@ -104,7 +104,7 @@ export function BudgetMeter({ budget, appLabel }: { budget: SocketBudget; appLab
       </div>
 
       {over ? (
-        <p className="mt-2 text-[12px] text-ink-2">
+        <p className="mt-1.5 text-[11px] text-ink-2">
           {appLabel} would not be able to create its socket here. Move the data root somewhere
           shorter to make room.
         </p>

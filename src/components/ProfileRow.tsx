@@ -94,8 +94,8 @@ export function ProfileRow({
   }
 
   return (
-    <div className="group relative rounded-lg px-2 py-2 transition-colors duration-150 ease-out hover:bg-sunken">
-      <div className="flex items-start gap-3">
+    <div className="group relative rounded-lg px-2 py-1.5 transition-colors duration-150 ease-out hover:bg-sunken">
+      <div className="flex items-start gap-2.5">
         <IdentityChip
           appId={profile.app_id}
           profileId={profile.id}
@@ -105,7 +105,7 @@ export function ProfileRow({
 
         <div className="min-w-0 flex-1">
           <div className="flex min-w-0 items-center gap-1.5">
-            <span className="truncate text-[13.5px] font-medium text-ink">{profile.label}</span>
+            <span className="truncate text-[12.5px] font-medium text-ink">{profile.label}</span>
             {/* Colour is never the whole message: the badge on the chip and this
                 word say the same thing twice on purpose. */}
             {profile.running ? (
@@ -146,10 +146,10 @@ export function ProfileRow({
         {/* Fixed width, because both things it holds are read down a column: a
             size that shifts left and right by a character makes five rows look
             like five different lists. */}
-        <div className="grid w-[88px] shrink-0 place-items-end">
+        <div className="grid w-[74px] shrink-0 place-items-end">
           <span
             aria-hidden={bytes === undefined}
-            className="col-start-1 row-start-1 self-center font-mono text-[11px] text-ink-2 transition-opacity duration-150 ease-out group-hover:opacity-0 group-focus-within:opacity-0"
+            className="col-start-1 row-start-1 self-center font-mono text-[10.5px] text-ink-2 transition-opacity duration-150 ease-out group-hover:opacity-0 group-focus-within:opacity-0"
           >
             {bytes === undefined ? "—" : <ByteCount bytes={bytes} />}
           </span>

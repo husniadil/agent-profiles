@@ -25,8 +25,8 @@ export function StatusStrip({
   const { dataRoot, homePath } = usePathNames();
 
   return (
-    <header className="sticky top-0 z-10 flex h-12 items-center justify-between gap-3 border-b border-hairline bg-surface px-4">
-      <p aria-hidden="true" className="flex items-baseline gap-1.5 text-[13px] text-ink-2">
+    <header className="sticky top-0 z-10 flex h-10 items-center justify-between gap-3 border-b border-hairline bg-surface px-3">
+      <p aria-hidden="true" className="flex items-baseline gap-1.5 text-[12px] text-ink-2">
         <Count value={profiles} className="font-mono text-ink" />
         <span>{profiles === 1 ? "profile" : "profiles"}</span>
         <Separator />
@@ -59,7 +59,7 @@ export function StatusStrip({
         >
           <FolderOpen size={13} strokeWidth={1.75} aria-hidden="true" className="shrink-0" />
           <span className="sr-only">Show the profiles folder in the file manager: </span>
-          <bdi className="truncate font-mono text-[11px]">{shortenRoot(dataRoot, homePath)}</bdi>
+          <bdi className="truncate font-mono text-[10.5px]">{shortenRoot(dataRoot, homePath)}</bdi>
         </button>
       ) : null}
     </header>

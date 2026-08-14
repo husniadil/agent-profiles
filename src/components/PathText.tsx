@@ -11,7 +11,7 @@ export function PathText({ path, className }: { path: string; className?: string
   const names = usePathNames();
   const [head, tail] = splitTail(shortenPath(path, names));
   return (
-    <p className={cn("truncate font-mono text-[11px] text-ink-2", className)} title={path}>
+    <p className={cn("truncate font-mono text-[10.5px] text-ink-2", className)} title={path}>
       {head}
       <span className="text-ink">{tail}</span>
     </p>

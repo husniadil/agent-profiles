@@ -17,11 +17,11 @@ import type { AppView, SocketBudget } from "@/lib/api";
 // One band of 32px controls at 13px: the field, the picker and the button are
 // the same height and the same type size, so the compose row reads as one thing
 // rather than three things of three sizes. beUI ships all three larger.
-const CONTROL = "h-8 rounded-lg px-3 text-[13px]";
+const CONTROL = "h-7 rounded-lg px-2.5 text-[12px]";
 
 const FIELD: InputClassNames = {
-  field: "h-8 rounded-lg",
-  input: "px-2.5 text-[13px] placeholder:text-ink-3",
+  field: "h-7 rounded-lg",
+  input: "px-2 text-[12px] placeholder:text-ink-3",
   // The refusal keeps the pulled-toward-ink mix it had as a standalone banner,
   // which is what clears 4.5:1 at this size in both themes.
   errorMessage:
@@ -84,11 +84,11 @@ export function ComposeCard({
   return (
     <section
       aria-labelledby="compose-heading"
-      className="rounded-xl border border-hairline bg-surface p-3 shadow-card"
+      className="rounded-xl border border-hairline bg-surface p-2.5 shadow-card"
     >
       <h2
         id="compose-heading"
-        className="mb-2 font-wide text-[11px] font-semibold tracking-[0.06em] text-ink-2 uppercase [font-stretch:112%]"
+        className="mb-1.5 font-wide text-[10px] font-semibold tracking-[0.06em] text-ink-2 uppercase [font-stretch:112%]"
       >
         New profile
       </h2>

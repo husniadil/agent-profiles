@@ -8,10 +8,10 @@ export function AutostartRow({ autostart }: { autostart: Autostart }) {
   if (!autostart.state.offered) return null;
 
   return (
-    <div className="flex items-center justify-between gap-4 px-1 pt-1">
+    <div className="flex items-center justify-between gap-4 px-1 pt-0.5">
       <div>
-        <p className="text-[13px] text-ink">Start at login</p>
-        <p className="text-[12px] text-ink-2">opens the tray only — no profile is launched</p>
+        <p className="text-[12px] text-ink">Start at login</p>
+        <p className="text-[11px] text-ink-2">opens the tray only — no profile is launched</p>
       </div>
 
       {/* A `role="switch"` button rather than a checkbox: it is named here

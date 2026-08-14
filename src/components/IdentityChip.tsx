@@ -24,8 +24,8 @@ export function IdentityChip({
     <span className="relative shrink-0" aria-hidden="true">
       <span
         className={cn(
-          "grid size-9 place-items-center rounded-[11px]",
-          "font-wide text-[13px] leading-none font-semibold",
+          "grid size-7 place-items-center rounded-[9px]",
+          "font-wide text-[11px] leading-none font-semibold",
           // Archivo's width axis, narrowed a little so two letters sit as
           // comfortably in the square as one does.
           "[font-stretch:88%]",
@@ -44,7 +44,7 @@ export function IdentityChip({
       {running ? (
         <span
           className={cn(
-            "absolute -right-0.5 -bottom-0.5 size-3 rounded-full bg-live",
+            "absolute -right-0.5 -bottom-0.5 size-2.5 rounded-full bg-live",
             // The cut-out follows the row, so the badge stays a badge on hover
             // instead of growing a pale halo.
             "border-2 border-surface transition-colors duration-150 group-hover:border-sunken",
