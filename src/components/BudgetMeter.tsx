@@ -1,4 +1,5 @@
-import { BorderBeam } from "@/components/magicui/border-beam";
+import { motion, useReducedMotion } from "motion/react";
+
 import type { SocketBudget } from "@/lib/api";
 import { readable } from "@/lib/color";
 import { shortenPath, usePathNames } from "@/lib/paths";
@@ -12,6 +13,7 @@ import { cn } from "@/lib/utils";
 /// invent a limit that means nothing.
 export function BudgetMeter({ budget, appLabel }: { budget: SocketBudget; appLabel: string }) {
   const names = usePathNames();
+  const still = useReducedMotion();
   const limit = budget.limit_bytes;
   if (limit === null) return null;
 
@@ -83,14 +85,20 @@ export function BudgetMeter({ budget, appLabel }: { budget: SocketBudget; appLab
 
         {/* The one ambient-looking effect in the window, and it is not ambient:
             it exists only while no profile can be created at all, and it goes
-            the moment that stops being true. */}
+            the moment that stops being true. Under the limit nothing is drawn
+            here at all — a decoration that runs in the healthy state teaches the
+            reader to stop seeing it in the state that matters.
+
+            The breath rests at full strength rather than at its dimmest, so a
+            window that never gets a frame — hidden behind the tray, or with
+            motion turned off — still shows a meter ringed in the danger colour
+            rather than a ghost of one. */}
         {over ? (
-          <BorderBeam
-            size={64}
-            duration={5}
-            borderWidth={1.5}
-            colorFrom="transparent"
-            colorTo="var(--danger)"
+          <motion.span
+            aria-hidden="true"
+            className="pointer-events-none absolute inset-0 rounded-lg ring-1 ring-[var(--danger)]"
+            animate={still ? undefined : { opacity: [1, 0.35, 1] }}
+            transition={{ duration: 1.8, repeat: Infinity, ease: "easeInOut" }}
           />
         ) : null}
       </div>

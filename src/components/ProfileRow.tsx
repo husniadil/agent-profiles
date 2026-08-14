@@ -3,14 +3,57 @@ import { ExternalLink, Pencil, Trash2 } from "lucide-react";
 
 import { ByteCount } from "@/components/Counters";
 import { IdentityChip } from "@/components/IdentityChip";
+import { AnimatedBadge } from "@/components/motion/animated-badge";
+import { Button } from "@/components/motion/button/base";
 import { PathText } from "@/components/PathText";
 import { DeletePanel, RenamePanel } from "@/components/RowPanel";
-import { IconButton } from "@/components/ui/IconButton";
-import { Tag } from "@/components/ui/Tag";
 import * as api from "@/lib/api";
 import type { ProfileView } from "@/lib/api";
+import { edge, readable, wash } from "@/lib/color";
+import { cn } from "@/lib/utils";
 
 type Panel = { kind: "none" } | { kind: "rename" } | { kind: "delete"; bytes: number };
+
+// beUI's badge is a 24px pill at 11px; a row this dense wants the smaller,
+// upper-case chip the window already reads in. The status colours it ships are
+// Tailwind's emerald and amber — this palette has its own, and they are set as
+// styles so the same token drives the tag, the dot and the meter.
+const TAG =
+  "h-auto rounded-full px-1.5 py-px text-[10px] tracking-[0.04em] uppercase";
+
+/// A fact about state, never about identity.
+///
+/// State is kept apart from the profile's own hue so a colour never has to mean
+/// two things at once: running is always the live green, a shared sign-in is
+/// always the warning amber, and neither one ever tints the identity chip.
+/// Colour is not the message either — the word is right there beside it, which
+/// is also the only thing beUI's icon would repeat, so it is turned off.
+function Tag({
+  token,
+  status,
+  children,
+}: {
+  token: string;
+  status: "success" | "warning";
+  children: string;
+}) {
+  return (
+    <AnimatedBadge
+      status={status}
+      size="sm"
+      showIcon={false}
+      className={TAG}
+      style={{ color: readable(token), background: wash(token), borderColor: edge(token) }}
+    >
+      {children}
+    </AnimatedBadge>
+  );
+}
+
+// A control whose whole face is a picture, so its name has to reach a screen
+// reader some other way. `title` covers the pointer; `aria-label` covers
+// everything else, and both are spelled out on every one of them below.
+const ICON_ACTION = "size-7 rounded-md";
 
 export function ProfileRow({
   profile,
@@ -65,8 +108,16 @@ export function ProfileRow({
             <span className="truncate text-[13.5px] font-medium text-ink">{profile.label}</span>
             {/* Colour is never the whole message: the badge on the chip and this
                 word say the same thing twice on purpose. */}
-            {profile.running ? <Tag token="var(--live)">Running</Tag> : null}
-            {profile.shares_account ? <Tag token="var(--warning)">Shared sign-in</Tag> : null}
+            {profile.running ? (
+              <Tag token="var(--live)" status="success">
+                Running
+              </Tag>
+            ) : null}
+            {profile.shares_account ? (
+              <Tag token="var(--warning)" status="warning">
+                Shared sign-in
+              </Tag>
+            ) : null}
           </div>
           <PathText path={profile.path} className="mt-0.5" />
 
@@ -103,26 +154,44 @@ export function ProfileRow({
             {bytes === undefined ? "—" : <ByteCount bytes={bytes} />}
           </span>
           <div className="col-start-1 row-start-1 flex items-center gap-0.5 self-center opacity-0 transition-opacity duration-150 ease-out group-hover:opacity-100 group-focus-within:opacity-100">
-            <IconButton
-              icon={ExternalLink}
-              label={`Open ${profile.label}`}
+            <Button
+              variant="ghost"
+              size="icon"
+              className={ICON_ACTION}
+              title={`Open ${profile.label}`}
+              aria-label={`Open ${profile.label}`}
               onClick={() => void act(api.openProfile(profile.app_id, profile.id))}
-            />
-            <IconButton
-              icon={Pencil}
-              label={`Rename ${profile.label}`}
+            >
+              <ExternalLink size={15} strokeWidth={1.75} aria-hidden="true" />
+            </Button>
+            <Button
+              variant="ghost"
+              size="icon"
+              className={ICON_ACTION}
+              title={`Rename ${profile.label}`}
+              aria-label={`Rename ${profile.label}`}
               onClick={() => setPanel({ kind: "rename" })}
-            />
+            >
+              <Pencil size={15} strokeWidth={1.75} aria-hidden="true" />
+            </Button>
             {/* The Default profile is the app's own existing installation, so
                 its directory is never ours to delete. Its label is still just a
                 label, so rename stays. */}
             {profile.is_default ? null : (
-              <IconButton
-                icon={Trash2}
-                tone="danger"
-                label={`Delete ${profile.label}`}
+              <Button
+                variant="ghost"
+                size="icon"
+                className={cn(
+                  ICON_ACTION,
+                  "hover:bg-[color-mix(in_oklab,var(--danger)_14%,var(--surface))]",
+                  "hover:text-[color-mix(in_oklab,var(--danger)_70%,var(--ink))]",
+                )}
+                title={`Delete ${profile.label}`}
+                aria-label={`Delete ${profile.label}`}
                 onClick={() => void askToDelete()}
-              />
+              >
+                <Trash2 size={15} strokeWidth={1.75} aria-hidden="true" />
+              </Button>
             )}
           </div>
         </div>

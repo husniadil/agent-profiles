@@ -2,11 +2,31 @@ import { useEffect, useState, type FormEvent } from "react";
 import { Plus } from "lucide-react";
 
 import { BudgetMeter } from "@/components/BudgetMeter";
-import { Button } from "@/components/ui/Button";
-import { FIELD } from "@/components/ui/Field";
+import { Button } from "@/components/motion/button/base";
+import { Input, type InputClassNames } from "@/components/motion/input";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/motion/select";
 import * as api from "@/lib/api";
 import type { AppView, SocketBudget } from "@/lib/api";
-import { cn } from "@/lib/utils";
+
+// One band of 32px controls at 13px: the field, the picker and the button are
+// the same height and the same type size, so the compose row reads as one thing
+// rather than three things of three sizes. beUI ships all three larger.
+const CONTROL = "h-8 rounded-lg px-3 text-[13px]";
+
+const FIELD: InputClassNames = {
+  field: "h-8 rounded-lg",
+  input: "px-2.5 text-[13px] placeholder:text-ink-3",
+  // The refusal keeps the pulled-toward-ink mix it had as a standalone banner,
+  // which is what clears 4.5:1 at this size in both themes.
+  errorMessage:
+    "px-0 text-[12px] font-medium text-[color-mix(in_oklab,var(--danger)_70%,var(--ink))]",
+};
 
 export function ComposeCard({
   apps,
@@ -27,7 +47,9 @@ export function ComposeCard({
   // Adding a profile reports next to the form rather than in the page banner.
   // The banner sits above the profile list, which on any populated window is far
   // enough above the form to be scrolled out of sight — a refused label then
-  // looks like a button that did nothing at all.
+  // looks like a button that did nothing at all. Handing it to the field makes
+  // that closer still: the field shakes, which is the refusal arriving on the
+  // control that caused it.
   const [error, setError] = useState<string | null>(null);
 
   // A refusal is a verdict about one moment. Every visit starts from a clean
@@ -71,71 +93,67 @@ export function ComposeCard({
         New profile
       </h2>
 
-      <form className="flex gap-2" onSubmit={(event) => void submit(event)}>
-        <label className="sr-only" htmlFor="new-label">
-          Profile name
-        </label>
-        <input
+      {/* Aligned to the top, not stretched: a refusal grows the field's box
+          downward, and the picker and the button have no business growing with
+          it. */}
+      <form className="flex items-start gap-2" onSubmit={(event) => void submit(event)}>
+        <Input
           id="new-label"
           type="text"
           maxLength={80}
           autoComplete="off"
           placeholder="Name this profile"
+          aria-label="Profile name"
           value={label}
           // A refusal is about the label as it was submitted. The moment it is
           // edited the verdict is stale, and leaving it on screen invites the
           // reader to believe the new label was rejected too.
-          onChange={(event) => {
-            setLabel(event.target.value);
+          onChange={(next) => {
+            setLabel(next);
             setError(null);
           }}
-          className={cn(FIELD, "flex-1")}
+          error={error ?? false}
+          className="flex-1"
+          classNames={FIELD}
         />
 
         {/* The picker is only a question when there is more than one answer. */}
         {apps.length > 1 ? (
-          <>
-            <label className="sr-only" htmlFor="new-app">
-              App
-            </label>
-            <select
-              id="new-app"
-              value={appId}
-              // Switching app switches which data root the meter is about — the
-              // two apps sit at different depths under the same root, so the
-              // number is not the same twice.
-              onChange={(event) => {
-                setError(null);
-                onAppId(event.target.value);
-              }}
-              className={cn(FIELD, "max-w-[10rem]")}
-            >
+          <Select
+            value={appId}
+            // Switching app switches which data root the meter is about — the
+            // two apps sit at different depths under the same root, so the
+            // number is not the same twice.
+            onValueChange={(next) => {
+              setError(null);
+              onAppId(next);
+            }}
+            className="w-40 shrink-0"
+          >
+            {/* beUI's trigger takes no label prop, so the name is given the way
+                any button gets one: inside it, out of sight. The accessible
+                name reads "App, <chosen app>". */}
+            <SelectTrigger className={CONTROL}>
+              <span className="sr-only">App</span>
+              <SelectValue />
+            </SelectTrigger>
+            <SelectContent>
               {apps.map((app) => (
-                <option key={app.id} value={app.id}>
+                <SelectItem key={app.id} value={app.id}>
                   {app.label}
-                </option>
+                </SelectItem>
               ))}
-            </select>
-          </>
+            </SelectContent>
+          </Select>
         ) : null}
 
         {/* Over the limit the backend has already decided to refuse, so the
             button would only submit into that refusal. */}
-        <Button type="submit" tone="accent" disabled={over}>
+        <Button type="submit" size="sm" className={CONTROL} disabled={over}>
           <Plus size={14} strokeWidth={2} aria-hidden="true" />
           Add profile
         </Button>
       </form>
-
-      {error ? (
-        <p
-          role="alert"
-          className="mt-2 text-[12px] font-medium"
-          style={{ color: "color-mix(in oklab, var(--danger) 70%, var(--ink))" }}
-        >
-          {error}
-        </p>
-      ) : null}
 
       {budget ? <BudgetMeter budget={budget} appLabel={appLabel} /> : null}
     </section>

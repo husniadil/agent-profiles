@@ -1,16 +1,35 @@
 import { useEffect, useRef, useState, type ReactNode } from "react";
-import { useReducedMotion } from "motion/react";
+import { motion, useReducedMotion } from "motion/react";
 
-import { BlurFade } from "@/components/magicui/blur-fade";
-import { Button } from "@/components/ui/Button";
-import { FIELD } from "@/components/ui/Field";
+import { Button } from "@/components/motion/button/base";
+import { Input, type InputClassNames } from "@/components/motion/input";
 import { formatBytes } from "@/format";
+import { EASE_OUT } from "@/lib/ease";
 import { cn } from "@/lib/utils";
 
 /// Rename and delete both used to call `window.prompt` / `window.confirm`.
 /// Tauri's webview implements neither, so both actions silently did nothing.
 /// Everything here is drawn in the row instead — in the page, under the profile
 /// it is about, and never as a modal.
+
+// beUI's buttons are 40px pills at 12px; this window's controls are 32px
+// rounded rectangles at 13px, and the compose row above agrees with that.
+const ACTION = "h-8 rounded-lg px-3 text-[13px]";
+
+// Destructive is not one of beUI's four variants, and it is not a colour to
+// invent per call site either — it is the danger token, the same one the meter
+// and the delete icon use.
+const DESTRUCTIVE = cn(
+  "bg-danger text-[oklch(0.99_0.01_25)]",
+  "hover:bg-[color-mix(in_oklab,var(--danger)_86%,var(--ink))]",
+);
+
+// beUI's field is a 44px pill at 16px with a transparent ground. The panel it
+// sits in is sunken, so the field takes the surface back to stay a field.
+const FIELD: InputClassNames = {
+  field: "h-8 rounded-lg bg-surface",
+  input: "px-2.5 text-[13px] placeholder:text-ink-3",
+};
 
 /// The panel is a reveal, not an entrance: it exists because the user asked a
 /// question, and the short settle is what ties it to the row it opened under.
@@ -30,9 +49,13 @@ function Panel({ danger = false, children }: { danger?: boolean; children: React
   );
   if (still) return body;
   return (
-    <BlurFade duration={0.18} offset={4} blur="3px">
+    <motion.div
+      initial={{ opacity: 0, y: -4, filter: "blur(3px)" }}
+      animate={{ opacity: 1, y: 0, filter: "blur(0px)" }}
+      transition={{ duration: 0.18, ease: EASE_OUT }}
+    >
       {body}
-    </BlurFade>
+    </motion.div>
   );
 }
 
@@ -67,21 +90,22 @@ export function RenamePanel({
           onSave(next);
         }}
       >
-        <input
+        <Input
           ref={input}
           autoFocus
           type="text"
           maxLength={80}
           value={value}
-          onChange={(event) => setValue(event.target.value)}
+          onChange={setValue}
           aria-label={`New name for ${label}`}
-          className={cn(FIELD, "w-full")}
+          className="w-full"
+          classNames={FIELD}
         />
         <div className="mt-2 flex gap-2">
-          <Button type="submit" tone="accent">
+          <Button type="submit" size="sm" className={ACTION}>
             Save name
           </Button>
-          <Button type="button" onClick={onCancel}>
+          <Button type="button" variant="secondary" size="sm" className={ACTION} onClick={onCancel}>
             Cancel
           </Button>
         </div>
@@ -118,10 +142,16 @@ export function DeletePanel({
         folder. This can’t be undone.
       </p>
       <div className="mt-2 flex gap-2">
-        <Button ref={confirm} type="button" tone="danger" onClick={onConfirm}>
+        <Button
+          ref={confirm}
+          type="button"
+          size="sm"
+          className={cn(ACTION, DESTRUCTIVE)}
+          onClick={onConfirm}
+        >
           Delete permanently
         </Button>
-        <Button type="button" onClick={onCancel}>
+        <Button type="button" variant="secondary" size="sm" className={ACTION} onClick={onCancel}>
           Keep it
         </Button>
       </div>

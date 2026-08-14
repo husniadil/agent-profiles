@@ -39,6 +39,13 @@
   --warning: oklch(0.60 0.12 75);
   --danger: oklch(0.53 0.17 25);
 
+  /* Two names beUI reads straight out of the cascade — `text-(--color-success)`
+     and `hover:border-(--color-border-strong)` ask for the custom property by
+     name rather than for a utility. Defined here, in terms of tokens that are
+     already restated in the dark block, so neither needs a second definition. */
+  --color-success: var(--live);
+  --color-border-strong: var(--ink-4);
+
   --shadow-sm: 0 1px 2px oklch(0.19 0.012 50 / 0.06);
   --shadow-md: 0 1px 2px oklch(0.19 0.012 50 / 0.05), 0 8px 24px -12px oklch(0.19 0.012 50 / 0.22);
 
@@ -113,6 +120,21 @@
   --color-live: var(--live);
   --color-warning: var(--warning);
   --color-danger: var(--danger);
+
+  /* beUI's components are written against the shadcn token names. Mapping those
+     names onto this palette is what makes them wear this window's colours;
+     without it they would arrive carrying a second theme, and every call site
+     would have to argue with it in `className`. */
+  --color-background: var(--surface);
+  --color-foreground: var(--ink);
+  --color-card: var(--surface);
+  --color-muted: var(--sunken);
+  --color-muted-foreground: var(--ink-2);
+  --color-border: var(--line);
+  --color-ring: var(--accent);
+  --color-primary: var(--accent);
+  --color-primary-foreground: var(--accent-ink);
+  --color-destructive: var(--danger);
 
   --font-sans: "Inter Tight", ui-sans-serif, -apple-system, system-ui, sans-serif;
   --font-mono: "IBM Plex Mono", ui-monospace, "SF Mono", Menlo, monospace;

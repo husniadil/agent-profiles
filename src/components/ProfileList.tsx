@@ -1,7 +1,6 @@
 import { useEffect, useRef } from "react";
-import { useReducedMotion } from "motion/react";
+import { motion, useReducedMotion } from "motion/react";
 
-import { AnimatedListItem } from "@/components/magicui/animated-list";
 import { ProfileRow } from "@/components/ProfileRow";
 import type { AppView } from "@/lib/api";
 import type { Sizes } from "@/hooks/useSizes";
@@ -106,7 +105,21 @@ function Rows({
         const arriving = !still && arrivals.has(profile.id);
         return (
           <li key={profile.id}>
-            {arriving ? <AnimatedListItem>{row}</AnimatedListItem> : row}
+            {/* The row the user just created, saying so once. Scaled up from
+                its own top edge so it grows into the gap it made rather than
+                shoving the rows below it around. */}
+            {arriving ? (
+              <motion.div
+                className="w-full"
+                initial={{ scale: 0, opacity: 0 }}
+                animate={{ scale: 1, opacity: 1, originY: 0 }}
+                transition={{ type: "spring", stiffness: 350, damping: 40 }}
+              >
+                {row}
+              </motion.div>
+            ) : (
+              row
+            )}
           </li>
         );
       })}
