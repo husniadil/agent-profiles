@@ -1,31 +1,61 @@
 @import "./fonts.css";
 
 :root {
-  --paper: #f4f0e8;
-  --paper-deep: #e9e1d4;
-  --card: #fbf8f2;
-  --ink: #192c46;
-  --ink-soft: #5d6875;
-  --line: #d8cec0;
-  --orange: #dd6b32;
-  --orange-deep: #a84620;
-  --orange-wash: #f5dfd2;
-  --warning: #9a5b24;
-  --warning-wash: #f4e5c7;
-  --danger: #a8443e;
-  --danger-wash: #f3dcd7;
-  --shadow: rgba(25, 44, 70, 0.08);
+  --sans: ui-sans-serif, -apple-system, "Segoe UI", system-ui, sans-serif;
+  --wide: "Archivo", ui-sans-serif, system-ui, sans-serif;
+  --mono: "IBM Plex Mono", ui-monospace, "SF Mono", Menlo, monospace;
 
-  font-family: "Avenir Next", Avenir, Helvetica, Arial, sans-serif;
-  font-size: 16px;
-  line-height: 1.5;
-  font-weight: 400;
+  --canvas: #dddfe2;
+  --paper: #eff0f2;
+  --surface: #ffffff;
+  --sunken: #f4f5f7;
+  --ink: #0e1114;
+  --ink-2: #4a5058;
+  --ink-3: #8b929a;
+  --ink-4: #b3b9bf;
+  --line: #dcdfe3;
+  --hairline: #eaecef;
+
+  /* The only colours in the window, and each one means one thing. */
+  --live: #0c8757;
+  --warning: #96600a;
+  --danger: #be3328;
+
+  --radius: 10px;
+  --shadow: 0 1px 1px rgba(14, 17, 20, 0.05), 0 24px 50px -26px rgba(14, 17, 20, 0.4);
+
+  color-scheme: light dark;
+  font-family: var(--sans);
+  font-size: 14px;
+  line-height: 1.45;
   color: var(--ink);
-  background: var(--paper);
+  background: var(--canvas);
   font-synthesis: none;
   text-rendering: optimizeLegibility;
   -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: grayscale;
+}
+
+/* The window follows the system rather than offering a preference. A theme
+   switch is a setting, and a setting needs somewhere to live. */
+@media (prefers-color-scheme: dark) {
+  :root {
+    --canvas: #08090b;
+    --paper: #131619;
+    --surface: #171a1e;
+    --sunken: #1e2227;
+    --ink: #e9ebed;
+    --ink-2: #a4acb4;
+    --ink-3: #6c757d;
+    --ink-4: #4a5259;
+    --line: #272c32;
+    --hairline: #212529;
+
+    --live: #38c88f;
+    --warning: #d8a144;
+    --danger: #e96c5f;
+    --shadow: 0 1px 1px rgba(0, 0, 0, 0.5), 0 24px 50px -26px rgba(0, 0, 0, 0.9);
+  }
 }
 
 * {
@@ -36,15 +66,14 @@ body {
   min-width: 320px;
   min-height: 100vh;
   margin: 0;
-  background:
-    radial-gradient(circle at 88% 8%, rgba(221, 107, 50, 0.11), transparent 16rem),
-    linear-gradient(135deg, rgba(255, 255, 255, 0.28), transparent 38%),
-    var(--paper);
+  background: var(--canvas);
 }
 
 button,
-input {
+input,
+select {
   font: inherit;
+  color: inherit;
 }
 
 button {
@@ -52,9 +81,11 @@ button {
 }
 
 button:focus-visible,
-input:focus-visible {
-  outline: 3px solid rgba(221, 107, 50, 0.48);
-  outline-offset: 3px;
+input:focus-visible,
+select:focus-visible {
+  outline: 2px solid var(--ink);
+  outline-offset: 2px;
+  border-radius: 4px;
 }
 
 .container {
@@ -79,12 +110,12 @@ input:focus-visible {
   place-items: center;
   margin-top: 0.15rem;
   color: var(--paper);
-  background: var(--orange);
-  box-shadow: 0.35rem 0.35rem 0 var(--ink);
+  background: var(--ink);
   transform: rotate(-3deg);
 }
 
 .brand-mark span {
+  font-family: var(--wide);
   font-size: 1.08rem;
   font-weight: 800;
   letter-spacing: -0.08em;
@@ -93,7 +124,8 @@ input:focus-visible {
 
 .eyebrow {
   margin: 0 0 0.4rem;
-  color: var(--orange-deep);
+  color: var(--ink-3);
+  font-family: var(--wide);
   font-size: 0.68rem;
   font-weight: 800;
   letter-spacing: 0.17em;
@@ -112,7 +144,7 @@ h1,
 h2,
 h3 {
   color: var(--ink);
-  font-family: Georgia, "Times New Roman", serif;
+  font-family: var(--wide);
   font-weight: 700;
 }
 
@@ -127,7 +159,7 @@ h1 {
 .lede {
   max-width: 43rem;
   margin-bottom: 0;
-  color: var(--ink-soft);
+  color: var(--ink-2);
   font-size: 1rem;
   line-height: 1.55;
 }
@@ -163,8 +195,9 @@ h1 {
   border-radius: 999px;
   color: var(--paper);
   background: var(--ink);
+  font-family: var(--mono);
   font-size: 0.8rem;
-  font-weight: 800;
+  font-weight: 700;
 }
 
 .error {
@@ -172,7 +205,7 @@ h1 {
   padding: 0.85rem 1rem;
   border-left: 4px solid var(--danger);
   color: var(--danger);
-  background: var(--danger-wash);
+  background: var(--sunken);
   font-size: 0.9rem;
   line-height: 1.45;
 }
@@ -185,11 +218,12 @@ h1 {
 
 .app-heading {
   margin: 0 0 0.6rem;
+  font-family: var(--wide);
   font-size: 0.78rem;
   font-weight: 600;
   letter-spacing: 0.08em;
   text-transform: uppercase;
-  color: #89919a;
+  color: var(--ink-3);
 }
 
 .app-picker select {
@@ -198,12 +232,12 @@ h1 {
   border-radius: 0.25rem;
   padding: 0.65rem 0.6rem;
   color: var(--ink);
-  background: var(--card);
+  background: var(--surface);
   font: inherit;
 }
 
 .app-picker select:hover {
-  border-color: #b6aa9c;
+  border-color: var(--ink-3);
 }
 
 .profile-list {
@@ -223,23 +257,23 @@ h1 {
   padding: 1rem 1.1rem;
   border: 1px solid var(--line);
   border-left: 4px solid var(--ink);
-  background: var(--card);
-  box-shadow: 0 0.45rem 1rem var(--shadow);
+  background: var(--surface);
+  box-shadow: var(--shadow);
   transition: border-color 160ms ease, box-shadow 160ms ease, transform 160ms ease;
 }
 
 .profile-card:hover {
-  border-color: var(--orange);
-  box-shadow: 0 0.65rem 1.2rem rgba(25, 44, 70, 0.12);
+  border-color: var(--ink-3);
   transform: translateY(-1px);
 }
 
 .profile-index {
   align-self: start;
   padding-top: 0.16rem;
-  color: var(--orange);
+  color: var(--ink-3);
+  font-family: var(--mono);
   font-size: 0.72rem;
-  font-weight: 800;
+  font-weight: 600;
   letter-spacing: 0.08em;
 }
 
@@ -268,8 +302,8 @@ h1 {
 .profile-path {
   overflow: hidden;
   margin: 0;
-  color: var(--ink-soft);
-  font-family: "SFMono-Regular", Consolas, "Liberation Mono", monospace;
+  color: var(--ink-2);
+  font-family: var(--mono);
   font-size: 0.73rem;
   line-height: 1.45;
   text-overflow: ellipsis;
@@ -290,13 +324,13 @@ h1 {
 }
 
 .status-default {
-  color: var(--ink);
-  background: var(--paper-deep);
+  color: var(--ink-2);
+  background: var(--sunken);
 }
 
 .status-warning {
   color: var(--warning);
-  background: var(--warning-wash);
+  background: var(--sunken);
 }
 
 .profile-actions {
@@ -312,19 +346,19 @@ h1 {
   border-radius: 0.25rem;
   padding: 0.45rem 0.8rem;
   font-size: 0.78rem;
-  font-weight: 800;
+  font-weight: 700;
   line-height: 1.1;
   white-space: nowrap;
   transition: background-color 160ms ease, border-color 160ms ease, color 160ms ease;
 }
 
 .button-primary {
-  color: #fffaf2;
-  background: var(--orange);
+  color: var(--paper);
+  background: var(--ink);
 }
 
 .button-primary:hover {
-  background: var(--orange-deep);
+  background: var(--ink-2);
 }
 
 .button-quiet {
@@ -335,7 +369,7 @@ h1 {
 
 .button-quiet:hover {
   border-color: var(--ink);
-  background: var(--paper-deep);
+  background: var(--sunken);
 }
 
 .button-danger {
@@ -346,7 +380,7 @@ h1 {
 
 .button-danger:hover {
   border-color: var(--danger);
-  background: var(--danger-wash);
+  background: var(--sunken);
 }
 
 .add-column {
@@ -373,7 +407,7 @@ h1 {
 .helper {
   max-width: 32rem;
   margin: 0.75rem 0 0;
-  color: var(--ink-soft);
+  color: var(--ink-2);
   font-size: 0.84rem;
   line-height: 1.5;
 }
@@ -391,15 +425,15 @@ h1 {
   border-radius: 0.25rem;
   padding: 0.65rem 0.75rem;
   color: var(--ink);
-  background: var(--card);
+  background: var(--surface);
 }
 
 .add-form input::placeholder {
-  color: #89919a;
+  color: var(--ink-3);
 }
 
 .add-form input:hover {
-  border-color: #b6aa9c;
+  border-color: var(--ink-3);
 }
 
 .sr-only {
@@ -478,36 +512,6 @@ h1 {
   }
 }
 
-@media (prefers-color-scheme: dark) {
-  :root {
-    --paper: #1b2635;
-    --paper-deep: #263548;
-    --card: #223044;
-    --ink: #f5efe4;
-    --ink-soft: #b7c0c9;
-    --line: #405168;
-    --orange: #ef8950;
-    --orange-deep: #ffac79;
-    --orange-wash: #4b3030;
-    --warning: #f4c77b;
-    --warning-wash: #4a3d2c;
-    --danger: #ff9b91;
-    --danger-wash: #492f35;
-    --shadow: rgba(0, 0, 0, 0.22);
-  }
-
-  body {
-    background:
-      radial-gradient(circle at 88% 8%, rgba(239, 137, 80, 0.13), transparent 16rem),
-      linear-gradient(135deg, rgba(255, 255, 255, 0.025), transparent 38%),
-      var(--paper);
-  }
-
-  .button-primary {
-    color: #211a17;
-  }
-}
-
 .inline-panel {
   display: flex;
   flex-wrap: wrap;
@@ -515,7 +519,7 @@ h1 {
   gap: 0.5rem;
   margin-top: 0.75rem;
   padding: 0.75rem;
-  border: 1px solid var(--border, rgba(128, 128, 128, 0.35));
+  border: 1px solid var(--line);
   border-radius: 0.5rem;
 }
 
@@ -530,7 +534,7 @@ h1 {
 }
 
 .inline-panel-danger {
-  border-color: rgba(190, 60, 60, 0.6);
+  border-color: var(--danger);
 }
 
 /* Text selection is a document affordance, not an app one. */
