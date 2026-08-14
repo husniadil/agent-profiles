@@ -5,6 +5,13 @@ import { profileSizeBytes, type AppView } from "@/lib/api";
 export type Sizes = {
   /// Bytes per profile, keyed `app:profile`. Absent until that row reports.
   byKey: Record<string, number>;
+  /// The rows whose walk threw, keyed the same way.
+  ///
+  /// Read-only, and the reason it exists: a failed walk publishes nothing at
+  /// all, so without it a row that could not be measured and a row that has not
+  /// been reached yet are the same absence — and they are not the same thing to
+  /// say. In neither `byKey` nor here means still to come.
+  failed: ReadonlySet<string>;
   /// Absent until every row has reported: a total that counts half the profiles
   /// is a wrong number stated confidently.
   total: number | null;
@@ -36,6 +43,7 @@ export function useSizes(apps: AppView[], visit: number): Sizes {
   const lastVisit = useRef(visit);
 
   const [byKey, setByKey] = useState<Record<string, number>>({});
+  const [failed, setFailed] = useState<ReadonlySet<string>>(() => new Set());
   const [total, setTotal] = useState<number | null>(null);
 
   useEffect(() => {
@@ -53,6 +61,7 @@ export function useSizes(apps: AppView[], visit: number): Sizes {
     // A fresh list restarts the measuring, so the total stops claiming what the
     // previous list added up to.
     setByKey({});
+    setFailed(new Set());
     setTotal(null);
 
     void (async () => {
@@ -63,6 +72,9 @@ export function useSizes(apps: AppView[], visit: number): Sizes {
       let sum = 0;
       let complete = true;
       const found: Record<string, number> = {};
+      // Pass-local for the same reason `found` is: a row that could not be read
+      // belongs to the list it was read for.
+      const missed = new Set<string>();
 
       for (const target of targets) {
         const key = `${target.appId}:${target.id}`;
@@ -90,6 +102,10 @@ export function useSizes(apps: AppView[], visit: number): Sizes {
           // but the total is now unknowable, and a total missing a profile is a
           // wrong total.
           complete = false;
+          // Said out loud, though, so the row can stop waiting: silence is how
+          // "still measuring" looks, and this row has finished failing.
+          missed.add(key);
+          setFailed(new Set(missed));
         }
       }
 
@@ -98,5 +114,5 @@ export function useSizes(apps: AppView[], visit: number): Sizes {
     })();
   }, [apps, visit]);
 
-  return { byKey, total };
+  return { byKey, failed, total };
 }

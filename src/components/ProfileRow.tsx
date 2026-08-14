@@ -1,7 +1,7 @@
 import { useState } from "react";
 import { ExternalLink, Pencil, Trash2 } from "lucide-react";
 
-import { ByteCount } from "@/components/Counters";
+import { ByteCount, PendingSize } from "@/components/Counters";
 import { IdentityChip } from "@/components/IdentityChip";
 import { AnimatedBadge } from "@/components/motion/animated-badge";
 import { Button } from "@/components/motion/button/base";
@@ -58,12 +58,17 @@ const ICON_ACTION = "size-7 rounded-md";
 export function ProfileRow({
   profile,
   bytes,
+  sizeFailed,
   reload,
   onError,
   clearError,
 }: {
   profile: ProfileView;
   bytes: number | undefined;
+  /// This row's walk threw. Together with `bytes`, the three states the size
+  /// slot can be in: a number, a walk still running, a walk that came back
+  /// empty-handed.
+  sizeFailed: boolean;
   reload: () => Promise<void>;
   onError: (error: unknown) => void;
   clearError: () => void;
@@ -151,7 +156,13 @@ export function ProfileRow({
             aria-hidden={bytes === undefined}
             className="col-start-1 row-start-1 self-center font-mono text-[10.5px] text-ink-2 transition-opacity duration-150 ease-out group-hover:opacity-0 group-focus-within:opacity-0"
           >
-            {bytes === undefined ? "—" : <ByteCount bytes={bytes} />}
+            {bytes !== undefined ? (
+              <ByteCount bytes={bytes} />
+            ) : sizeFailed ? (
+              "—"
+            ) : (
+              <PendingSize />
+            )}
           </span>
           <div className="col-start-1 row-start-1 flex items-center gap-0.5 self-center opacity-0 transition-opacity duration-150 ease-out group-hover:opacity-100 group-focus-within:opacity-100">
             <Button

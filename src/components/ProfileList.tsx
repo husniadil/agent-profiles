@@ -93,10 +93,12 @@ function Rows({
   return (
     <ul>
       {app.profiles.map((profile) => {
+        const key = `${profile.app_id}:${profile.id}`;
         const row = (
           <ProfileRow
             profile={profile}
-            bytes={sizes.byKey[`${profile.app_id}:${profile.id}`]}
+            bytes={sizes.byKey[key]}
+            sizeFailed={sizes.failed.has(key)}
             reload={reload}
             onError={onError}
             clearError={clearError}

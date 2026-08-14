@@ -2,7 +2,10 @@ import { useEffect, useState, type FormEvent } from "react";
 import { Plus } from "lucide-react";
 
 import { BudgetMeter } from "@/components/BudgetMeter";
-import { Button } from "@/components/motion/button/base";
+import {
+  StatefulButton,
+  type ButtonState,
+} from "@/components/motion/button/stateful";
 import { Input, type InputClassNames } from "@/components/motion/input";
 import {
   Select,
@@ -52,32 +55,63 @@ export function ComposeCard({
   // control that caused it.
   const [error, setError] = useState<string | null>(null);
 
+  // Adding a profile is not instant — it creates a directory on disk, and on a
+  // slow volume that is long enough for a click to look like it did nothing. So
+  // the button carries the operation: idle while there is nothing happening,
+  // working while the call is out, and then the verdict.
+  //
+  // The button says *that* it failed; the field beside it still says *why*, and
+  // it is the field the reader has to go back to anyway. Neither replaces the
+  // other.
+  const [state, setState] = useState<ButtonState>("idle");
+
   // A refusal is a verdict about one moment. Every visit starts from a clean
   // form rather than from what was true the last time the window was open.
-  useEffect(() => setError(null), [visit]);
+  useEffect(() => {
+    setError(null);
+    setState("idle");
+  }, [visit]);
+
+  // The verdict settles back into the button's own name once it has been read.
+  // A timer and not an animation: this window spends its life hidden, and
+  // `setTimeout` still runs there — a button left reading "Added" until someone
+  // happens to look at it would be describing a profile added minutes ago.
+  useEffect(() => {
+    if (state === "idle" || state === "loading") return;
+    const settle = setTimeout(() => setState("idle"), state === "success" ? 1400 : 2400);
+    return () => clearTimeout(settle);
+  }, [state]);
 
   const over =
     budget !== null && budget.limit_bytes !== null && budget.used_bytes > budget.limit_bytes;
   const appLabel = apps.find((app) => app.id === appId)?.label ?? "This app";
 
+  function refuse(message: string): void {
+    setError(message);
+    setState("error");
+  }
+
   async function submit(event: FormEvent): Promise<void> {
     event.preventDefault();
+    if (state === "loading") return;
     const name = label.trim();
     if (!name) {
-      setError("Enter a name for this profile.");
+      refuse("Enter a name for this profile.");
       return;
     }
     if (!appId) {
-      setError("No supported app was found to add a profile to.");
+      refuse("No supported app was found to add a profile to.");
       return;
     }
+    setState("loading");
     try {
       await api.addProfile(appId, name);
       setLabel("");
       setError(null);
+      setState("success");
       await reload();
     } catch (cause) {
-      setError(api.errorMessage(cause));
+      refuse(api.errorMessage(cause));
     }
   }
 
@@ -111,6 +145,9 @@ export function ComposeCard({
           onChange={(next) => {
             setLabel(next);
             setError(null);
+            // And the button's verdict goes with it, for the same reason: it is
+            // about the label that was submitted, not the one being typed.
+            if (state !== "loading") setState("idle");
           }}
           error={error ?? false}
           className="flex-1"
@@ -149,10 +186,23 @@ export function ComposeCard({
 
         {/* Over the limit the backend has already decided to refuse, so the
             button would only submit into that refusal. */}
-        <Button type="submit" size="sm" className={CONTROL} disabled={over}>
-          <Plus size={14} strokeWidth={2} aria-hidden="true" />
+        {/* Fixed width: the four labels it swaps between are four different
+            lengths, and a button that resizes takes the field beside it with
+            it. The label is spoken once, politely, from inside — a person who
+            cannot see the spinner still hears that it is working. */}
+        <StatefulButton
+          type="submit"
+          size="sm"
+          className={`${CONTROL} w-[124px] shrink-0`}
+          disabled={over}
+          state={state}
+          icon={<Plus size={14} strokeWidth={2} aria-hidden="true" />}
+          loadingText="Adding"
+          successText="Added"
+          errorText="Try again"
+        >
           Add profile
-        </Button>
+        </StatefulButton>
       </form>
 
       {budget ? <BudgetMeter budget={budget} appLabel={appLabel} /> : null}

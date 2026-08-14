@@ -1,6 +1,7 @@
 import { useReducedMotion } from "motion/react";
 
 import { AnimatedNumber } from "@/components/motion/animated-number";
+import { TextShimmer } from "@/components/motion/text-shimmer";
 import { formatBytes } from "@/format";
 import { useAwake } from "@/lib/hooks/use-awake";
 import { cn } from "@/lib/utils";
@@ -63,5 +64,31 @@ export function ByteCount({ bytes, className }: { bytes: number; className?: str
       />{" "}
       {unit}
     </span>
+  );
+}
+
+/// The size of a directory that is still being walked.
+///
+/// Only ever a stand-in for a number that has not arrived — never a number
+/// itself, so nothing here is gated on the animation running. The word is
+/// painted by a static gradient and the shimmer only slides that gradient
+/// along; a hidden window gets no frames and still gets the word.
+///
+/// A row whose measurement *failed* does not get this. It gets the plain dash
+/// it always had: a dash says nothing, which is the honest thing to say about a
+/// folder that could not be read, and a shimmer there would promise a number
+/// that is never coming.
+///
+/// `prefers-reduced-motion` keeps the word and drops the slide — the placeholder
+/// is the message, the movement was only ever the manner.
+export function PendingSize({ className }: { className?: string }) {
+  const still = useReducedMotion();
+  const word = "Sizing";
+
+  if (still) return <span className={cn("text-ink-2", className)}>{word}</span>;
+  return (
+    <TextShimmer duration={1.8} className={className}>
+      {word}
+    </TextShimmer>
   );
 }

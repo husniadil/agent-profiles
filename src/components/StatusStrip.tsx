@@ -2,6 +2,7 @@ import { FolderOpen } from "lucide-react";
 import { revealItemInDir } from "@tauri-apps/plugin-opener";
 
 import { ByteCount, Count } from "@/components/Counters";
+import { Tooltip } from "@/components/motion/tooltip";
 import { statusLine } from "@/format";
 import { shortenRoot, usePathNames } from "@/lib/paths";
 
@@ -47,20 +48,35 @@ export function StatusStrip({
       </span>
 
       {/* The strip names the folder; this is the only way to actually get to it. */}
+      {/* The label on screen is an abbreviation, so the whole root is said in
+          two places that reach two different audiences: the tooltip, which
+          opens on focus as well as hover — a button is already a tab stop, so
+          this costs nothing — and the button's own accessible name, since beUI's
+          tooltip is `aria-hidden` and nothing in it is ever read aloud. */}
       {dataRoot ? (
-        <button
-          type="button"
-          title={dataRoot}
-          onClick={() => {
-            // Unlike reading the root, this one the user asked for.
-            void revealItemInDir(dataRoot).catch(onError);
-          }}
-          className="flex min-w-0 shrink items-center gap-1.5 rounded-md px-1.5 py-1 text-ink-2 transition-colors duration-150 ease-out hover:bg-sunken hover:text-ink"
+        <Tooltip
+          content={dataRoot}
+          side="bottom"
+          wrapperClassName="flex min-w-0 shrink"
+          className="max-w-[min(420px,calc(100vw-16px))] break-all whitespace-normal font-mono text-[11px] font-normal"
         >
-          <FolderOpen size={13} strokeWidth={1.75} aria-hidden="true" className="shrink-0" />
-          <span className="sr-only">Show the profiles folder in the file manager: </span>
-          <bdi className="truncate font-mono text-[10.5px]">{shortenRoot(dataRoot, homePath)}</bdi>
-        </button>
+          <button
+            type="button"
+            onClick={() => {
+              // Unlike reading the root, this one the user asked for.
+              void revealItemInDir(dataRoot).catch(onError);
+            }}
+            className="flex min-w-0 shrink items-center gap-1.5 rounded-md px-1.5 py-1 text-ink-2 transition-colors duration-150 ease-out hover:bg-sunken hover:text-ink"
+          >
+            <FolderOpen size={13} strokeWidth={1.75} aria-hidden="true" className="shrink-0" />
+            <span className="sr-only">
+              Show the profiles folder in the file manager: {dataRoot}
+            </span>
+            <bdi aria-hidden="true" className="truncate font-mono text-[10.5px]">
+              {shortenRoot(dataRoot, homePath)}
+            </bdi>
+          </button>
+        </Tooltip>
       ) : null}
     </header>
   );
