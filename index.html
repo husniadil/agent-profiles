@@ -5,116 +5,12 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <!-- `--surface`, which is what the window paints edge to edge. -->
     <meta name="theme-color" content="#ffffff" media="(prefers-color-scheme: light)" />
-    <meta name="theme-color" content="#171a1e" media="(prefers-color-scheme: dark)" />
+    <meta name="theme-color" content="#2b2724" media="(prefers-color-scheme: dark)" />
     <title>Agent Profiles</title>
     <link rel="icon" type="image/png" href="/src/favicon.png" />
   </head>
   <body>
-    <!-- Icon sprite: 16px grid, hairline strokes, no fills. Defined once here
-         rather than inlined per button, because every row draws the same three
-         and a list of a dozen profiles would otherwise carry three dozen copies
-         of the same geometry. -->
-    <svg width="0" height="0" aria-hidden="true" style="position: absolute">
-      <symbol id="i-open" viewBox="0 0 16 16">
-        <path d="M6.75 3.25H4A1.25 1.25 0 0 0 2.75 4.5V12a1.25 1.25 0 0 0 1.25 1.25h7.5A1.25 1.25 0 0 0 12.75 12V9.25" />
-        <path d="M9.5 2.75h3.75V6.5" />
-        <path d="M13.25 2.75 8 8" />
-      </symbol>
-      <symbol id="i-rename" viewBox="0 0 16 16">
-        <path d="M11.4 2.85a1.34 1.34 0 0 1 1.9 1.9l-7.2 7.2-2.55.65.65-2.55 7.2-7.2Z" />
-        <path d="m10.35 3.9 1.9 1.9" />
-      </symbol>
-      <symbol id="i-delete" viewBox="0 0 16 16">
-        <path d="M3.25 4.5h9.5" />
-        <path d="M6.5 4.5v-1a1 1 0 0 1 1-1h1a1 1 0 0 1 1 1v1" />
-        <path d="m4.75 4.5.6 8.05a1 1 0 0 0 1 .95h3.3a1 1 0 0 0 1-.95l.6-8.05" />
-      </symbol>
-    </svg>
-
-    <!-- The window itself, not a card floating on a canvas: the macOS title bar
-         above it already carries the name, so this begins at the status strip. -->
-    <main class="win">
-      <div class="strip">
-        <div id="status" aria-live="polite"><b>0</b> profiles<span class="sep">·</span><b>0</b> running</div>
-        <!-- Shortened to `~/…/agent-profiles` for the strip, which is a place for
-             the shape of a fact rather than the fact in full. The whole path
-             stays in the tooltip, and the button reveals the folder itself. -->
-        <button id="data-root" class="strip-root" type="button" hidden>
-          <span class="sr-only">Show the profiles folder in the file manager: </span>
-          <bdi></bdi>
-          <span aria-hidden="true"> ↗</span>
-        </button>
-      </div>
-
-      <div id="error" class="error" role="alert" hidden></div>
-
-      <!-- Deliberately not a live region. The sizes fill in one row at a time
-           over several seconds, and each arrival is a mutation here — a polite
-           region would re-read the list once per profile. The status strip is
-           the live region, and its counts already say when the list changed. -->
-      <div id="apps"></div>
-
-      <section class="compose" id="add-section" aria-labelledby="add-heading">
-        <span class="sec-label" id="add-heading">New profile</span>
-        <form id="add-profile-form" class="compose-row">
-          <label class="sr-only" for="new-label">Profile name</label>
-          <input
-            id="new-label"
-            class="field"
-            name="label"
-            type="text"
-            maxlength="80"
-            autocomplete="off"
-            placeholder="Name this profile"
-            required
-          />
-          <span class="app-picker" hidden>
-            <label class="sr-only" for="new-app">App</label>
-            <select id="new-app" class="field" name="app"></select>
-          </span>
-          <button type="submit" id="add-submit" class="btn solid">Add profile</button>
-        </form>
-
-        <!-- Refusals belong beside the control that caused them. This one used
-             to render in the banner at the top of the page, far enough above
-             the form to be off screen, so a rejected label looked like a
-             button that did nothing. -->
-        <div id="add-error" class="error error-inline" role="alert" hidden></div>
-
-        <div id="budget" class="budget" hidden>
-          <div id="budget-path" class="budget-path"></div>
-          <div class="budget-track">
-            <span id="budget-fill" class="budget-fill"></span>
-            <span class="budget-ticks"></span>
-          </div>
-          <div class="budget-read">
-            <span id="budget-note"></span>
-            <span id="budget-count"></span>
-          </div>
-        </div>
-        <p id="budget-helper" class="helper" hidden></p>
-        <!-- Over budget means no profile can be created on this machine at all,
-             which is too important to leave as a colour change nobody is looking
-             at. The readout says it in place; this says it out loud, and only in
-             the case that warrants interrupting. -->
-        <p id="budget-alert" class="sr-only" role="alert"></p>
-      </section>
-
-      <div class="footer" id="autostart-section" hidden>
-        <div>
-          <div class="footer-text">Start at login</div>
-          <div class="footer-help">opens the tray only — no profile is launched</div>
-        </div>
-        <!-- The name is on the input rather than in a visually hidden span
-             beside it: the track and the knob are drawn by the one `span` this
-             label is allowed to contain, and a second one would be painted as a
-             second track on top of the first. -->
-        <label class="switch">
-          <input id="autostart" type="checkbox" aria-label="Start Agent Profiles at login" />
-          <span></span>
-        </label>
-      </div>
-    </main>
-    <script type="module" src="/src/main.ts"></script>
+    <div id="root"></div>
+    <script type="module" src="/src/main.tsx"></script>
   </body>
 </html>
