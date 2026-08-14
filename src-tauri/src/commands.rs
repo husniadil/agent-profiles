@@ -1,6 +1,7 @@
 use crate::app_spec::AppSpec;
+use crate::instance_manager;
 use crate::paths::Paths;
-use crate::platform::{find_for, wm_class, Platform, RunningProcess};
+use crate::platform::{find_for, wm_class, FocusHint, FocusOutcome, Platform, RunningProcess};
 use crate::profile_store::{Profile, ProfileStore};
 use crate::runtime::{AppRuntime, AppState};
 use serde::Serialize;
@@ -349,6 +350,94 @@ pub fn profile_size_bytes(
     directory_size(&profile.path).map_err(|e| e.to_string())
 }
 
+/// What opening one profile amounts to, given what is running right now.
+#[derive(Debug, PartialEq)]
+pub(crate) enum OpenAction {
+    Launch,
+    Focus(i32),
+    /// Live already, and this app has no window to raise. The tray simply omits
+    /// the row in that case; the window has one control per profile and has to
+    /// say something, so this becomes a refusal rather than a second process on
+    /// a profile directory that already has one.
+    AlreadyRunning,
+}
+
+/// Takes `can_focus` rather than the whole spec: it is the only thing about an
+/// app that moves the answer, and every spec declared today can be focused — so
+/// the third branch has no real spec a test could reach for.
+pub(crate) fn open_action(
+    processes: &[RunningProcess],
+    app_id: &str,
+    can_focus: bool,
+    profile: &Profile,
+) -> OpenAction {
+    match find_for(processes, app_id, &profile.path, profile.is_default) {
+        Some(pid) if can_focus => OpenAction::Focus(pid),
+        Some(_) => OpenAction::AlreadyRunning,
+        None => OpenAction::Launch,
+    }
+}
+
+/// Launch this profile, or raise it if it is already running.
+///
+/// The window's copy of the running flag is a snapshot from the last `list_apps`,
+/// and a person can quit an app between that render and the click, so the choice
+/// is made from a fresh scan here rather than from anything the page sends.
+#[tauri::command]
+pub fn open_profile(
+    app: tauri::AppHandle,
+    state: tauri::State<AppState>,
+    app_id: String,
+    id: String,
+) -> Result<(), String> {
+    let (runtime, profile) = state.profile(&app_id, &id).map_err(|e| e.to_string())?;
+    // Fails closed, like `instance_manager::launch`: a scan that could not be run
+    // is not evidence that nothing is running, and treating it as such is exactly
+    // how a second process lands on a live profile directory.
+    let target =
+        instance_manager::scan_target(&*state.platform, runtime.spec).map_err(|e| e.to_string())?;
+    let processes = state.platform.scan(&[target]).map_err(|error| {
+        format!(
+            "could not check whether {} is running ({error})",
+            profile.label
+        )
+    })?;
+
+    match open_action(
+        &processes,
+        runtime.spec.id,
+        runtime.spec.capabilities.focus,
+        &profile,
+    ) {
+        OpenAction::Focus(pid) => {
+            let hint = FocusHint {
+                wm_class: &wm_class(runtime.spec.id, &profile.id),
+            };
+            match state
+                .platform
+                .focus(pid, &hint)
+                .map_err(|e| e.to_string())?
+            {
+                FocusOutcome::Focused => {}
+                FocusOutcome::Unsupported(message) => {
+                    return Err(format!("Could not focus {}: {message}", profile.label));
+                }
+            }
+        }
+        OpenAction::AlreadyRunning => {
+            return Err(format!("{} is already running", profile.label));
+        }
+        OpenAction::Launch => {
+            instance_manager::launch(&*state.platform, runtime.spec, &profile, &runtime.paths)
+                .map_err(|e| e.to_string())?;
+        }
+    }
+    // The tray shows running state, so it is now out of date. A tray that fails to
+    // redraw must not turn a launch that worked into a reported failure.
+    let _ = crate::tray::rebuild(&app);
+    Ok(())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -540,6 +629,83 @@ mod tests {
         }]);
 
         assert!(refuse_if_running(&platform, &app_spec::CODEX, &profile).is_ok());
+    }
+
+    fn work() -> Profile {
+        Profile {
+            id: "work".into(),
+            label: "Work".into(),
+            path: PathBuf::from("/profiles/work"),
+            is_default: false,
+            account: None,
+        }
+    }
+
+    fn running(app_id: &'static str, profile: &Profile) -> Vec<RunningProcess> {
+        vec![RunningProcess {
+            app_id,
+            pid: 4242,
+            profile_dir: Some(profile.path.clone()),
+        }]
+    }
+
+    #[test]
+    fn a_profile_with_no_process_is_launched() {
+        assert_eq!(open_action(&[], "codex", true, &work()), OpenAction::Launch);
+    }
+
+    #[test]
+    fn a_running_profile_is_focused_rather_than_launched_again() {
+        let profile = work();
+        assert_eq!(
+            open_action(&running("codex", &profile), "codex", true, &profile),
+            OpenAction::Focus(4242)
+        );
+    }
+
+    #[test]
+    fn a_running_profile_of_an_app_that_cannot_be_raised_is_left_alone() {
+        // The case the window's own running flag cannot be trusted for: with no
+        // window to raise, the only alternative to doing nothing is a second
+        // process on a profile directory that already has one.
+        let profile = work();
+        assert_eq!(
+            open_action(&running("codex", &profile), "codex", false, &profile),
+            OpenAction::AlreadyRunning
+        );
+    }
+
+    #[test]
+    fn the_other_app_running_the_same_directory_does_not_count_as_open() {
+        // Keyed per app, or opening ChatGPT would be answered by a live Claude.
+        let profile = work();
+        assert_eq!(
+            open_action(&running("claude", &profile), "codex", true, &profile),
+            OpenAction::Launch
+        );
+    }
+
+    #[test]
+    fn the_stock_profile_is_the_process_carrying_no_directory_at_all() {
+        // `is_default` cannot be inferred from the path, and getting it wrong
+        // here reads a live stock instance as idle and launches a second copy.
+        let stock = Profile {
+            is_default: true,
+            ..work()
+        };
+        let bare = vec![RunningProcess {
+            app_id: "codex",
+            pid: 77,
+            profile_dir: None,
+        }];
+        assert_eq!(
+            open_action(&bare, "codex", true, &stock),
+            OpenAction::Focus(77)
+        );
+        assert_eq!(
+            open_action(&bare, "codex", true, &work()),
+            OpenAction::Launch
+        );
     }
 
     #[test]
