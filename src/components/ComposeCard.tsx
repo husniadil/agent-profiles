@@ -118,7 +118,7 @@ export function ComposeCard({
   return (
     <section
       aria-labelledby="compose-heading"
-      className="rounded-xl border border-hairline bg-surface p-2.5 shadow-card"
+      className="shrink-0 rounded-xl border border-hairline bg-surface p-2.5 shadow-card"
     >
       <h2
         id="compose-heading"

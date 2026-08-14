@@ -70,7 +70,10 @@ export default function App() {
     <PathNamesContext.Provider value={paths}>
       {/* The window itself, not a card floating on a canvas: the title bar above
           it already carries the name, so this begins at the status strip. */}
-      <main className="min-h-screen bg-bg font-sans text-ink">
+      {/* Fixed height, three bands: a strip that does not move, a list that
+          takes whatever is left, and a chrome bar on the floor. The window is
+          resized by the user, not by how many profiles they happen to have. */}
+      <main className="flex h-screen flex-col overflow-hidden bg-bg font-sans text-ink">
         <StatusStrip
           profiles={counts.profiles}
           running={counts.running}
@@ -78,7 +81,10 @@ export default function App() {
           onError={fail}
         />
 
-        <div className="flex flex-col gap-2 p-2">
+        {/* `min-h-0` is what lets this shrink at all: a flex item's default
+            `min-height: auto` refuses to go below its content, which would
+            push the bar below the bottom edge of a window this size. */}
+        <section className="flex min-h-0 flex-1 flex-col gap-2 p-2">
           <ErrorBanner message={data.error} />
 
           {available.length === 0 ? (
@@ -106,9 +112,9 @@ export default function App() {
               visit={visit}
             />
           ) : null}
+        </section>
 
-          <AutostartRow autostart={autostart} />
-        </div>
+        <AutostartRow autostart={autostart} />
       </main>
     </PathNamesContext.Provider>
   );

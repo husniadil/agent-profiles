@@ -55,6 +55,12 @@ function Tag({
 // everything else, and both are spelled out on every one of them below.
 const ICON_ACTION = "size-7 rounded-md";
 
+// The trailing column is exactly as wide as the widest thing it holds: the
+// action row, at 28n + 2(n−1) for n actions — three 28px buttons and two 2px
+// gaps. Anything narrower is not a smaller column, it is an overflowing one,
+// and the size text rides out with it. A fourth action makes this 118.
+const TRAILING = "w-[88px]";
+
 export function ProfileRow({
   profile,
   bytes,
@@ -151,7 +157,10 @@ export function ProfileRow({
         {/* Fixed width, because both things it holds are read down a column: a
             size that shifts left and right by a character makes five rows look
             like five different lists. */}
-        <div className="grid w-[74px] shrink-0 place-items-end">
+        {/* One column, explicitly `minmax(0,1fr)`: an implicit `auto` track is
+            floored at its content's min-content width, so the action row would
+            widen the track past the box and push the size text out of line. */}
+        <div className={cn("grid shrink-0 grid-cols-[minmax(0,1fr)] justify-items-end", TRAILING)}>
           <span
             aria-hidden={bytes === undefined}
             className="col-start-1 row-start-1 self-center font-mono text-[10.5px] text-ink-2 transition-opacity duration-150 ease-out group-hover:opacity-0 group-focus-within:opacity-0"
@@ -187,8 +196,17 @@ export function ProfileRow({
             </Button>
             {/* The Default profile is the app's own existing installation, so
                 its directory is never ours to delete. Its label is still just a
-                label, so rename stays. */}
-            {profile.is_default ? null : (
+                label, so rename stays.
+
+                The slot is kept even where the action is not, because position
+                is how this row is read: if the last 28px means Delete on one
+                row and Open on the next, the hand that learned the first row
+                mis-clicks the second. Inert, unfocusable, unannounced — a
+                disabled trash would instead promise a condition under which
+                the Default profile could be deleted, and there is none. */}
+            {profile.is_default ? (
+              <span className="size-7" aria-hidden="true" />
+            ) : (
               <Button
                 variant="ghost"
                 size="icon"

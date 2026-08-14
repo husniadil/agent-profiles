@@ -26,7 +26,11 @@ export function StatusStrip({
   const { dataRoot, homePath } = usePathNames();
 
   return (
-    <header className="sticky top-0 z-10 flex h-10 items-center justify-between gap-3 border-b border-hairline bg-surface px-3">
+    // Not sticky any more: the list scrolls inside its own frame, so there is
+    // nothing left for this to stick over — only a stacking context and an
+    // overlap waiting to happen. `px-5` lines its content up with the first
+    // row's chip and with the bar on the floor.
+    <header className="flex h-10 shrink-0 items-center justify-between gap-3 border-b border-hairline bg-surface px-5">
       <p aria-hidden="true" className="flex items-baseline gap-1.5 text-[12px] text-ink-2">
         <Count value={profiles} className="font-mono text-ink" />
         <span>{profiles === 1 ? "profile" : "profiles"}</span>

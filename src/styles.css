@@ -167,6 +167,9 @@
     /* Text selection is a document affordance, not an app one. */
     -webkit-user-select: none;
     user-select: none;
+    /* Nor is rubber-banding: the webview is the window, and a window does not
+       bounce when a list inside it reaches its end. */
+    overscroll-behavior: none;
   }
 
   input,

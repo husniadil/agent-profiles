@@ -15,9 +15,11 @@
       {
         "title": "Agent Profiles",
         "width": 800,
-        "height": 600,
+        "height": 480,
         "minWidth": 560,
         "minHeight": 420,
+        "resizable": true,
+        "maximizable": false,
         "visible": false
       }
     ],

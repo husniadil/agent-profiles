@@ -13,7 +13,10 @@ import { systemNames } from "@/lib/system";
 export function EmptyState({ apps }: { apps: AppView[] }) {
   const names = apps.map((app) => app.label).join(", ");
   return (
-    <div className="rounded-xl border border-hairline bg-surface px-6 py-10 text-center shadow-card">
+    // Takes the list card's slot and the height that comes with it. Centring
+    // the block vertically is what supplies the air now, so the fixed padding
+    // no longer has to carry it alone.
+    <div className="grid min-h-0 flex-1 place-content-center overflow-y-auto rounded-xl border border-hairline bg-surface px-6 py-8 text-center shadow-card">
       <PackageOpen
         size={22}
         strokeWidth={1.5}
