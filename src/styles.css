@@ -19,7 +19,11 @@
   /* The only colours in the window, and each one means one thing. */
   --live: #0c8757;
   --warning: #96600a;
-  --danger: #be3328;
+  /* Dark enough to clear 4.5:1 on the canvas, not only on the sunken surfaces
+     the delete button and the error banner sit on. The over-budget legend is
+     the one place red text lands on the bare page, and it is the sentence that
+     says no profile can be created on this machine at all. */
+  --danger: #b52d22;
 
   --radius: 10px;
   --shadow: 0 1px 1px rgba(14, 17, 20, 0.05), 0 24px 50px -26px rgba(14, 17, 20, 0.4);
