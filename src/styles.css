@@ -6,7 +6,7 @@
   --mono: "IBM Plex Mono", ui-monospace, "SF Mono", Menlo, monospace;
 
   --canvas: #dddfe2;
-  --paper: #eff0f2;
+  --on-ink: #eff0f2;
   --surface: #ffffff;
   --sunken: #f4f5f7;
   --ink: #0e1114;
@@ -25,7 +25,7 @@
      says no profile can be created on this machine at all. */
   --danger: #b52d22;
 
-  --radius: 10px;
+  --radius: 0.71rem;
   --shadow: 0 1px 1px rgba(14, 17, 20, 0.05), 0 24px 50px -26px rgba(14, 17, 20, 0.4);
 
   color-scheme: light dark;
@@ -45,7 +45,7 @@
 @media (prefers-color-scheme: dark) {
   :root {
     --canvas: #08090b;
-    --paper: #131619;
+    --on-ink: #131619;
     --surface: #171a1e;
     --sunken: #1e2227;
     --ink: #e9ebed;
@@ -98,34 +98,6 @@ select:focus-visible {
   padding: 3.25rem clamp(1.25rem, 5vw, 4.5rem) 4rem;
 }
 
-.page-header {
-  display: grid;
-  grid-template-columns: auto 1fr;
-  gap: 1.25rem;
-  align-items: start;
-  padding-bottom: 2.5rem;
-  border-bottom: 1px solid var(--line);
-}
-
-.brand-mark {
-  display: grid;
-  width: 3.65rem;
-  height: 3.65rem;
-  place-items: center;
-  margin-top: 0.15rem;
-  color: var(--paper);
-  background: var(--ink);
-  transform: rotate(-3deg);
-}
-
-.brand-mark span {
-  font-family: var(--wide);
-  font-size: 1.08rem;
-  font-weight: 800;
-  letter-spacing: -0.08em;
-  transform: rotate(3deg);
-}
-
 .eyebrow {
   margin: 0 0 0.4rem;
   color: var(--ink-2);
@@ -152,60 +124,18 @@ h3 {
   font-weight: 700;
 }
 
-h1 {
-  max-width: 18ch;
-  margin-bottom: 0.65rem;
-  font-size: clamp(2.35rem, 7vw, 4.4rem);
-  letter-spacing: -0.055em;
-  line-height: 0.98;
-}
-
-.lede {
-  max-width: 43rem;
-  margin-bottom: 0;
-  color: var(--ink-2);
-  font-size: 1rem;
-  line-height: 1.55;
-}
-
 .profiles-section {
   padding: 2.4rem 0 2.75rem;
-}
-
-.section-heading {
-  display: flex;
-  align-items: end;
-  justify-content: space-between;
-  gap: 1rem;
-  margin-bottom: 1.15rem;
 }
 
 /* `.add-section h2` was here too. Its heading is now an `.app-heading` — a
    section label of the same rank as an app group's — and this rule outranks the
    class on specificity, so leaving it would have drawn that label at 2.35rem. */
-.section-heading h2,
 .settings-section h2 {
   margin-bottom: 0;
   font-size: clamp(1.7rem, 4vw, 2.35rem);
   letter-spacing: -0.045em;
   line-height: 1;
-}
-
-.count-badge {
-  display: inline-grid;
-  min-width: 2.25rem;
-  height: 2.25rem;
-  padding: 0 0.55rem;
-  place-items: center;
-  border: 1px solid var(--ink);
-  border-radius: 999px;
-  color: var(--paper);
-  background: var(--ink);
-  font-family: var(--mono);
-  font-size: 0.8rem;
-  /* Only 400 and 500 of the mono are vendored, and `font-synthesis: none` means
-     a heavier number here would quietly render at 500 rather than being faked. */
-  font-weight: 500;
 }
 
 .error {
@@ -344,11 +274,6 @@ h1 {
   text-transform: uppercase;
 }
 
-.status-default {
-  color: var(--ink-2);
-  background: var(--sunken);
-}
-
 /* The only badge with an edge. Two profiles sharing one sign-in is a surprise,
    and on an achromatic surface the fill alone is 1.09:1 against the card — the
    pill effectively disappears and the warning rests on 0.63rem of text. The
@@ -445,7 +370,7 @@ h1 {
 }
 
 .button-primary {
-  color: var(--paper);
+  color: var(--on-ink);
   background: var(--ink);
 }
 
@@ -552,35 +477,13 @@ h1 {
     padding-top: 2rem;
   }
 
-  .page-header {
-    grid-template-columns: 1fr;
-    gap: 1rem;
-  }
-
-  .brand-mark {
-    width: 3rem;
-    height: 3rem;
-  }
-
   /* The row already fits: the dot is a few pixels and the trailing cell is one
      short string. Only the gap between them has to give. */
   .profile-card {
     gap: 0.6rem;
   }
 
-  .add-column {
-  display: grid;
-  gap: 0.75rem;
-  align-content: start;
-}
-
-/* The banner version reserves space below itself; this one sits at the end of
-   its column and does not. */
-.error-inline {
-  margin-bottom: 0;
-}
-
-.add-section {
+  .add-section {
     grid-template-columns: 1fr;
     gap: 1.25rem;
   }
@@ -680,8 +583,8 @@ textarea {
   display: flex;
   align-items: baseline;
   justify-content: space-between;
-  gap: 16px;
-  padding: 14px 0 12px;
+  gap: 1.14rem;
+  padding: 1rem 0 0.86rem;
   border-bottom: 1px solid var(--line);
   font-family: var(--mono);
   font-size: 0.82rem;
