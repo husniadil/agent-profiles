@@ -21,6 +21,8 @@ The management window redesigned around what this app actually holds: paths, pro
 - **Open, rename and delete are icons**, shown on hover or keyboard focus in the slot the size occupies at rest, so the row's width never changes. The rename and delete confirmations keep their words — an action that destroys 1.4 GB should be read, not recognised from a picture.
 - The `Default` badge is gone: that profile is recognisable from being the one with no delete action. The shared-sign-in badge stays, and gains a border so it is findable on an achromatic surface.
 - The total size on disk is published only once every profile has been measured. A total that counts half the profiles is a wrong number stated confidently.
+- The helper line under the add form is gone with the rest of the prose. Its assurance — that account details stay inside the app itself — is not dropped: it is stated at more length under **Important safety behavior** in the README, which says that labels are manual and that account email addresses are never read from disk or displayed.
+- Each profile is measured once per visit to the window rather than on every list reload. Renaming or opening a profile cannot change a byte of it, and both reload the list; re-walking every directory each time made a rename cost seconds of I/O to arrive back at the same numbers.
 
 ### Fixed
 

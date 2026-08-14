@@ -21,7 +21,11 @@
 
       <section class="profiles-section" aria-label="Profiles">
         <div id="error" class="error" role="alert" hidden></div>
-        <div id="apps" aria-live="polite"></div>
+        <!-- Deliberately not a live region. The sizes fill in one row at a time
+             over several seconds, and each arrival is a mutation here — a polite
+             region would re-read the list once per profile. The status line is
+             the live region, and its counts already say when the list changed. -->
+        <div id="apps"></div>
       </section>
 
       <section class="add-section" aria-labelledby="add-heading">

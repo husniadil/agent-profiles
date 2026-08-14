@@ -111,6 +111,13 @@ function clearAddError(): void {
 let statusApps: AppView[] = [];
 let sizeTotal: number | null = null;
 
+// Sizes already measured this visit, keyed `app:profile`. A directory only grows
+// while its app is running, and the window is a place you visit for a moment to
+// rename or delete something — so measuring once per visit is fresh enough, and
+// re-measuring on every list reload is not. Cleared on `window-shown`, which is
+// the moment the numbers could have moved without us.
+const measured = new Map<string, number>();
+
 function paintStatus(): void {
   const profiles = statusApps.reduce((total, app) => total + app.profiles.length, 0);
   const running = statusApps.reduce(
@@ -304,11 +311,23 @@ async function measureSizes(pass: number): Promise<void> {
   for (const cell of cells) {
     const appId = cell.dataset.appId ?? "";
     const id = cell.dataset.profileId ?? "";
+    const key = `${appId}:${id}`;
+    // Renaming a profile cannot change a byte of it, and neither can opening it,
+    // but both reload the list — so without this every rename would blank every
+    // row and walk every profile directory again, seconds of I/O to arrive back
+    // at the same numbers. A profile is measured once per window session.
+    const known = measured.get(key);
+    if (known !== undefined) {
+      cell.textContent = formatBytes(known);
+      total += known;
+      continue;
+    }
     try {
       const bytes = await invoke<number>("profile_size_bytes", { appId, id });
       // The list this cell belongs to has been replaced; the cell is detached and
       // the bytes are about a row nobody is looking at.
       if (pass !== renderPass) return;
+      measured.set(key, bytes);
       cell.textContent = formatBytes(bytes);
       total += bytes;
     } catch {
@@ -407,9 +426,12 @@ async function loadBudget(): Promise<void> {
     ? `no room for the socket apps create inside a profile — ${budget.used_bytes - limit} bytes over`
     : `socket path budget · this system stops at ${limit}`;
   budgetCount.textContent = `${budget.used_bytes} / ${limit} bytes`;
-  budgetAlert.textContent = over
+  const alert = over
     ? `This folder is too deep for ${budget.used_bytes - limit} bytes of the socket path a profile needs. No profile can be added here.`
     : "";
+  // `loadBudget` runs on every render, and this is an assertive live region:
+  // reassigning the same sentence would interrupt to say a thing already said.
+  if (budgetAlert.textContent !== alert) budgetAlert.textContent = alert;
 }
 
 /// Rename and delete both used to call `window.prompt` / `window.confirm`.
@@ -473,13 +495,19 @@ async function startDelete(profile: ProfileView, content: HTMLElement): Promise<
 
   const panel = document.createElement("div");
   panel.className = "inline-panel inline-panel-danger";
-  panel.append(
-    makeTextElement(
-      "p",
-      "helper",
-      `Delete “${profile.label}” and all ${formatBytes(size)} in ${profile.path}? This cannot be undone.`,
-    ),
+  // The size and the path are set in the mono face here, as they are on the row
+  // two lines above. They are the two facts this sentence turns on, and reading
+  // them in the prose face is the one place the window would have set a path
+  // like a word rather than like a path.
+  const question = makeTextElement("p", "helper", "");
+  question.append(
+    `Delete “${profile.label}” and all `,
+    makeTextElement("span", "figure", formatBytes(size)),
+    " in ",
+    makeTextElement("span", "figure", profile.path),
+    "? This cannot be undone.",
   );
+  panel.append(question);
 
   const confirm = document.createElement("button");
   confirm.type = "button";
@@ -600,6 +628,9 @@ profileForm.addEventListener("submit", addProfile);
 void listen("window-shown", () => {
   clearError();
   clearAddError();
+  // A profile grows while its app runs, and the window is closed for most of
+  // that. Reopening it is the one moment the sizes are worth walking again.
+  measured.clear();
   void loadProfiles();
   void loadDataRoot();
   void loadAutostart();

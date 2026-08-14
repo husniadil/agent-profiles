@@ -107,14 +107,12 @@ select:focus-visible {
   text-transform: uppercase;
 }
 
-h1,
 h2,
 h3,
 p {
   margin-top: 0;
 }
 
-h1,
 h2,
 h3 {
   color: var(--ink);
@@ -426,6 +424,13 @@ h3 {
   margin-top: 0;
 }
 
+/* A filesystem value quoted inside a sentence. The window sets paths and byte
+   counts in the mono face everywhere else; a sentence is no reason to stop. */
+.figure {
+  font-family: var(--mono);
+  font-size: 0.95em;
+}
+
 .helper {
   max-width: 32rem;
   margin: 0.75rem 0 0;
@@ -479,11 +484,6 @@ h3 {
      short string. Only the gap between them has to give. */
   .profile-card {
     gap: 0.6rem;
-  }
-
-  .add-section {
-    grid-template-columns: 1fr;
-    gap: 1.25rem;
   }
 }
 
@@ -657,6 +657,12 @@ textarea {
   display: block;
   height: 100%;
   background: var(--ink-2);
+}
+
+/* The count beside it is a measurement and stays mono; this half is a sentence,
+   and the window sets sentences in the prose face. */
+#budget-note {
+  font-family: var(--sans);
 }
 
 .budget-legend {
