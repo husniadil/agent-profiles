@@ -607,27 +607,39 @@ h1 {
   }
 }
 
+/* Both confirmations keep their words. An action that destroys 1.4 GB should be
+   read, not recognised from a picture — the icons on the row are for reaching,
+   this is for deciding. */
 .inline-panel {
   display: flex;
   flex-wrap: wrap;
   align-items: center;
-  gap: 0.5rem;
-  margin-top: 0.75rem;
-  padding: 0.75rem;
+  gap: 0.57rem;
+  margin-top: 0.57rem;
+  padding: 0.71rem;
   border: 1px solid var(--line);
-  border-radius: 0.5rem;
+  border-radius: 0.57rem;
+  background: var(--surface);
 }
 
 .inline-panel input {
-  flex: 1 1 12rem;
+  flex: 1 1 10rem;
   min-width: 0;
+  height: 2rem;
+  padding: 0 0.57rem;
+  border: 1px solid var(--line);
+  border-radius: 0.43rem;
+  background: var(--sunken);
 }
 
 .inline-panel .helper {
   flex: 1 1 100%;
   margin: 0;
+  color: var(--ink);
 }
 
+/* The border carries the warning; the fill does not. A red block behind the
+   sentence makes it harder to read at exactly the moment it matters most. */
 .inline-panel-danger {
   border-color: var(--danger);
 }
