@@ -2,6 +2,8 @@ import "./styles.css";
 
 import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
+import { homeDir } from "@tauri-apps/api/path";
+import { revealItemInDir } from "@tauri-apps/plugin-opener";
 
 import { formatBytes, statusLine } from "./format";
 
@@ -25,19 +27,21 @@ type AppView = {
 type SocketBudget = { profile_dir: string; used_bytes: number; limit_bytes: number | null };
 
 const appsElement = document.querySelector<HTMLDivElement>("#apps");
-const statusElement = document.querySelector<HTMLParagraphElement>("#status");
-const dataRootElement = document.querySelector<HTMLParagraphElement>("#data-root");
+const statusElement = document.querySelector<HTMLDivElement>("#status");
+const dataRootElement = document.querySelector<HTMLButtonElement>("#data-root");
 const dataRootTextElement = document.querySelector<HTMLElement>("#data-root bdi");
 const errorElement = document.querySelector<HTMLDivElement>("#error");
 const addForm = document.querySelector<HTMLFormElement>("#add-profile-form");
 const labelInput = document.querySelector<HTMLInputElement>("#new-label");
 const appSelect = document.querySelector<HTMLSelectElement>("#new-app");
+const addSubmit = document.querySelector<HTMLButtonElement>("#add-submit");
 const addErrorElement = document.querySelector<HTMLDivElement>("#add-error");
 const budgetElement = document.querySelector<HTMLDivElement>("#budget");
-const budgetPathElement = document.querySelector<HTMLParagraphElement>("#budget-path");
+const budgetPathElement = document.querySelector<HTMLDivElement>("#budget-path");
 const budgetFillElement = document.querySelector<HTMLSpanElement>("#budget-fill");
 const budgetNoteElement = document.querySelector<HTMLSpanElement>("#budget-note");
 const budgetCountElement = document.querySelector<HTMLSpanElement>("#budget-count");
+const budgetHelperElement = document.querySelector<HTMLParagraphElement>("#budget-helper");
 const budgetAlertElement = document.querySelector<HTMLParagraphElement>("#budget-alert");
 
 if (
@@ -49,12 +53,14 @@ if (
   !addForm ||
   !labelInput ||
   !appSelect ||
+  !addSubmit ||
   !addErrorElement ||
   !budgetElement ||
   !budgetPathElement ||
   !budgetFillElement ||
   !budgetNoteElement ||
   !budgetCountElement ||
+  !budgetHelperElement ||
   !budgetAlertElement
 ) {
   throw new Error("Agent Profiles management window is missing required elements");
@@ -62,18 +68,20 @@ if (
 
 const appsContainer = appsElement;
 const statusText = statusElement;
-const dataRootBox = dataRootElement;
+const dataRootButton = dataRootElement;
 const dataRootText = dataRootTextElement;
 const errorBox = errorElement;
 const profileForm = addForm;
 const profileLabelInput = labelInput;
 const profileAppSelect = appSelect;
+const profileAddButton = addSubmit;
 const addErrorBox = addErrorElement;
 const budgetBox = budgetElement;
 const budgetPath = budgetPathElement;
 const budgetFill = budgetFillElement;
 const budgetNote = budgetNoteElement;
 const budgetCount = budgetCountElement;
+const budgetHelper = budgetHelperElement;
 const budgetAlert = budgetAlertElement;
 
 function errorMessage(error: unknown): string {
@@ -104,12 +112,87 @@ function clearAddError(): void {
   addErrorBox.hidden = true;
 }
 
+function makeTextElement(
+  tag: "div" | "p" | "span" | "em" | "b" | "strong",
+  className: string,
+  text: string,
+): HTMLElement {
+  const element = document.createElement(tag);
+  if (className) element.className = className;
+  element.textContent = text;
+  return element;
+}
+
+// ---------------------------------------------------------------------------
+// Paths, written the way a person says them
+// ---------------------------------------------------------------------------
+
+// Both are learned once and never change while the app runs. They are only ever
+// used to shorten what is drawn — every element also keeps the full path — so
+// arriving late, or not at all, costs an abbreviation and nothing else.
+let dataRoot = "";
+let homePath = "";
+
+/// A path split at its last separator, either kind, so the same code reads a
+/// Windows path and a POSIX one.
+function splitTail(path: string): [string, string] {
+  const cut = Math.max(path.lastIndexOf("/"), path.lastIndexOf("\\"));
+  return cut < 0 ? ["", path] : [path.slice(0, cut + 1), path.slice(cut + 1)];
+}
+
+/// A profile path as the window shows it: everything above our own data root is
+/// scenery, and the home directory is a name the reader already knows.
+function shortenPath(path: string): string {
+  if (dataRoot && path.startsWith(`${dataRoot}/`)) {
+    return `…/${splitTail(dataRoot)[1]}${path.slice(dataRoot.length)}`;
+  }
+  if (homePath && path.startsWith(`${homePath}/`)) {
+    return `~${path.slice(homePath.length)}`;
+  }
+  return path;
+}
+
+/// The data root, shortened to the one segment that names it.
+function shortenRoot(root: string): string {
+  const tail = splitTail(root)[1];
+  if (!homePath || !root.startsWith(`${homePath}/`)) return `…/${tail}`;
+  const inside = root.slice(homePath.length + 1);
+  return inside === tail ? `~/${tail}` : `~/…/${tail}`;
+}
+
+/// Draw a path into a row, with its last segment set apart.
+///
+/// The full value is kept on the element, both as the tooltip — the line is
+/// ellipsised, and this is the only thing telling two similar profiles apart —
+/// and as the source to redraw from when the home directory arrives.
+function paintPath(element: HTMLElement, path: string): void {
+  element.dataset.path = path;
+  element.title = path;
+  const shown = shortenPath(path);
+  const [head, tail] = splitTail(shown);
+  element.replaceChildren(head, makeTextElement("em", "", tail));
+}
+
+/// Redraw every path on screen. The data root and the home directory both
+/// arrive after the first list is already drawn, and each one shortens paths
+/// that were written out in full a moment earlier.
+function paintPaths(): void {
+  if (dataRoot) dataRootText.textContent = shortenRoot(dataRoot);
+  for (const element of appsContainer.querySelectorAll<HTMLElement>(".path")) {
+    paintPath(element, element.dataset.path ?? "");
+  }
+}
+
 // The line is drawn from the list that is on screen, so the list lives here
 // beside the total rather than being passed in: the sizes arrive long after
 // `render` has returned, and a repaint that needed the list handed to it would
 // mean keeping a second copy of it somewhere just to say the same thing again.
 let statusApps: AppView[] = [];
 let sizeTotal: number | null = null;
+// What the strip currently says, in the plain-text form the whole line reduces
+// to. The strip is markup now — counts in bold, separators of their own — so
+// there is no single `textContent` to compare against without rebuilding it.
+let statusKey = "";
 
 // Sizes already measured this visit, keyed `app:profile`. A directory only grows
 // while its app is running, and the window is a place you visit for a moment to
@@ -124,12 +207,27 @@ function paintStatus(): void {
     (total, app) => total + app.profiles.filter((p) => p.running).length,
     0,
   );
-  const line = statusLine(profiles, running, sizeTotal);
-  // The line is a polite live region: it is repainted once per render, and once
+  // The strip is a polite live region: it is repainted once per render, and once
   // more when the sizes have all arrived. Rewriting identical text still counts
   // as a change to a screen reader, so an unchanged line is left alone rather
   // than read out again.
-  if (statusText.textContent !== line) statusText.textContent = line;
+  const line = statusLine(profiles, running, sizeTotal);
+  if (statusKey === line) return;
+  statusKey = line;
+
+  const parts: Array<[string, string]> = [
+    [String(profiles), profiles === 1 ? "profile" : "profiles"],
+    [String(running), "running"],
+  ];
+  // Absent until every row has reported: a total that counts half the profiles
+  // is a wrong number stated confidently.
+  if (sizeTotal !== null) parts.push([formatBytes(sizeTotal), "on disk"]);
+
+  statusText.replaceChildren();
+  for (const [index, [value, word]] of parts.entries()) {
+    if (index > 0) statusText.append(makeTextElement("span", "sep", "·"));
+    statusText.append(makeTextElement("b", "", value), ` ${word}`);
+  }
 }
 
 // Asked for again on every window-shown rather than cached. The root cannot
@@ -138,10 +236,12 @@ function paintStatus(): void {
 async function loadDataRoot(): Promise<void> {
   try {
     const root = await invoke<string>("data_root");
-    dataRootText.textContent = root;
-    // The line is ellipsised to one line, so the full value has to stay
-    // reachable somewhere. The tooltip belongs on the box, not the `bdi`.
-    dataRootBox.title = root;
+    dataRoot = root;
+    dataRootButton.hidden = false;
+    // The strip shows the shape of the path, not the path, so the full value has
+    // to stay reachable. The tooltip belongs on the button, not the `bdi`.
+    dataRootButton.title = root;
+    paintPaths();
   } catch {
     // Not worth the error banner: the window works perfectly without knowing
     // where the files are, and the banner is reserved for actions that failed.
@@ -154,83 +254,89 @@ async function loadDataRoot(): Promise<void> {
   }
 }
 
-function makeTextElement(tag: "h2" | "h3" | "p" | "span", className: string, text: string): HTMLElement {
-  const element = document.createElement(tag);
-  element.className = className;
-  element.textContent = text;
-  return element;
+// The home directory is a fact about the machine, not about this window, so it
+// is read once at startup and never again.
+async function loadHome(): Promise<void> {
+  try {
+    homePath = (await homeDir()).replace(/[\\/]+$/, "");
+    paintPaths();
+  } catch {
+    // Every path stays correct without it — only longer.
+  }
 }
 
-function iconButton(name: string, label: string, path: string, onClick: () => void): HTMLButtonElement {
+const ROW_ICONS = { open: "i-open", rename: "i-rename", delete: "i-delete" } as const;
+
+function iconButton(
+  icon: keyof typeof ROW_ICONS,
+  label: string,
+  onClick: () => void,
+): HTMLButtonElement {
   const button = document.createElement("button");
   button.type = "button";
-  button.className = `row-icon row-icon-${name}`;
+  button.className = icon === "delete" ? "icon-btn is-danger" : "icon-btn";
   button.title = label;
   // The picture is the whole control, so the name has to reach a screen reader
   // some other way. `title` covers the pointer; this covers everything else.
   button.setAttribute("aria-label", label);
-  button.innerHTML = `<svg viewBox="0 0 16 16" width="14" height="14" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="1.25" stroke-linecap="round" stroke-linejoin="round">${path}</svg>`;
+  // The geometry lives in the sprite in `index.html`; only its id is written
+  // here, so nothing user-supplied is ever parsed as markup.
+  button.innerHTML = `<svg aria-hidden="true"><use href="#${ROW_ICONS[icon]}"/></svg>`;
   button.addEventListener("click", onClick);
   return button;
 }
 
-const ICON_OPEN = `<path d="M9 3h4v4"/><path d="M13 3 7.5 8.5"/><path d="M11 9.5V13H3V5h3.5"/>`;
-const ICON_RENAME = `<path d="M10.5 2.5 13.5 5.5 6 13H3v-3z"/><path d="M9 4 12 7"/>`;
-const ICON_DELETE = `<path d="M3 4.5h10"/><path d="M6.5 4.5V3h3v1.5"/><path d="M4.5 4.5 5 13.5h6l.5-9"/>`;
-
-function profileCard(profile: ProfileView): HTMLLIElement {
+function profileRow(profile: ProfileView): HTMLLIElement {
   const item = document.createElement("li");
-  item.className = "profile-card";
+  item.className = "row";
 
   const dot = document.createElement("span");
-  dot.className = profile.running ? "run-dot run-dot-live" : "run-dot";
-  // Colour alone is never the message: the same fact is in the title, and the
-  // status line counts it in words.
+  dot.className = profile.running ? "dot live" : "dot";
+  // Colour alone is never the message: the same fact is in the tag beside the
+  // name, in this tooltip, and counted in words in the status strip.
   dot.title = profile.running ? "running" : "not running";
 
   const content = document.createElement("div");
-  content.className = "profile-content";
-  const title = document.createElement("div");
-  title.className = "profile-title";
-  title.append(makeTextElement("h3", "profile-label", profile.label));
-  // The `Default` badge is gone: this profile is recognisable from being the
-  // one with no delete action, and a badge that repeats that is decoration.
+  const nameRow = document.createElement("div");
+  nameRow.className = "row-name";
+  nameRow.append(makeTextElement("span", "name", profile.label));
+  if (profile.running) nameRow.append(makeTextElement("span", "tag live", "Running"));
   if (profile.shares_account) {
-    title.append(makeTextElement("span", "status-badge status-warning", "same account"));
+    nameRow.append(makeTextElement("span", "tag warn", "Shared sign-in"));
   }
-  content.append(title);
-  // The path is ellipsised to keep rows one line tall, so the full value has to
-  // stay reachable — it is the only thing distinguishing two similar profiles.
-  const path = makeTextElement("p", "profile-path", profile.path);
-  path.title = profile.path;
+  content.append(nameRow);
+
+  const path = document.createElement("p");
+  path.className = "path";
+  paintPath(path, profile.path);
   content.append(path);
 
   // Size and actions share one slot: the size is what the row says at rest, the
   // icons are what it offers when reached for.
-  const trailing = document.createElement("div");
-  trailing.className = "profile-trailing";
+  const end = document.createElement("div");
+  end.className = "row-end";
 
-  const size = makeTextElement("span", "profile-size", "—");
+  const size = makeTextElement("span", "size", "—");
   size.dataset.appId = profile.app_id;
   size.dataset.profileId = profile.id;
-  trailing.append(size);
+  end.append(size);
 
   const actions = document.createElement("div");
-  actions.className = "profile-actions";
+  actions.className = "row-actions";
   actions.append(
-    iconButton("open", `Open ${profile.label}`, ICON_OPEN, () => void openProfile(profile)),
-    iconButton("rename", `Rename ${profile.label}`, ICON_RENAME, () => startRename(profile, content)),
+    iconButton("open", `Open ${profile.label}`, () => void openProfile(profile)),
+    iconButton("rename", `Rename ${profile.label}`, () => startRename(profile, content)),
   );
   // The Default profile is the app's own existing installation, so its directory
   // is never ours to delete. Its label is still just a label.
   if (!profile.is_default) {
     actions.append(
-      iconButton("delete", `Delete ${profile.label}`, ICON_DELETE, () => void startDelete(profile, content)),
+      iconButton("delete", `Delete ${profile.label}`, () => void startDelete(profile, content)),
     );
   }
-  trailing.append(actions);
+  end.append(actions);
 
-  item.append(dot, content, trailing);
+  item.append(dot, content, end);
   return item;
 }
 
@@ -266,9 +372,7 @@ function render(apps: AppView[]): void {
   // Nothing installed is the only case worth explaining. With one app working,
   // the other's absence is not an error — it is simply not installed.
   if (available.length === 0) {
-    for (const app of apps) {
-      appsContainer.append(makeTextElement("p", "helper", app.unavailable ?? ""));
-    }
+    appsContainer.append(emptyState(available.length, apps));
     // Clear the picker on the way out. Returning early used to leave whichever
     // options the last render built, so submitting the form after the only
     // installed app disappeared would create a profile directory for an app
@@ -279,14 +383,20 @@ function render(apps: AppView[]): void {
 
   for (const app of available) {
     const group = document.createElement("section");
-    group.className = "app-group";
+    group.className = "group";
     // A heading only earns its space once there is a second app to tell apart.
     if (available.length > 1) {
-      group.append(makeTextElement("h2", "app-heading", app.label));
+      const head = document.createElement("div");
+      head.className = "group-head";
+      head.append(
+        makeTextElement("span", "group-name", app.label),
+        makeTextElement("span", "group-rule", ""),
+      );
+      group.append(head);
     }
     const list = document.createElement("ul");
-    list.className = "profile-list";
-    for (const profile of app.profiles) list.append(profileCard(profile));
+    list.className = "rows";
+    for (const profile of app.profiles) list.append(profileRow(profile));
     group.append(list);
     appsContainer.append(group);
   }
@@ -295,13 +405,34 @@ function render(apps: AppView[]): void {
   void measureSizes(pass);
 }
 
+/// The window with nothing to manage.
+///
+/// The apps are named from what the backend actually looked for rather than
+/// from a fixed list, so this sentence cannot come to describe a different set
+/// of apps than the one the app supports.
+function emptyState(found: number, apps: AppView[]): HTMLElement {
+  const empty = document.createElement("div");
+  empty.className = "empty";
+  const names = apps.map((app) => app.label).join(", ");
+  empty.append(
+    makeTextElement("div", "empty-mark", `${found} apps found`),
+    makeTextElement("div", "empty-title", "Nothing to open yet"),
+    makeTextElement(
+      "p",
+      "empty-body",
+      `Agent Profiles runs the coding agents already installed on this computer — ${names}. Install one, then reopen this window.`,
+    ),
+  );
+  return empty;
+}
+
 /// Filling in the size of every row, one row at a time, after the list is drawn.
 ///
 /// Sequentially rather than all at once: each of these is a walk of a whole
 /// profile directory, and a dozen of them in flight together turns opening the
 /// window into a disk storm. Top to bottom also reads as progress.
 async function measureSizes(pass: number): Promise<void> {
-  const cells = appsContainer.querySelectorAll<HTMLElement>(".profile-size");
+  const cells = appsContainer.querySelectorAll<HTMLElement>(".size");
   // The running sum belongs to this pass alone. Held in module state it would be
   // shared with whatever render replaced us, and the bytes of a profile that has
   // since been deleted would be added to the new list's total.
@@ -361,8 +492,8 @@ function renderAppChoices(available: AppView[]): void {
   }
   const picker = profileAppSelect.closest(".app-picker") as HTMLElement | null;
   if (picker) picker.hidden = available.length < 2;
-  // With nothing to add a profile to, the whole section goes: a heading over an
-  // empty space reads as something failing to load, and the form beneath it is a
+  // With nothing to add a profile to, the whole band goes: a label over an empty
+  // space reads as something failing to load, and the form beneath it is a
   // control that could only fail.
   const section = profileForm.closest("section") as HTMLElement | null;
   if (section) section.hidden = available.length === 0;
@@ -372,6 +503,8 @@ function renderAppChoices(available: AppView[]): void {
 /// Hiding the meter, for every reason there is not one to draw.
 function hideBudget(): void {
   budgetBox.hidden = true;
+  budgetHelper.hidden = true;
+  profileAddButton.disabled = false;
   // A verdict left in the live region would be read out the next time anything
   // touched it, long after it stopped being true of the selected app.
   budgetAlert.textContent = "";
@@ -390,6 +523,7 @@ async function loadBudget(): Promise<void> {
     hideBudget();
     return;
   }
+  const appLabel = profileAppSelect.selectedOptions[0]?.textContent ?? "This app";
   let budget: SocketBudget;
   try {
     budget = await invoke<SocketBudget>("socket_budget", { appId });
@@ -413,19 +547,44 @@ async function loadBudget(): Promise<void> {
 
   const over = budget.used_bytes > limit;
   budgetBox.hidden = false;
-  budgetBox.classList.toggle("budget-over", over);
+  // The button would submit into a refusal the backend has already decided on.
+  profileAddButton.disabled = over;
   // `profile_dir` carries a placeholder id of the right width, not a directory
   // that exists — see the doc comment on the Rust struct. It is drawn because
-  // its *length* is the whole subject, and the shape is what makes that legible.
-  budgetPath.textContent = budget.profile_dir;
+  // its *length* is the whole subject, and the shape is what makes that legible:
+  // the part of the path we chose is set bright, and the part the machine
+  // handed us is dimmed to scenery.
+  budgetPath.replaceChildren();
+  const inside =
+    dataRoot && budget.profile_dir.startsWith(`${dataRoot}/`)
+      ? budget.profile_dir.slice(dataRoot.length + 1)
+      : "";
+  if (inside) {
+    budgetPath.append(makeTextElement("span", "dim", `${shortenPath(dataRoot)}/`), inside);
+  } else {
+    budgetPath.append(budget.profile_dir);
+  }
   // Ellipsised to one line like every other path in the window, so the value has
   // to stay reachable somewhere.
   budgetPath.title = budget.profile_dir;
+
   budgetFill.style.width = `${Math.min(100, (budget.used_bytes / limit) * 100)}%`;
+  budgetFill.classList.toggle("over", over);
   budgetNote.textContent = over
-    ? `no room for the socket apps create inside a profile — ${budget.used_bytes - limit} bytes over`
+    ? `${budget.used_bytes - limit} bytes over the limit`
     : `socket path budget · this system stops at ${limit}`;
-  budgetCount.textContent = `${budget.used_bytes} / ${limit} bytes`;
+  budgetNote.classList.toggle("over", over);
+  budgetCount.replaceChildren(
+    makeTextElement("b", "", String(budget.used_bytes)),
+    ` / ${limit} bytes`,
+  );
+  budgetCount.classList.toggle("over", over);
+
+  budgetHelper.hidden = !over;
+  budgetHelper.textContent = over
+    ? `${appLabel} would not be able to create its socket here. Move the data root somewhere shorter to make room.`
+    : "";
+
   const alert = over
     ? `This folder is too deep for ${budget.used_bytes - limit} bytes of the socket path a profile needs. No profile can be added here.`
     : "";
@@ -436,31 +595,36 @@ async function loadBudget(): Promise<void> {
 
 /// Rename and delete both used to call `window.prompt` / `window.confirm`.
 /// Tauri's webview does not implement either one, so both actions silently did
-/// nothing. Everything below is drawn in the page instead.
+/// nothing. Everything below is drawn in the row instead.
 function startRename(profile: ProfileView, content: HTMLElement): void {
-  if (content.querySelector(".inline-panel")) return;
+  if (content.querySelector(".panel")) return;
 
   const panel = document.createElement("form");
-  panel.className = "inline-panel";
+  panel.className = "panel";
 
   const input = document.createElement("input");
   input.type = "text";
+  input.className = "field";
   input.maxLength = 80;
   input.value = profile.label;
-  input.setAttribute("aria-label", `New label for ${profile.label}`);
+  input.setAttribute("aria-label", `New name for ${profile.label}`);
+
+  const row = document.createElement("div");
+  row.className = "panel-row";
 
   const save = document.createElement("button");
   save.type = "submit";
-  save.className = "button button-primary";
-  save.textContent = "Save";
+  save.className = "btn solid";
+  save.textContent = "Save name";
 
   const cancel = document.createElement("button");
   cancel.type = "button";
-  cancel.className = "button button-quiet";
+  cancel.className = "btn outline";
   cancel.textContent = "Cancel";
   cancel.addEventListener("click", () => panel.remove());
 
-  panel.append(input, save, cancel);
+  row.append(save, cancel);
+  panel.append(input, row);
   panel.addEventListener("submit", async (event) => {
     event.preventDefault();
     const label = input.value.trim();
@@ -483,7 +647,7 @@ function startRename(profile: ProfileView, content: HTMLElement): void {
 }
 
 async function startDelete(profile: ProfileView, content: HTMLElement): Promise<void> {
-  if (content.querySelector(".inline-panel")) return;
+  if (content.querySelector(".panel")) return;
 
   let size: number;
   try {
@@ -494,24 +658,30 @@ async function startDelete(profile: ProfileView, content: HTMLElement): Promise<
   }
 
   const panel = document.createElement("div");
-  panel.className = "inline-panel inline-panel-danger";
+  panel.className = "panel is-danger";
+
   // The size and the path are set in the mono face here, as they are on the row
   // two lines above. They are the two facts this sentence turns on, and reading
   // them in the prose face is the one place the window would have set a path
   // like a word rather than like a path.
-  const question = makeTextElement("p", "helper", "");
+  const question = makeTextElement("p", "panel-text", "");
   question.append(
-    `Delete “${profile.label}” and all `,
-    makeTextElement("span", "figure", formatBytes(size)),
+    "Delete ",
+    makeTextElement("strong", "", profile.label),
+    " and the ",
+    makeTextElement("strong", "figure", formatBytes(size)),
     " in ",
-    makeTextElement("span", "figure", profile.path),
-    "? This cannot be undone.",
+    makeTextElement("strong", "figure", shortenPath(profile.path)),
+    ". This can’t be undone.",
   );
   panel.append(question);
 
+  const row = document.createElement("div");
+  row.className = "panel-row";
+
   const confirm = document.createElement("button");
   confirm.type = "button";
-  confirm.className = "button button-danger";
+  confirm.className = "btn solid-danger";
   confirm.textContent = "Delete permanently";
   confirm.addEventListener("click", async () => {
     try {
@@ -525,11 +695,12 @@ async function startDelete(profile: ProfileView, content: HTMLElement): Promise<
 
   const cancel = document.createElement("button");
   cancel.type = "button";
-  cancel.className = "button button-quiet";
+  cancel.className = "btn outline";
   cancel.textContent = "Keep it";
   cancel.addEventListener("click", () => panel.remove());
 
-  panel.append(confirm, cancel);
+  row.append(confirm, cancel);
+  panel.append(row);
   content.append(panel);
   confirm.focus();
 }
@@ -548,7 +719,7 @@ async function addProfile(event: SubmitEvent): Promise<void> {
   event.preventDefault();
   const label = profileLabelInput.value.trim();
   if (!label) {
-    showAddError("Enter a label for this profile.");
+    showAddError("Enter a name for this profile.");
     profileLabelInput.focus();
     return;
   }
@@ -577,6 +748,18 @@ profileLabelInput.addEventListener("input", clearAddError);
 profileAppSelect.addEventListener("change", () => {
   clearAddError();
   void loadBudget();
+});
+
+// The strip names the folder; this is the only way to actually get to it.
+dataRootButton.addEventListener("click", async () => {
+  if (!dataRoot) return;
+  try {
+    await revealItemInDir(dataRoot);
+    clearError();
+  } catch (error) {
+    // Unlike reading the root, this one the user asked for.
+    showError(error);
+  }
 });
 
 // A desktop app has no business offering "Reload" or "Inspect Element" on
@@ -636,6 +819,7 @@ void listen("window-shown", () => {
   void loadAutostart();
 });
 
+void loadHome();
 void loadProfiles();
 void loadDataRoot();
 void loadAutostart();

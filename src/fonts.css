@@ -9,14 +9,37 @@
   font-display: block;
 }
 
-/* One weight only. Nothing in the window asks the mono for emphasis — the size
-   column, the paths and the meter are all plain figures — and a vendored face
-   nothing renders is bytes in the bundle for nobody. `font-synthesis: none` is
-   set, so a future `font-weight: 500` on this family will render at 400 rather
-   than being faked: vendor the Medium again at that point. */
+/* The prose face. One variable file carries the whole axis, so the 400 of a
+   helper line and the 600 of a profile name cost the same download. */
+@font-face {
+  font-family: "Inter Tight";
+  src: url("./fonts/InterTight-Variable.woff2") format("woff2");
+  font-weight: 100 900;
+  font-display: block;
+}
+
+/* Three weights, because the mono is no longer only for plain figures: tags and
+   the emphasised path segment ask for 500, and the counts the status strip and
+   the budget readout put in bold ask for 600. `font-synthesis: none` is set, so
+   a weight with no vendored file is not faked — it silently renders at the
+   nearest one that exists, which is exactly the flattening this avoids. */
 @font-face {
   font-family: "IBM Plex Mono";
   src: url("./fonts/IBMPlexMono-Regular.woff2") format("woff2");
   font-weight: 400;
+  font-display: block;
+}
+
+@font-face {
+  font-family: "IBM Plex Mono";
+  src: url("./fonts/IBMPlexMono-Medium.woff2") format("woff2");
+  font-weight: 500;
+  font-display: block;
+}
+
+@font-face {
+  font-family: "IBM Plex Mono";
+  src: url("./fonts/IBMPlexMono-SemiBold.woff2") format("woff2");
+  font-weight: 600;
   font-display: block;
 }

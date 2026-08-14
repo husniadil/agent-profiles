@@ -1,11 +1,22 @@
 @import "./fonts.css";
 
+/* ==========================================================================
+   Agent Profiles — the management window.
+
+   Thesis: this app's content is paths, ids, processes and byte counts, so the
+   type is mono-led and the surface is achromatic. Colour is spent only on
+   state — running, shared sign-in, destructive — never on decoration.
+   Signature: the socket-path budget meter, the one number that decides
+   whether a profile can exist at all.
+   ========================================================================== */
+
 :root {
-  --sans: ui-sans-serif, -apple-system, "Segoe UI", system-ui, sans-serif;
-  --wide: "Archivo", ui-sans-serif, system-ui, sans-serif;
+  --sans: "Inter Tight", ui-sans-serif, -apple-system, system-ui, sans-serif;
+  --wide: "Archivo", "Inter Tight", ui-sans-serif, system-ui, sans-serif;
   --mono: "IBM Plex Mono", ui-monospace, "SF Mono", Menlo, monospace;
 
-  --canvas: #dddfe2;
+  /* `--on-ink` is the mockup's `--paper`: the band behind the compose form, and
+     the colour text takes when it sits on a solid ink button. */
   --on-ink: #eff0f2;
   --surface: #ffffff;
   --sunken: #f4f5f7;
@@ -19,20 +30,14 @@
   /* The only colours in the window, and each one means one thing. */
   --live: #0c8757;
   --warning: #96600a;
-  /* Dark enough to clear 4.5:1 on the canvas, not only on the sunken surfaces
-     the delete button and the error banner sit on. The over-budget legend is
-     the one place red text lands on the bare page, and it is the sentence that
-     says no profile can be created on this machine at all. */
-  --danger: #b52d22;
-
-  --radius: 0.71rem;
+  --danger: #be3328;
 
   color-scheme: light dark;
   font-family: var(--sans);
   font-size: 14px;
   line-height: 1.45;
   color: var(--ink);
-  background: var(--canvas);
+  background: var(--surface);
   font-synthesis: none;
   text-rendering: optimizeLegibility;
   -webkit-font-smoothing: antialiased;
@@ -43,7 +48,6 @@
    switch is a setting, and a setting needs somewhere to live. */
 @media (prefers-color-scheme: dark) {
   :root {
-    --canvas: #08090b;
     --on-ink: #131619;
     --surface: #171a1e;
     --sunken: #1e2227;
@@ -64,11 +68,28 @@
   box-sizing: border-box;
 }
 
+/* `hidden` is how this window puts a whole band away — the meter, the footer,
+   the compose form. Several of them are flex or grid containers, and an author
+   `display` outranks the user agent's rule for `[hidden]`: without this, an
+   element the code believes is gone is still drawn. */
+[hidden] {
+  display: none !important;
+}
+
 body {
   min-width: 320px;
-  min-height: 100vh;
   margin: 0;
-  background: var(--canvas);
+  background: var(--surface);
+  color: var(--ink);
+  /* Text selection is a document affordance, not an app one. */
+  -webkit-user-select: none;
+  user-select: none;
+}
+
+input,
+textarea {
+  -webkit-user-select: text;
+  user-select: text;
 }
 
 button,
@@ -78,389 +99,656 @@ select {
   color: inherit;
 }
 
-button {
+/* The window content. In the mockup this was a card on a canvas; here it is the
+   window itself, so it has no width of its own, no shadow to cast and no corner
+   to round — only the internal rhythm of its bands. */
+.win {
+  background: var(--surface);
+}
+
+/* ---------- status strip: the whole app state in one mono line ---------- */
+
+.strip {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  padding: 10px 18px;
+  border-bottom: 1px solid var(--hairline);
+  font-family: var(--mono);
+  font-size: 11px;
+  color: var(--ink-3);
+}
+
+.strip b {
+  font-weight: 600;
+  color: var(--ink-2);
+}
+
+.strip .sep {
+  color: var(--ink-4);
+  margin: 0 6px;
+}
+
+/* The counts are the shorter, fixed-length half of the strip, so they hold their
+   width and the root — already shortened, and ellipsised if it is still too
+   long — absorbs whatever is left. */
+#status {
+  flex: none;
+  white-space: nowrap;
+}
+
+.strip-root {
+  min-width: 0;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: var(--ink-3);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.strip-root:hover {
+  color: var(--ink-2);
   cursor: pointer;
 }
 
-button:focus-visible,
-input:focus-visible,
-select:focus-visible {
+.strip-root:focus-visible {
   outline: 2px solid var(--ink);
   outline-offset: 2px;
-  border-radius: 4px;
 }
 
-.container {
-  width: min(100%, 900px);
-  margin: 0 auto;
-  padding: 3.25rem clamp(1.25rem, 5vw, 4.5rem) 4rem;
-}
+/* ---------- errors ---------- */
 
-.eyebrow {
-  margin: 0 0 0.4rem;
-  color: var(--ink-2);
-  font-family: var(--wide);
-  font-size: 0.68rem;
-  font-weight: 800;
-  letter-spacing: 0.17em;
-  line-height: 1.2;
-  text-transform: uppercase;
-}
-
-h2,
-h3,
-p {
-  margin-top: 0;
-}
-
-h2,
-h3 {
-  color: var(--ink);
-  font-family: var(--wide);
-  font-weight: 700;
-}
-
-.profiles-section {
-  padding: 2.4rem 0 2.75rem;
-}
-
-/* `.add-section h2` was here too. Its heading is now an `.app-heading` — a
-   section label of the same rank as an app group's — and this rule outranks the
-   class on specificity, so leaving it would have drawn that label at 2.35rem. */
-.settings-section h2 {
-  margin-bottom: 0;
-  font-size: clamp(1.7rem, 4vw, 2.35rem);
-  letter-spacing: -0.045em;
-  line-height: 1;
-}
-
+/* Nothing in the mockup fails, so this is built from the parts of it that do
+   exist: the strip's own padding, the hairline that separates every band of the
+   window, and the one colour the window already spends on damage. */
 .error {
-  margin-bottom: 1rem;
-  padding: 0.85rem 1rem;
-  border-left: 4px solid var(--danger);
-  color: var(--danger);
+  margin: 0;
+  padding: 10px 18px;
+  border-bottom: 1px solid var(--hairline);
   background: var(--sunken);
-  font-size: 0.9rem;
-  line-height: 1.45;
+  color: var(--danger);
+  font-size: 12.5px;
 }
 
-/* Grouping only appears once a second app is installed; with one, the list
-   renders exactly as it did before groups existed. */
-.app-group + .app-group {
-  margin-top: 1.35rem;
+/* Inside the compose band the same message is a note against a single control
+   rather than a state of the window, so it takes the shape of the inline panels
+   instead of the shape of a band. */
+.error-inline {
+  margin: 9px 0 0;
+  padding: 8px 10px;
+  border: 1px solid color-mix(in srgb, var(--danger) 38%, transparent);
+  border-radius: 6px;
+  background: var(--surface);
 }
 
-.app-heading {
+/* ---------- app groups ---------- */
+
+.group {
+  padding: 16px 18px 8px;
+}
+
+.group + .group {
+  border-top: 1px solid var(--hairline);
+}
+
+.group-head {
   display: flex;
   align-items: center;
-  gap: 0.86rem;
-  margin: 1.57rem 0 0.43rem;
-  font-family: var(--wide);
-  font-variation-settings: "wdth" 115;
-  font-size: 0.79rem;
-  font-weight: 600;
-  letter-spacing: 0.14em;
-  text-transform: uppercase;
-  /* Not `--ink-3`: this carries the app name, which is the only thing telling a
-     reader whose profiles these are. On the canvas that grey reads at 2.4:1. */
-  color: var(--ink-2);
+  gap: 12px;
+  margin-bottom: 4px;
 }
 
-.app-heading::after {
-  content: "";
+.group-name {
+  font-family: var(--wide);
+  font-variation-settings: "wdth" 118;
+  font-weight: 700;
+  font-size: 10px;
+  letter-spacing: 0.18em;
+  text-transform: uppercase;
+  color: var(--ink);
+}
+
+.group-rule {
   flex: 1;
   height: 1px;
   background: var(--hairline);
 }
 
-.app-picker select {
-  height: 100%;
-  border: 1px solid var(--line);
-  border-radius: 0.25rem;
-  padding: 0.65rem 0.6rem;
-  color: var(--ink);
-  background: var(--surface);
-  font: inherit;
-}
-
-.app-picker select:hover {
-  border-color: var(--ink-3);
-}
-
-.profile-list {
-  display: grid;
-  gap: 0.75rem;
+.rows {
+  list-style: none;
   margin: 0;
   padding: 0;
-  list-style: none;
 }
 
-/* A row is a line of text, not a card: no border, no shadow, and nothing to
-   raise on hover. The card it used to be spent its strongest contrast — a
-   near-white bar down the left edge in dark mode — on decoration. */
-.profile-card {
+.row {
   display: grid;
-  grid-template-columns: 0.57rem minmax(0, 1fr) auto;
-  align-items: center;
-  gap: 0.86rem;
-  min-width: 0;
-  padding: 0.64rem 0.71rem;
-  border-radius: var(--radius);
+  grid-template-columns: 15px minmax(0, 1fr) auto;
+  align-items: start;
+  gap: 0 8px;
+  /* The negative margin lets the hover surface reach past the group's padding,
+     so a row reads as a band of the window rather than as a boxed item. */
+  padding: 9px 10px;
+  margin: 0 -10px;
+  border-radius: 6px;
 }
 
-.profile-card:hover,
-.profile-card:focus-within {
+.row + .row {
+  box-shadow: inset 0 1px 0 var(--hairline);
+}
+
+.row:hover {
   background: var(--sunken);
 }
 
-.run-dot {
-  width: 0.43rem;
-  height: 0.43rem;
+/* The hovered row's fill already separates it from the next one, so the rule
+   between them would only draw a line inside a shape that has an edge. */
+.row:hover + .row {
+  box-shadow: none;
+}
+
+/* state dot — the only always-visible colour in the interface */
+.dot {
+  width: 7px;
+  height: 7px;
   border-radius: 50%;
-  background: var(--ink-4);
+  margin: 7px 0 0 3px;
+  border: 1.5px solid var(--ink-4);
+  background: transparent;
 }
 
-.run-dot-live {
+.dot.live {
+  border-color: var(--live);
   background: var(--live);
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--live) 15%, transparent);
 }
 
-.profile-content {
-  min-width: 0;
-}
-
-.profile-title {
+.row-name {
   display: flex;
+  align-items: center;
+  gap: 7px;
   flex-wrap: wrap;
-  gap: 0.45rem;
-  align-items: center;
 }
 
-.profile-label {
-  overflow: hidden;
-  margin: 0;
-  font-size: 1rem;
+.name {
+  font-weight: 600;
+  font-size: 13.5px;
+  letter-spacing: -0.006em;
+}
+
+.tag {
+  font-family: var(--mono);
+  font-size: 9px;
   font-weight: 500;
-  letter-spacing: -0.025em;
-  line-height: 1.2;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.profile-path {
-  overflow: hidden;
-  margin: 0.15rem 0 0;
-  color: var(--ink-3);
-  font-family: var(--mono);
-  font-size: 0.79rem;
-  line-height: 1.45;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.status-badge {
-  display: inline-flex;
-  align-items: center;
-  min-height: 1.45rem;
-  padding: 0.15rem 0.52rem;
-  border-radius: 999px;
-  font-size: 0.63rem;
-  font-weight: 800;
-  letter-spacing: 0.04em;
-  line-height: 1.2;
+  letter-spacing: 0.11em;
   text-transform: uppercase;
+  padding: 2px 6px;
+  border-radius: 3px;
+  border: 1px solid var(--line);
+  color: var(--ink-3);
 }
 
-/* The only badge with an edge. Two profiles sharing one sign-in is a surprise,
-   and on an achromatic surface the fill alone is 1.09:1 against the card — the
-   pill effectively disappears and the warning rests on 0.63rem of text. The
-   border gives the eye a shape to find without painting the surface. */
-.status-warning {
+.tag.live {
+  border-color: color-mix(in srgb, var(--live) 42%, transparent);
+  color: var(--live);
+}
+
+.tag.warn {
+  border-color: color-mix(in srgb, var(--warning) 48%, transparent);
   color: var(--warning);
-  background: var(--sunken);
-  box-shadow: inset 0 0 0 1px var(--warning);
 }
 
-/* Size and actions occupy the same cell: whichever is showing, the row's width
-   never changes, so nothing shifts under the pointer on hover. */
-.profile-trailing {
-  display: grid;
-  min-width: 6rem;
-  justify-items: end;
-}
-
-.profile-trailing > * {
-  grid-area: 1 / 1;
-}
-
-.profile-size {
+.path {
   font-family: var(--mono);
-  font-size: 0.82rem;
+  font-size: 10.5px;
+  color: var(--ink-3);
+  margin: 3px 0 0;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+/* The last segment is the profile's own directory — the part that tells two
+   otherwise identical paths apart — so it is the part that is set brighter. */
+.path em {
+  font-style: normal;
   color: var(--ink-2);
+  font-weight: 500;
+}
+
+/* right edge: identity at rest, actions on intent */
+.row-end {
+  position: relative;
+  min-width: 104px;
+  height: 26px;
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+}
+
+.size {
+  font-family: var(--mono);
+  font-size: 11px;
+  color: var(--ink-3);
   font-variant-numeric: tabular-nums;
 }
 
-.profile-actions {
+.row-actions {
+  position: absolute;
+  right: -4px;
+  top: 0;
   display: flex;
-  gap: 0.15rem;
+  align-items: center;
+  gap: 1px;
   opacity: 0;
-  transition: opacity 120ms ease;
+  pointer-events: none;
 }
 
-.profile-card:hover .profile-size,
-.profile-card:focus-within .profile-size {
+/* icon-only row actions — the label lives in the tooltip and the accessible name */
+.icon-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 26px;
+  height: 26px;
+  padding: 0;
+  border: 1px solid transparent;
+  border-radius: 6px;
+  background: transparent;
+  color: var(--ink-3);
+  cursor: pointer;
+}
+
+.icon-btn:hover {
+  color: var(--ink);
+  background: var(--surface);
+  border-color: var(--line);
+}
+
+.icon-btn:focus-visible {
+  outline: 2px solid var(--ink);
+  outline-offset: 1px;
+}
+
+.icon-btn.is-danger:hover {
+  color: var(--danger);
+  border-color: color-mix(in srgb, var(--danger) 40%, transparent);
+}
+
+.icon-btn svg {
+  width: 15px;
+  height: 15px;
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 1.25;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+
+.row:hover .size,
+.row:focus-within .size {
   opacity: 0;
 }
 
-.profile-card:hover .profile-actions,
-.profile-card:focus-within .profile-actions {
+.row:hover .row-actions,
+.row:focus-within .row-actions {
   opacity: 1;
+  pointer-events: auto;
 }
 
 /* A pointer that cannot hover would never reach these at all. */
 @media (hover: none) {
-  .profile-size {
-    display: none;
+  .size {
+    opacity: 0;
   }
 
-  .profile-actions {
+  .row-actions {
     opacity: 1;
+    pointer-events: auto;
   }
 }
 
-.row-icon {
-  display: grid;
-  place-items: center;
-  width: 1.71rem;
-  height: 1.71rem;
-  padding: 0;
-  border: 0;
-  border-radius: 0.43rem;
-  background: transparent;
-  /* Quiet, but these are controls: `--ink-3` on the hovered row is 2.9:1, under
-     the 3:1 an interactive element owes the eye. They only appear on hover in
-     the first place, so there is no resting clutter to hold them back from. */
+/* ---------- controls ---------- */
+
+.btn {
+  font-family: var(--sans);
+  font-size: 12px;
+  font-weight: 500;
   color: var(--ink-2);
-}
-
-.row-icon:hover {
-  background: var(--surface);
-  color: var(--ink);
-}
-
-/* Grey at rest, red only under the pointer: the row should not look dangerous
-   for existing. */
-.row-icon-delete:hover {
-  color: var(--danger);
-}
-
-.button {
-  min-height: 2.25rem;
+  background: transparent;
   border: 1px solid transparent;
-  border-radius: 0.25rem;
-  padding: 0.45rem 0.8rem;
-  font-size: 0.78rem;
-  font-weight: 700;
-  line-height: 1.1;
+  border-radius: 6px;
+  padding: 3px 9px;
+  cursor: pointer;
   white-space: nowrap;
-  transition: background-color 160ms ease, border-color 160ms ease, color 160ms ease;
 }
 
-.button-primary {
-  color: var(--on-ink);
+.btn:hover {
+  color: var(--ink);
+  background: var(--surface);
+  border-color: var(--line);
+}
+
+.btn:focus-visible {
+  outline: 2px solid var(--ink);
+  outline-offset: 1px;
+}
+
+.btn.solid {
+  color: var(--surface);
   background: var(--ink);
-}
-
-.button-primary:hover {
-  background: var(--ink-2);
-}
-
-.button-quiet {
-  border-color: var(--line);
-  color: var(--ink);
-  background: transparent;
-}
-
-.button-quiet:hover {
   border-color: var(--ink);
-  background: var(--sunken);
 }
 
-.button-danger {
+.btn.solid:hover {
+  color: var(--surface);
+  background: var(--ink);
+  opacity: 0.87;
+}
+
+.btn.outline {
   border-color: var(--line);
-  color: var(--danger);
-  background: transparent;
-}
-
-.button-danger:hover {
-  border-color: var(--danger);
-  background: var(--sunken);
-}
-
-.add-column {
-  display: grid;
-  gap: 0.75rem;
-  align-content: start;
-}
-
-/* The banner version reserves space below itself; this one sits at the end of
-   its column and does not. */
-.error-inline {
-  margin-bottom: 0;
-}
-
-/* One column now the prose is gone. The heading is a label for what is under it,
-   the way an app group's heading labels its list, and its hairline rule wants
-   the full width to run to. Beside the form it would have been bottom-aligned
-   against the meter instead, with the rule stopping in the middle of the page. */
-.add-section {
-  display: grid;
-  gap: 0.86rem;
-  padding: 1.8rem 0 2.4rem;
-  border-top: 1px solid var(--line);
-}
-
-/* The section's own padding sets the distance from the rule above it. */
-.add-section .app-heading {
-  margin-top: 0;
-}
-
-/* A filesystem value quoted inside a sentence. The window sets paths and byte
-   counts in the mono face everywhere else; a sentence is no reason to stop. */
-.figure {
-  font-family: var(--mono);
-  font-size: 0.95em;
-}
-
-.helper {
-  max-width: 32rem;
-  margin: 0.75rem 0 0;
-  color: var(--ink-2);
-  font-size: 0.84rem;
-  line-height: 1.5;
-}
-
-.add-form {
-  display: flex;
-  gap: 0.6rem;
-  align-items: stretch;
-}
-
-.add-form input {
-  min-width: 0;
-  width: 100%;
-  border: 1px solid var(--line);
-  border-radius: 0.25rem;
-  padding: 0.65rem 0.75rem;
-  color: var(--ink);
   background: var(--surface);
 }
 
-.add-form input::placeholder {
+.btn.solid-danger {
+  color: #fff;
+  background: var(--danger);
+  border-color: var(--danger);
+}
+
+.btn.solid-danger:hover {
+  color: #fff;
+  background: var(--danger);
+  opacity: 0.9;
+}
+
+.btn[disabled] {
+  opacity: 0.38;
+  cursor: default;
+}
+
+.field {
+  font-family: var(--sans);
+  font-size: 13px;
+  color: var(--ink);
+  background: var(--surface);
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  padding: 6px 10px;
+  width: 100%;
+}
+
+.field::placeholder {
   color: var(--ink-3);
 }
 
-.add-form input:hover {
-  border-color: var(--ink-3);
+.field:focus {
+  outline: 2px solid var(--ink);
+  outline-offset: -1px;
+  border-color: var(--ink);
+}
+
+.sec-label {
+  font-family: var(--wide);
+  font-variation-settings: "wdth" 118;
+  font-weight: 700;
+  font-size: 10px;
+  letter-spacing: 0.18em;
+  text-transform: uppercase;
+  color: var(--ink);
+}
+
+/* ---------- new profile: the signature instrument ---------- */
+
+.compose {
+  padding: 15px 18px 17px;
+  border-top: 1px solid var(--hairline);
+  background: var(--on-ink);
+}
+
+.compose-row {
+  display: flex;
+  gap: 7px;
+  margin-top: 9px;
+}
+
+.compose-row .field {
+  flex: 1;
+}
+
+/* The picker is as wide as the app name it holds, not a share of the row: the
+   name field is the one that earns the space. */
+.compose-row .app-picker {
+  flex: none;
+}
+
+.compose-row select.field {
+  width: auto;
+}
+
+.budget {
+  margin-top: 13px;
+  display: grid;
+  gap: 6px;
+}
+
+.budget-path {
+  font-family: var(--mono);
+  font-size: 10.5px;
+  color: var(--ink);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.budget-path .dim {
+  color: var(--ink-3);
+}
+
+.budget-track {
+  position: relative;
+  height: 12px;
+  border: 1px solid var(--line);
+  border-radius: 2px;
+  background: var(--surface);
+  overflow: hidden;
+}
+
+/* the ruler: one mark every 13 bytes */
+.budget-ticks {
+  position: absolute;
+  inset: auto 0 0 0;
+  height: 5px;
+  background: repeating-linear-gradient(to right, var(--ink-3) 0 1px, transparent 1px 12.5%);
+  opacity: 0.85;
+}
+
+.budget-fill {
+  position: absolute;
+  inset: 0 auto 0 0;
+  background: color-mix(in srgb, var(--ink) 22%, transparent);
+  border-right: 2px solid var(--ink);
+}
+
+.budget-fill.over {
+  background: color-mix(in srgb, var(--danger) 34%, transparent);
+  border-right-color: var(--danger);
+}
+
+.budget-read {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+  align-items: baseline;
+  font-family: var(--mono);
+  font-size: 10.5px;
+  color: var(--ink-3);
+}
+
+.budget-read b {
+  color: var(--ink);
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+}
+
+.budget-read .over,
+.budget-read .over b {
+  color: var(--danger);
+}
+
+.helper {
+  font-family: var(--sans);
+  font-size: 12px;
+  color: var(--ink-3);
+  margin: 7px 0 0;
+}
+
+/* ---------- footer ---------- */
+
+.footer {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  padding: 11px 18px;
+  border-top: 1px solid var(--hairline);
+}
+
+.footer-text {
+  font-size: 12.5px;
+}
+
+.footer-help {
+  font-family: var(--mono);
+  font-size: 10px;
+  color: var(--ink-3);
+  margin-top: 1px;
+}
+
+.switch {
+  position: relative;
+  width: 34px;
+  height: 20px;
+  flex: none;
+}
+
+.switch input {
+  position: absolute;
+  opacity: 0;
+  inset: 0;
+  margin: 0;
+  cursor: pointer;
+}
+
+.switch span {
+  position: absolute;
+  inset: 0;
+  border-radius: 999px;
+  background: var(--sunken);
+  border: 1px solid var(--line);
+  transition: 0.14s;
+}
+
+.switch span::after {
+  content: "";
+  position: absolute;
+  top: 2px;
+  left: 2px;
+  width: 14px;
+  height: 14px;
+  border-radius: 50%;
+  background: var(--ink-4);
+  transition: 0.14s;
+}
+
+.switch input:checked + span {
+  background: var(--ink);
+  border-color: var(--ink);
+}
+
+.switch input:checked + span::after {
+  left: 16px;
+  background: var(--surface);
+}
+
+.switch input:focus-visible + span {
+  outline: 2px solid var(--ink);
+  outline-offset: 2px;
+}
+
+/* ---------- inline panels (rename / delete) ---------- */
+
+.panel {
+  margin-top: 9px;
+  padding: 10px;
+  border-radius: 6px;
+  background: var(--surface);
+  border: 1px solid var(--line);
+}
+
+/* The border carries the warning; the fill does not. A red block behind the
+   sentence makes it harder to read at exactly the moment it matters most. */
+.panel.is-danger {
+  border-color: color-mix(in srgb, var(--danger) 38%, transparent);
+}
+
+.panel-row {
+  display: flex;
+  gap: 7px;
+  margin-top: 9px;
+}
+
+.panel-text {
+  font-size: 12.5px;
+  color: var(--ink-2);
+  margin: 0;
+}
+
+.panel-text strong {
+  color: var(--ink);
+  font-weight: 600;
+}
+
+/* A filesystem value quoted inside a sentence. The window sets paths and byte
+   counts in the mono face everywhere else; a sentence is no reason to stop. The
+   path is the longest thing in this panel and the panel is as narrow as a row,
+   so it is allowed to break wherever it must rather than widen the window. */
+.figure {
+  font-family: var(--mono);
+  font-size: 0.95em;
+  overflow-wrap: anywhere;
+}
+
+/* ---------- empty state ---------- */
+
+.empty {
+  padding: 38px 26px;
+  text-align: center;
+}
+
+.empty-mark {
+  font-family: var(--mono);
+  font-size: 10.5px;
+  letter-spacing: 0.15em;
+  text-transform: uppercase;
+  color: var(--ink-3);
+}
+
+.empty-title {
+  font-weight: 600;
+  font-size: 14px;
+  margin: 10px 0 5px;
+}
+
+.empty-body {
+  font-size: 12.5px;
+  color: var(--ink-2);
+  margin: 0 auto;
+  max-width: 300px;
+  line-height: 1.5;
 }
 
 .sr-only {
@@ -475,28 +763,6 @@ h3 {
   white-space: nowrap;
 }
 
-@media (max-width: 650px) {
-  .container {
-    padding-top: 2rem;
-  }
-
-  /* The row already fits: the dot is a few pixels and the trailing cell is one
-     short string. Only the gap between them has to give. */
-  .profile-card {
-    gap: 0.6rem;
-  }
-}
-
-@media (max-width: 430px) {
-  .add-form {
-    flex-direction: column;
-  }
-
-  .add-form .button {
-    width: 100%;
-  }
-}
-
 @media (prefers-reduced-motion: reduce) {
   *,
   *::before,
@@ -506,175 +772,4 @@ h3 {
     animation-duration: 0.01ms !important;
     animation-iteration-count: 1 !important;
   }
-}
-
-/* Both confirmations keep their words. An action that destroys 1.4 GB should be
-   read, not recognised from a picture — the icons on the row are for reaching,
-   this is for deciding. */
-.inline-panel {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: center;
-  gap: 0.57rem;
-  margin-top: 0.57rem;
-  padding: 0.71rem;
-  border: 1px solid var(--line);
-  border-radius: 0.57rem;
-  background: var(--surface);
-}
-
-.inline-panel input {
-  flex: 1 1 10rem;
-  min-width: 0;
-  height: 2rem;
-  padding: 0 0.57rem;
-  border: 1px solid var(--line);
-  border-radius: 0.43rem;
-  background: var(--sunken);
-}
-
-.inline-panel .helper {
-  flex: 1 1 100%;
-  margin: 0;
-  color: var(--ink);
-}
-
-/* The border carries the warning; the fill does not. A red block behind the
-   sentence makes it harder to read at exactly the moment it matters most. */
-.inline-panel-danger {
-  border-color: var(--danger);
-}
-
-/* Text selection is a document affordance, not an app one. */
-body {
-  -webkit-user-select: none;
-  user-select: none;
-}
-
-input,
-textarea {
-  -webkit-user-select: text;
-  user-select: text;
-}
-
-.settings-section {
-  display: grid;
-  gap: 1rem;
-  padding: 1.8rem 0 0;
-  border-top: 1px solid var(--line);
-}
-
-.toggle-row {
-  display: flex;
-  align-items: center;
-  gap: 0.6rem;
-  cursor: pointer;
-}
-
-.toggle-row input {
-  width: 1rem;
-  height: 1rem;
-  cursor: pointer;
-}
-
-.status-line {
-  display: flex;
-  align-items: baseline;
-  justify-content: space-between;
-  gap: 1.14rem;
-  padding: 1rem 0 0.86rem;
-  border-bottom: 1px solid var(--line);
-  font-family: var(--mono);
-  font-size: 0.82rem;
-  color: var(--ink-2);
-}
-
-.status-line p {
-  margin: 0;
-}
-
-/* The window is 800px wide, which is exactly wide enough for both halves and
-   not a pixel more. Left to itself the counts wrap and `on disk` lands under
-   the path; the counts are the shorter, fixed-length half, so they hold their
-   width and the root — already ellipsised — absorbs whatever is left. */
-#status {
-  flex: none;
-  white-space: nowrap;
-}
-
-/* The root is reference, not a heading: it is the longest string in the window
-   and the least often read. */
-#data-root {
-  flex: 1;
-  min-width: 0;
-  /* `--ink-3` on the canvas is 2.4:1 — the same reading that disqualified it for
-     the app heading. Quiet is carried by the alignment and the ellipsis, not by
-     making the one string that says where the files live hard to read. */
-  color: var(--ink-2);
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-  /* Right-to-left so the ellipsis eats the start of the path and the tail
-     (`…/Agent Profiles/claude`) survives. On its own this trick reorders the
-     leading slash to the far end — `Users/yudha/…/Agent Profiles/` — so the
-     path itself sits in a `bdi`, which keeps its own left-to-right ordering. */
-  direction: rtl;
-  text-align: right;
-}
-
-/* A constant of the data root, not a typing indicator: the profile directory is
-   named after a generated id, so this number cannot move as a label is typed. */
-.budget {
-  margin-top: 0.71rem;
-  font-family: var(--mono);
-  font-size: 0.79rem;
-  /* Not `--ink-3`: this sits on the canvas, where that grey reads at 2.4:1 —
-     4.2:1 even in dark, still under the 4.5:1 text of this size owes. */
-  color: var(--ink-2);
-}
-
-.budget p {
-  margin: 0;
-}
-
-.budget-path {
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.budget-bar {
-  height: 0.29rem;
-  margin: 0.43rem 0 0.29rem;
-  border-radius: 0.14rem;
-  background: var(--sunken);
-  overflow: hidden;
-}
-
-/* Not `--ink-4`: the fill is the whole reading, and against the track it sits in
-   that grey is 1.8:1 — well under the 3:1 a non-text control owes the eye. */
-.budget-bar > span {
-  display: block;
-  height: 100%;
-  background: var(--ink-2);
-}
-
-/* The count beside it is a measurement and stays mono; this half is a sentence,
-   and the window sets sentences in the prose face. */
-#budget-note {
-  font-family: var(--sans);
-}
-
-.budget-legend {
-  display: flex;
-  justify-content: space-between;
-  gap: 0.86rem;
-}
-
-.budget-over .budget-bar > span {
-  background: var(--danger);
-}
-
-.budget-over .budget-legend {
-  color: var(--danger);
 }
