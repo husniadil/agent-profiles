@@ -167,6 +167,8 @@ pub fn run() {
             commands::profile_size_bytes,
             commands::autostart_state,
             commands::set_autostart,
+            commands::data_root,
+            commands::socket_budget,
         ])
         .on_menu_event(|app, event| {
             let id = event.id().as_ref();

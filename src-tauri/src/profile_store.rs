@@ -75,13 +75,13 @@ impl ProfileStore {
         self.profiles.iter().find(|p| p.id == id)
     }
 
-    /// Eight hex characters rather than a whole uuid.
+    /// The first [`ID_LEN`] hex characters of a uuid, rather than the whole one.
     ///
     /// A profile id is a directory name, and its length is charged against the
     /// socket budget documented in `paths`: a uuid spends 36 bytes of it, which
-    /// was enough on its own to push a real installation past the limit. Eight
-    /// characters collide about once in four billion draws, and the loop makes
-    /// even that a non-event — an id only has to be unique within this store.
+    /// was enough on its own to push a real installation past the limit. At this
+    /// width a draw collides about once in four billion, and the loop makes even
+    /// that a non-event — an id only has to be unique within this store.
     fn fresh_id(&self) -> String {
         loop {
             let candidate: String = uuid::Uuid::new_v4()

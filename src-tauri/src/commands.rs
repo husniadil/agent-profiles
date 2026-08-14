@@ -1,5 +1,6 @@
 use crate::app_spec::AppSpec;
-use crate::platform::{find_for, wm_class, Platform};
+use crate::paths::Paths;
+use crate::platform::{find_for, wm_class, Platform, RunningProcess};
 use crate::profile_store::{Profile, ProfileStore};
 use crate::runtime::{AppRuntime, AppState};
 use serde::Serialize;
@@ -13,6 +14,9 @@ pub struct ProfileView {
     pub path: String,
     pub is_default: bool,
     pub shares_account: bool,
+    /// Whether this profile has a live process right now. The window draws a
+    /// dot from it; it is a snapshot of scan time, never cached.
+    pub running: bool,
 }
 
 #[derive(Serialize, Clone)]
@@ -24,7 +28,11 @@ pub struct AppView {
     pub profiles: Vec<ProfileView>,
 }
 
-pub fn to_views(spec: &AppSpec, store: &ProfileStore) -> Vec<ProfileView> {
+pub fn to_views(
+    spec: &AppSpec,
+    store: &ProfileStore,
+    processes: &[RunningProcess],
+) -> Vec<ProfileView> {
     let dupes = crate::account::duplicate_accounts(store.list());
     store
         .list()
@@ -40,8 +48,34 @@ pub fn to_views(spec: &AppSpec, store: &ProfileStore) -> Vec<ProfileView> {
                 .as_deref()
                 .map(|account| dupes.contains(account))
                 .unwrap_or(false),
+            running: find_for(processes, spec.id, &p.path, p.is_default).is_some(),
         })
         .collect()
+}
+
+#[derive(Serialize, Clone)]
+pub struct SocketBudget {
+    /// The directory a profile added now would get. Drawn verbatim.
+    pub path: String,
+    /// How long the socket path inside it would be.
+    pub used: usize,
+    /// `None` on Windows, where named pipes live outside the profile and there
+    /// is no budget to keep. The window draws nothing at all in that case.
+    pub limit: Option<usize>,
+}
+
+/// The socket budget for the next profile of this app.
+///
+/// Deliberately independent of the label: `ProfileStore::add` names a profile
+/// directory after a generated id, never after what the user typed, so this
+/// number is a property of the data root and does not move as they type.
+pub(crate) fn budget_for(paths: &Paths) -> SocketBudget {
+    let sample = paths.profile_dir(&"x".repeat(crate::profile_store::ID_LEN));
+    SocketBudget {
+        path: sample.display().to_string(),
+        used: crate::paths::socket_path_len(&sample),
+        limit: crate::paths::SOCKET_PATH_LIMIT,
+    }
 }
 
 pub(crate) fn refuse_if_running(
@@ -116,19 +150,57 @@ fn register_identity(platform: &dyn Platform, runtime: &AppRuntime, profile: &Pr
 
 #[tauri::command]
 pub fn list_apps(state: tauri::State<AppState>) -> Result<Vec<AppView>, String> {
-    state
-        .apps
-        .iter()
-        .map(|runtime| {
+    // One sweep for every app, the same shape the tray rebuild uses, so the cost
+    // of the window does not grow with the number of apps installed. Availability
+    // is answered by looking for a binary on disk, and it is wanted twice — to
+    // decide what to scan and to fill the view — so it is carried, not re-asked.
+    let mut apps = Vec::new();
+    let mut targets = Vec::new();
+    for runtime in &state.apps {
+        let unavailable = state.availability(runtime);
+        if unavailable.is_none() {
+            targets.push(
+                crate::instance_manager::scan_target(&*state.platform, runtime.spec)
+                    .map_err(|e| e.to_string())?,
+            );
+        }
+        apps.push((runtime, unavailable));
+    }
+    // A scan that fails costs the dots, not the list. The window's job is to let
+    // someone rename and delete profiles; refusing to draw any of them because a
+    // process listing hiccuped would be a worse answer than an unlit dot.
+    let processes = state.platform.scan(&targets).unwrap_or_default();
+
+    apps.into_iter()
+        .map(|(runtime, unavailable)| {
             let store = runtime.store.lock().map_err(|e| e.to_string())?;
             Ok(AppView {
                 id: runtime.spec.id.to_string(),
                 label: runtime.spec.label.to_string(),
-                unavailable: state.availability(runtime),
-                profiles: to_views(runtime.spec, &store),
+                unavailable,
+                profiles: to_views(runtime.spec, &store, &processes),
             })
         })
         .collect()
+}
+
+/// Where every profile of every app lives. Drawn at the right of the status line.
+#[tauri::command]
+pub fn data_root(state: tauri::State<AppState>) -> Result<String, String> {
+    state
+        .platform
+        .data_root()
+        .map(|root| root.display().to_string())
+        .map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+pub fn socket_budget(
+    state: tauri::State<AppState>,
+    app_id: String,
+) -> Result<SocketBudget, String> {
+    let runtime = state.app(&app_id).map_err(|e| e.to_string())?;
+    Ok(budget_for(&runtime.paths))
 }
 
 #[tauri::command]
@@ -144,7 +216,9 @@ pub fn add_profile(
     let created = store
         .add(&label, &runtime.paths)
         .map_err(|e| e.to_string())?;
-    let view = to_views(runtime.spec, &store)
+    // A profile cannot already be running the moment it is created, so an empty
+    // scan is the truth here rather than a shortcut.
+    let view = to_views(runtime.spec, &store, &[])
         .into_iter()
         .find(|v| v.id == created.id)
         .ok_or_else(|| "profile vanished after creation".to_string())?;
@@ -288,7 +362,7 @@ mod tests {
         store.set_account(&a.id, Some("same".into()));
         store.set_account(&b.id, Some("same".into()));
 
-        let views = to_views(&app_spec::CLAUDE, &store);
+        let views = to_views(&app_spec::CLAUDE, &store, &[]);
 
         assert!(views.iter().find(|v| v.id == a.id).unwrap().shares_account);
         assert!(views.iter().find(|v| v.id == b.id).unwrap().shares_account);
@@ -300,7 +374,85 @@ mod tests {
         // The window needs it to send the right app id back on every action.
         let d = tempfile::tempdir().unwrap();
         let (_, store) = store_in(d.path());
-        assert_eq!(to_views(&app_spec::CODEX, &store)[0].app_id, "codex");
+        assert_eq!(to_views(&app_spec::CODEX, &store, &[])[0].app_id, "codex");
+    }
+
+    #[test]
+    fn a_view_reports_whether_that_profile_has_a_running_process() {
+        // The window draws a dot per row, so the running flag has to be per
+        // profile — not "this app has something running somewhere".
+        let d = tempfile::tempdir().unwrap();
+        let (paths, mut store) = store_in(d.path());
+        let work = store.add("Work", &paths).unwrap();
+        let idle = store.add("Idle", &paths).unwrap();
+
+        let processes = vec![RunningProcess {
+            app_id: "codex",
+            pid: 4242,
+            profile_dir: Some(work.path.clone()),
+        }];
+
+        let views = to_views(&app_spec::CODEX, &store, &processes);
+        assert!(views.iter().find(|v| v.id == work.id).unwrap().running);
+        assert!(!views.iter().find(|v| v.id == idle.id).unwrap().running);
+    }
+
+    #[test]
+    fn nothing_is_running_when_the_scan_found_nothing() {
+        let d = tempfile::tempdir().unwrap();
+        let (_, store) = store_in(d.path());
+        assert!(to_views(&app_spec::CODEX, &store, &[])
+            .iter()
+            .all(|v| !v.running));
+    }
+
+    #[test]
+    fn the_budget_measures_a_profile_that_does_not_exist_yet() {
+        // Nothing may be created just to answer "would one fit?".
+        let d = tempfile::tempdir().unwrap();
+        let paths = Paths::new(d.path().join("root"));
+        let budget = budget_for(&paths);
+
+        assert_eq!(
+            budget.used,
+            crate::paths::socket_path_len(
+                &paths.profile_dir(&"x".repeat(crate::profile_store::ID_LEN))
+            )
+        );
+        assert!(budget
+            .path
+            .ends_with(&"x".repeat(crate::profile_store::ID_LEN)));
+        assert_eq!(budget.limit, crate::paths::SOCKET_PATH_LIMIT);
+        assert!(
+            !paths.profiles_dir().exists(),
+            "asking must not create anything"
+        );
+    }
+
+    #[test]
+    fn the_predicted_width_matches_a_profile_actually_created() {
+        // `budget_for` guesses the directory width from `ID_LEN` before any
+        // profile exists. If `fresh_id` ever produced a different width the
+        // meter would quietly measure the wrong path, so pin the two together.
+        let d = tempfile::tempdir().unwrap();
+        let (paths, mut store) = store_in(d.path());
+        let created = store.add("Work", &paths).unwrap();
+
+        assert_eq!(
+            budget_for(&paths).used,
+            crate::paths::socket_path_len(&created.path)
+        );
+    }
+
+    #[test]
+    fn a_cramped_root_reports_over_its_limit() {
+        // The whole point of drawing the meter: a home directory long enough that
+        // no profile can be created must say so before the user types a name.
+        let paths = Paths::new(format!("/Users/{}/agent-profiles/claude", "n".repeat(120)));
+        let budget = budget_for(&paths);
+        if let Some(limit) = budget.limit {
+            assert!(budget.used > limit, "got {} against {limit}", budget.used);
+        }
     }
 
     #[test]
