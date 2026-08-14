@@ -1,5 +1,7 @@
 import { motion, useReducedMotion } from "motion/react";
 
+import { Tooltip } from "@/components/motion/tooltip";
+
 import type { SocketBudget } from "@/lib/api";
 import { readable } from "@/lib/color";
 import { shortenPath, usePathNames } from "@/lib/paths";
@@ -32,16 +34,30 @@ export function BudgetMeter({ budget, appLabel }: { budget: SocketBudget; appLab
   return (
     <>
       <div className="relative mt-2.5 overflow-hidden rounded-lg bg-sunken p-2">
-        <p className="truncate font-mono text-[10.5px] text-ink" title={budget.profile_dir}>
-          {inside ? (
-            <>
-              <span className="text-ink-2">{shortenPath(names.dataRoot, names)}/</span>
-              {inside}
-            </>
-          ) : (
-            budget.profile_dir
-          )}
-        </p>
+        {/* Said twice, as every other path in the window is: on screen in a
+            tooltip that opens on hover and on focus, and to assistive technology
+            as the element's own text. beUI's tooltip is `aria-hidden` by design,
+            so it can never be the accessible copy. */}
+        <Tooltip
+          content={budget.profile_dir}
+          side="bottom"
+          wrapperClassName="block min-w-0 max-w-full"
+          className="max-w-[min(420px,calc(100vw-16px))] break-all whitespace-normal font-mono text-[11px] font-normal"
+        >
+          <p tabIndex={0} className="truncate rounded-sm font-mono text-[10.5px] text-ink">
+            <span className="sr-only">{budget.profile_dir}</span>
+            <span aria-hidden="true">
+              {inside ? (
+                <>
+                  <span className="text-ink-2">{shortenPath(names.dataRoot, names)}/</span>
+                  {inside}
+                </>
+              ) : (
+                budget.profile_dir
+              )}
+            </span>
+          </p>
+        </Tooltip>
 
         <div
           className="mt-1.5 h-1 overflow-hidden rounded-full bg-line"
