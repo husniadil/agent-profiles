@@ -26,7 +26,6 @@
   --danger: #b52d22;
 
   --radius: 0.71rem;
-  --shadow: 0 1px 1px rgba(14, 17, 20, 0.05), 0 24px 50px -26px rgba(14, 17, 20, 0.4);
 
   color-scheme: light dark;
   font-family: var(--sans);
@@ -58,7 +57,6 @@
     --live: #38c88f;
     --warning: #d8a144;
     --danger: #e96c5f;
-    --shadow: 0 1px 1px rgba(0, 0, 0, 0.5), 0 24px 50px -26px rgba(0, 0, 0, 0.9);
   }
 }
 
