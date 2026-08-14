@@ -586,7 +586,7 @@ textarea {
   padding: 14px 0 12px;
   border-bottom: 1px solid var(--line);
   font-family: var(--mono);
-  font-size: 11.5px;
+  font-size: 0.82rem;
   color: var(--ink-2);
 }
 
@@ -608,7 +608,10 @@ textarea {
 #data-root {
   flex: 1;
   min-width: 0;
-  color: var(--ink-3);
+  /* `--ink-3` on the canvas is 2.4:1 — the same reading that disqualified it for
+     the app heading. Quiet is carried by the alignment and the ellipsis, not by
+     making the one string that says where the files live hard to read. */
+  color: var(--ink-2);
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;

@@ -103,7 +103,9 @@ function paintStatus(apps: AppView[]): void {
   if (statusText.textContent !== line) statusText.textContent = line;
 }
 
-// The data root does not change while the app runs, so it is asked for once.
+// Asked for again on every window-shown rather than cached. The root cannot
+// change while the app runs, so this is not about freshness — it is the retry
+// for a first attempt that failed.
 async function loadDataRoot(): Promise<void> {
   try {
     const root = await invoke<string>("data_root");
@@ -114,7 +116,12 @@ async function loadDataRoot(): Promise<void> {
   } catch {
     // Not worth the error banner: the window works perfectly without knowing
     // where the files are, and the banner is reserved for actions that failed.
-    dataRootText.textContent = "";
+    //
+    // The last known-good path is left where it is. This value cannot go stale,
+    // so a failed re-read is a failure to learn something we may already know —
+    // replacing a correct answer with an empty one would be the only way to
+    // lose it. Blanking the text alone would also strand the tooltip, leaving a
+    // path on hover over nothing.
   }
 }
 
