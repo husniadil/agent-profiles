@@ -2,29 +2,27 @@
 
 Notable changes, newest first. This project follows [Semantic Versioning](https://semver.org).
 
-## [Unreleased]
+## [0.3.0] — 2026-08-15
 
 The management window rebuilt. Every existing behaviour is kept; only the presentation changes.
 
-> **Note:** the entries below describe the window as it stood partway through this work — achromatic, hand-built DOM. It was subsequently rebuilt in React with [beUI](https://beui.dev) components, and colour now carries **profile identity**: each profile has a stable hue shown as a chip with its initial, while running, shared sign-in and destructive keep their own fixed colours. These notes need rewriting against the shipped design before this section is released.
-
 ### Added
 
-- **The window opens at 800×480** rather than 800×600. The old height left a band of empty page below the content; the list now stretches to fill whatever height the window has, scrolling inside its own frame, with the New profile form and the Start at login bar pinned below it.
+- **The window is a React app** built with [beUI](https://beui.dev) components, replacing the hand-written DOM builder in `src/main.ts` that had grown to 394 lines of element creation and manual event wiring. The behaviour it drew is unchanged; what it is made of is not.
+- **A profile has an identity colour** — a stable hue derived from the profile, shown as a chip carrying its initial — so a profile is recognisable at a glance rather than only by reading its name. The hue follows the profile, not its position in the list.
 - **The maximize button is disabled.** This is a fixed-purpose window opened from the tray for a few seconds; a zoomed full-screen state serves nothing. It still resizes freely. On macOS the green title-bar button greys out; on Linux Tauri does not support the setting, so the window can still be maximized there.
-
 - **The socket path budget appears only when the margin is thin** — under eight bytes of headroom, or already over. The refusal does not live in that block: `profile_store::add` turns down a profile that leaves no room whether or not anything was drawn, so on a machine that will never reach the limit the meter was a number nobody could act on, held permanently in a window with no room to spare. It cannot move as you type either — a profile directory is named after a generated id, so for one machine it is a fixed verdict rather than a gauge. Eight bytes is the spread between app ids plus margin: a data root that clears `code` can still refuse `claude`. An ordinary home directory sits about sixteen bytes clear.
-- **The socket path budget is drawn under the add form**: the directory a new profile would get, a meter, and `89 / 104 bytes`. On a home directory too long to host a profile it says so, in red, before anything has been typed — where previously the refusal only arrived after the profile was submitted. It is a property of the data root, not of the name: a profile directory is named after a generated id, so the number cannot move as you type and a long label is never the reason a profile is refused.
 - **A profile can be opened from the management window**, not only from the tray. The row's open action launches the profile, or focuses it if it is already running, deciding from a fresh process scan rather than from what the window last drew.
 - **A running dot on every row.** Running state used to be visible only in the tray.
+- **Windsurf is a supported app** — the Devin rebrand, declared alongside the agents already handled.
 
 ### Changed
 
 - **The window sizes itself to its content** instead of holding a fixed height with the list stretched to fill it. A tray window is a popover, not a panel: three profiles no longer sit in a frame built for nine, and the empty band that used to open below a short list is gone. Past the point where the list would run off the screen it scrolls inside the window instead of growing it. Measured from the frontend — the gap between the list's natural height and the height the window currently gives it — and applied through the Tauri window API, so it stays a property of what is on screen rather than a count kept in the backend. macOS/Linux; the resize is a no-op where the platform gives no window to size.
 - **The add button is `Add`, without a trailing plus.** The plus sat after the word and only said it twice; the button is narrower for losing it, and its width is now pinned to its widest running state (`Adding`) so the label swapping through Add → Adding → Added → Retry never resizes it under the pointer.
 - **A new profile's name is capped at 15 characters.** The name is a label, not a path — the profile directory is named after a generated id — so its length costs nothing but row space, and fifteen sits on one line beside the running badge without truncating.
-- The window is achromatic and follows the system theme, with full light and dark palettes. Colour is reserved for state — green for running, amber for a shared sign-in, red for destructive — so nothing else in the window is coloured. The window previously painted one fixed warm palette regardless of the system.
-- Paths, ids, sizes and byte counts are set in a monospace face; the wordmark and section labels in a wide grotesque. Both typefaces are vendored into the bundle rather than fetched, so the window renders the same offline.
+- The window is achromatic and follows the system theme, with full light and dark palettes. Colour is spent on two things only: **identity** — a profile's own hue, on its chip — and **state**, green for running, amber for a shared sign-in, red for destructive. Nothing else in the window is coloured. It previously painted one fixed warm palette regardless of the system.
+- **The window is set in the system face** on a five-step type scale — `title`, `body`, `callout`, `sub`, `caption` — and the vendored Archivo and IBM Plex Mono files are gone from the bundle. A window that belongs to the menu bar should read as part of the system it sits in, and the fonts it was carrying were weight the download did not need to include.
 - **The three-line page header is one status line**: profile count, running count, total size on disk, and the data root. The window previously carried an eyebrow, a heading and a lede before the first row, then a second heading below that.
 - **Profile rows carry their size on disk** in place of the `01 / 02` index column. The index numbered rows in an order that meant nothing and changed when a profile was deleted; the size is the number the delete confirmation already computes.
 - **Open, rename and delete are icons**, shown on hover or keyboard focus in the slot the size occupies at rest, so the row's width never changes. The rename and delete confirmations keep their words — an action that destroys 1.4 GB should be read, not recognised from a picture.
@@ -45,7 +43,7 @@ The management window rebuilt. Every existing behaviour is kept; only the presen
 
 ### Fixed
 
-- **`cn()` was deleting this window's type sizes before they reached the DOM.** `tailwind-merge` only knows Tailwind's own class names, and `text-<name>` is a colour in stock Tailwind, so `text-body`, `text-sub` and `text-caption` were all classified as colours: any class list naming a size *and* a colour lost the size, and the element silently inherited `body`'s 13px instead. `extendTailwindMerge` now names the scale as a `font-size` group. One element was affected — the path under a profile's name, the only `cn()` call combining the two — and it had been rendering three sizes larger than the code said for as long as the class existed.
+- **`cn()` was deleting this window's type sizes before they reached the DOM.** The window styles with Tailwind and merges class lists through `tailwind-merge`, which only knows Tailwind's own class names, and `text-<name>` is a colour in stock Tailwind, so `text-body`, `text-sub` and `text-caption` were all classified as colours: any class list naming a size *and* a colour lost the size, and the element silently inherited `body`'s 13px instead. `extendTailwindMerge` now names the scale as a `font-size` group. One element was affected — the path under a profile's name, the only `cn()` call combining the two — and it had been rendering three sizes larger than the code said for as long as the class existed.
 - Every colour pairing in the window now clears WCAG AA for its role. Several did not: the app name that says whose profiles a group holds read at 2.4:1, and the red that reports an unusable data root read at 4.3:1 against the page.
 
 ### Removed
