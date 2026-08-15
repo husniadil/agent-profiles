@@ -69,39 +69,6 @@ fn handle_menu_event(app: &tauri::AppHandle, id: &str) -> Result<()> {
                 }
             }
         }
-        Some(("quit", app_id, profile_id)) => {
-            let pid = live_pid(app, app_id, profile_id)?;
-            let product = {
-                let state = state(app)?;
-                state.app(app_id)?.spec.product
-            };
-            let app = app.clone();
-            let worker_app = app.clone();
-            let thread = std::thread::Builder::new()
-                .name("agent-profiles-quit".into())
-                .spawn(move || {
-                    let result = (|| -> Result<()> {
-                        let state = state(&worker_app)?;
-                        state.platform.quit(pid)?;
-                        tray::rebuild(&worker_app)?;
-                        Ok(())
-                    })();
-                    if let Err(error) = result {
-                        eprintln!("tray quit action failed: {error}");
-                        let reason = format!("Could not quit {product}: {error}");
-                        if let Err(rebuild_error) =
-                            tray::rebuild_with_error(&worker_app, Some(&reason))
-                        {
-                            eprintln!("tray rebuild failed: {rebuild_error}");
-                        }
-                    }
-                });
-            if let Err(error) = thread {
-                let reason = format!("Could not start quit worker: {error}");
-                eprintln!("{reason}");
-                tray::rebuild_with_error(&app, Some(&reason))?;
-            }
-        }
         // Headers, error rows and anything else carrying a colon are inert.
         Some(_) => {}
         None if id == "manage" => {
@@ -137,14 +104,14 @@ pub(crate) fn autostart_is_offered() -> bool {
 
 /// A tray app outlives its windows. Closing the management window must hide it,
 /// never destroy it: the webview is created once, and `get_webview_window` would
-/// return `None` from then on, leaving "Manage Profiles…" permanently broken.
+/// return `None` from then on, leaving "Settings…" permanently broken.
 pub(crate) fn close_hides_window(label: &str) -> bool {
     label == "main"
 }
 
 /// `None` means a person closed the last window, which for a tray app is not a
 /// request to quit — the tray is still there. `Some` only ever comes from our own
-/// `app.exit()`, i.e. the "Quit Agent Profiles" row, which really must quit.
+/// `app.exit()`, i.e. the "Quit" row, which really must quit.
 pub(crate) fn exit_should_be_prevented(code: Option<i32>) -> bool {
     code.is_none()
 }
@@ -167,6 +134,9 @@ pub fn run() {
             commands::profile_size_bytes,
             commands::autostart_state,
             commands::set_autostart,
+            commands::data_root,
+            commands::socket_budget,
+            commands::open_profile,
         ])
         .on_menu_event(|app, event| {
             let id = event.id().as_ref();
@@ -251,7 +221,7 @@ mod tests {
     fn only_our_own_quit_row_is_allowed_to_end_the_process() {
         // A person closing the last window reports no code; the tray lives on.
         assert!(exit_should_be_prevented(None));
-        // `app.exit(0)` from "Quit Agent Profiles" reports one, and must win.
+        // `app.exit(0)` from "Quit" reports one, and must win.
         assert!(!exit_should_be_prevented(Some(0)));
     }
 }

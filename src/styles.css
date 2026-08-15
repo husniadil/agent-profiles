@@ -1,564 +1,216 @@
+@import "tailwindcss";
+
+/* ==========================================================================
+   Agent Profiles — the management window.
+
+   The product exists to keep sign-ins apart, so colour is spent on IDENTITY
+   first: every profile carries a stable hue derived from its id, so "Work" is
+   recognised before it is read. State is kept separate and unambiguous —
+   running is always the same green, damage is always the same red — so a hue
+   never has to mean two things at once.
+
+   Warmth lives in the dark surfaces (a charcoal at hue 45 rather than the
+   usual blue-black) and in an oxblood accent. Deliberately not cream-and-
+   terracotta, and deliberately not slate-and-acid-green: those are the two
+   defaults this category reaches for by reflex.
+   ========================================================================== */
+
 :root {
-  --paper: #f4f0e8;
-  --paper-deep: #e9e1d4;
-  --card: #fbf8f2;
-  --ink: #192c46;
-  --ink-soft: #5d6875;
-  --line: #d8cec0;
-  --orange: #dd6b32;
-  --orange-deep: #a84620;
-  --orange-wash: #f5dfd2;
-  --warning: #9a5b24;
-  --warning-wash: #f4e5c7;
-  --danger: #a8443e;
-  --danger-wash: #f3dcd7;
-  --shadow: rgba(25, 44, 70, 0.08);
+  --bg: oklch(0.99 0.002 60);
+  --surface: oklch(1 0 0);
+  --sunken: oklch(0.965 0.003 60);
+  --raised: oklch(1 0 0);
 
-  font-family: "Avenir Next", Avenir, Helvetica, Arial, sans-serif;
-  font-size: 16px;
-  line-height: 1.5;
-  font-weight: 400;
-  color: var(--ink);
-  background: var(--paper);
-  font-synthesis: none;
-  text-rendering: optimizeLegibility;
-  -webkit-font-smoothing: antialiased;
-  -moz-osx-font-smoothing: grayscale;
-}
+  --ink: oklch(0.19 0.012 50);
+  --ink-2: oklch(0.44 0.012 50);
+  --ink-3: oklch(0.63 0.011 50);
+  --ink-4: oklch(0.78 0.009 50);
 
-* {
-  box-sizing: border-box;
-}
+  --line: oklch(0.90 0.005 50);
+  --hairline: oklch(0.945 0.004 50);
 
-body {
-  min-width: 320px;
-  min-height: 100vh;
-  margin: 0;
-  background:
-    radial-gradient(circle at 88% 8%, rgba(221, 107, 50, 0.11), transparent 16rem),
-    linear-gradient(135deg, rgba(255, 255, 255, 0.28), transparent 38%),
-    var(--paper);
-}
+  /* Oxblood. Primary actions and the current selection only. */
+  --accent: oklch(0.52 0.155 25);
+  --accent-ink: oklch(0.99 0.01 25);
+  --accent-weak: oklch(0.95 0.02 25);
 
-button,
-input {
-  font: inherit;
-}
+  --live: oklch(0.56 0.13 155);
+  --warning: oklch(0.60 0.12 75);
+  --danger: oklch(0.53 0.17 25);
 
-button {
-  cursor: pointer;
-}
+  /* Two names beUI reads straight out of the cascade — `text-(--color-success)`
+     and `hover:border-(--color-border-strong)` ask for the custom property by
+     name rather than for a utility. Defined here, in terms of tokens that are
+     already restated in the dark block, so neither needs a second definition. */
+  --color-success: var(--live);
+  --color-border-strong: var(--ink-4);
 
-button:focus-visible,
-input:focus-visible {
-  outline: 3px solid rgba(221, 107, 50, 0.48);
-  outline-offset: 3px;
-}
+  --shadow-sm: 0 1px 2px oklch(0.19 0.012 50 / 0.06);
+  --shadow-md: 0 1px 2px oklch(0.19 0.012 50 / 0.05), 0 8px 24px -12px oklch(0.19 0.012 50 / 0.22);
 
-.container {
-  width: min(100%, 900px);
-  margin: 0 auto;
-  padding: 3.25rem clamp(1.25rem, 5vw, 4.5rem) 4rem;
-}
-
-.page-header {
-  display: grid;
-  grid-template-columns: auto 1fr;
-  gap: 1.25rem;
-  align-items: start;
-  padding-bottom: 2.5rem;
-  border-bottom: 1px solid var(--line);
-}
-
-.brand-mark {
-  display: grid;
-  width: 3.65rem;
-  height: 3.65rem;
-  place-items: center;
-  margin-top: 0.15rem;
-  color: var(--paper);
-  background: var(--orange);
-  box-shadow: 0.35rem 0.35rem 0 var(--ink);
-  transform: rotate(-3deg);
-}
-
-.brand-mark span {
-  font-size: 1.08rem;
-  font-weight: 800;
-  letter-spacing: -0.08em;
-  transform: rotate(3deg);
-}
-
-.eyebrow {
-  margin: 0 0 0.4rem;
-  color: var(--orange-deep);
-  font-size: 0.68rem;
-  font-weight: 800;
-  letter-spacing: 0.17em;
-  line-height: 1.2;
-  text-transform: uppercase;
-}
-
-h1,
-h2,
-h3,
-p {
-  margin-top: 0;
-}
-
-h1,
-h2,
-h3 {
-  color: var(--ink);
-  font-family: Georgia, "Times New Roman", serif;
-  font-weight: 700;
-}
-
-h1 {
-  max-width: 18ch;
-  margin-bottom: 0.65rem;
-  font-size: clamp(2.35rem, 7vw, 4.4rem);
-  letter-spacing: -0.055em;
-  line-height: 0.98;
-}
-
-.lede {
-  max-width: 43rem;
-  margin-bottom: 0;
-  color: var(--ink-soft);
-  font-size: 1rem;
-  line-height: 1.55;
-}
-
-.profiles-section {
-  padding: 2.4rem 0 2.75rem;
-}
-
-.section-heading {
-  display: flex;
-  align-items: end;
-  justify-content: space-between;
-  gap: 1rem;
-  margin-bottom: 1.15rem;
-}
-
-.section-heading h2,
-.add-section h2,
-.settings-section h2 {
-  margin-bottom: 0;
-  font-size: clamp(1.7rem, 4vw, 2.35rem);
-  letter-spacing: -0.045em;
-  line-height: 1;
-}
-
-.count-badge {
-  display: inline-grid;
-  min-width: 2.25rem;
-  height: 2.25rem;
-  padding: 0 0.55rem;
-  place-items: center;
-  border: 1px solid var(--ink);
-  border-radius: 999px;
-  color: var(--paper);
-  background: var(--ink);
-  font-size: 0.8rem;
-  font-weight: 800;
-}
-
-.error {
-  margin-bottom: 1rem;
-  padding: 0.85rem 1rem;
-  border-left: 4px solid var(--danger);
-  color: var(--danger);
-  background: var(--danger-wash);
-  font-size: 0.9rem;
-  line-height: 1.45;
-}
-
-/* Grouping only appears once a second app is installed; with one, the list
-   renders exactly as it did before groups existed. */
-.app-group + .app-group {
-  margin-top: 1.35rem;
-}
-
-.app-heading {
-  margin: 0 0 0.6rem;
-  font-size: 0.78rem;
-  font-weight: 600;
-  letter-spacing: 0.08em;
-  text-transform: uppercase;
-  color: #89919a;
-}
-
-.app-picker select {
-  height: 100%;
-  border: 1px solid var(--line);
-  border-radius: 0.25rem;
-  padding: 0.65rem 0.6rem;
-  color: var(--ink);
-  background: var(--card);
-  font: inherit;
-}
-
-.app-picker select:hover {
-  border-color: #b6aa9c;
-}
-
-.profile-list {
-  display: grid;
-  gap: 0.75rem;
-  margin: 0;
-  padding: 0;
-  list-style: none;
-}
-
-.profile-card {
-  display: grid;
-  grid-template-columns: 2.25rem minmax(0, 1fr) auto;
-  gap: 1rem;
-  align-items: center;
-  min-width: 0;
-  padding: 1rem 1.1rem;
-  border: 1px solid var(--line);
-  border-left: 4px solid var(--ink);
-  background: var(--card);
-  box-shadow: 0 0.45rem 1rem var(--shadow);
-  transition: border-color 160ms ease, box-shadow 160ms ease, transform 160ms ease;
-}
-
-.profile-card:hover {
-  border-color: var(--orange);
-  box-shadow: 0 0.65rem 1.2rem rgba(25, 44, 70, 0.12);
-  transform: translateY(-1px);
-}
-
-.profile-index {
-  align-self: start;
-  padding-top: 0.16rem;
-  color: var(--orange);
-  font-size: 0.72rem;
-  font-weight: 800;
-  letter-spacing: 0.08em;
-}
-
-.profile-content {
-  min-width: 0;
-}
-
-.profile-title {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 0.45rem;
-  align-items: center;
-  margin-bottom: 0.35rem;
-}
-
-.profile-label {
-  overflow: hidden;
-  margin: 0;
-  font-size: 1.18rem;
-  letter-spacing: -0.025em;
-  line-height: 1.2;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.profile-path {
-  overflow: hidden;
-  margin: 0;
-  color: var(--ink-soft);
-  font-family: "SFMono-Regular", Consolas, "Liberation Mono", monospace;
-  font-size: 0.73rem;
-  line-height: 1.45;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.status-badge {
-  display: inline-flex;
-  align-items: center;
-  min-height: 1.45rem;
-  padding: 0.15rem 0.52rem;
-  border-radius: 999px;
-  font-size: 0.63rem;
-  font-weight: 800;
-  letter-spacing: 0.04em;
-  line-height: 1.2;
-  text-transform: uppercase;
-}
-
-.status-default {
-  color: var(--ink);
-  background: var(--paper-deep);
-}
-
-.status-warning {
-  color: var(--warning);
-  background: var(--warning-wash);
-}
-
-.profile-actions {
-  display: flex;
-  flex-wrap: wrap;
-  justify-content: end;
-  gap: 0.45rem;
-}
-
-.button {
-  min-height: 2.25rem;
-  border: 1px solid transparent;
-  border-radius: 0.25rem;
-  padding: 0.45rem 0.8rem;
-  font-size: 0.78rem;
-  font-weight: 800;
-  line-height: 1.1;
-  white-space: nowrap;
-  transition: background-color 160ms ease, border-color 160ms ease, color 160ms ease;
-}
-
-.button-primary {
-  color: #fffaf2;
-  background: var(--orange);
-}
-
-.button-primary:hover {
-  background: var(--orange-deep);
-}
-
-.button-quiet {
-  border-color: var(--line);
-  color: var(--ink);
-  background: transparent;
-}
-
-.button-quiet:hover {
-  border-color: var(--ink);
-  background: var(--paper-deep);
-}
-
-.button-danger {
-  border-color: var(--line);
-  color: var(--danger);
-  background: transparent;
-}
-
-.button-danger:hover {
-  border-color: var(--danger);
-  background: var(--danger-wash);
-}
-
-.add-column {
-  display: grid;
-  gap: 0.75rem;
-  align-content: start;
-}
-
-/* The banner version reserves space below itself; this one sits at the end of
-   its column and does not. */
-.error-inline {
-  margin-bottom: 0;
-}
-
-.add-section {
-  display: grid;
-  grid-template-columns: minmax(0, 1fr) minmax(16rem, 1.05fr);
-  gap: 2rem;
-  align-items: end;
-  padding: 1.8rem 0 2.4rem;
-  border-top: 1px solid var(--line);
-}
-
-.helper {
-  max-width: 32rem;
-  margin: 0.75rem 0 0;
-  color: var(--ink-soft);
-  font-size: 0.84rem;
-  line-height: 1.5;
-}
-
-.add-form {
-  display: flex;
-  gap: 0.6rem;
-  align-items: stretch;
-}
-
-.add-form input {
-  min-width: 0;
-  width: 100%;
-  border: 1px solid var(--line);
-  border-radius: 0.25rem;
-  padding: 0.65rem 0.75rem;
-  color: var(--ink);
-  background: var(--card);
-}
-
-.add-form input::placeholder {
-  color: #89919a;
-}
-
-.add-form input:hover {
-  border-color: #b6aa9c;
-}
-
-.sr-only {
-  position: absolute;
-  width: 1px;
-  height: 1px;
-  overflow: hidden;
-  padding: 0;
-  border: 0;
-  margin: -1px;
-  clip: rect(0, 0, 0, 0);
-  white-space: nowrap;
-}
-
-@media (max-width: 650px) {
-  .container {
-    padding-top: 2rem;
-  }
-
-  .page-header {
-    grid-template-columns: 1fr;
-    gap: 1rem;
-  }
-
-  .brand-mark {
-    width: 3rem;
-    height: 3rem;
-  }
-
-  .profile-card {
-    grid-template-columns: 1.8rem minmax(0, 1fr);
-    gap: 0.75rem;
-  }
-
-  .profile-actions {
-    grid-column: 2;
-    justify-content: start;
-  }
-
-  .add-column {
-  display: grid;
-  gap: 0.75rem;
-  align-content: start;
-}
-
-/* The banner version reserves space below itself; this one sits at the end of
-   its column and does not. */
-.error-inline {
-  margin-bottom: 0;
-}
-
-.add-section {
-    grid-template-columns: 1fr;
-    gap: 1.25rem;
-  }
-}
-
-@media (max-width: 430px) {
-  .add-form {
-    flex-direction: column;
-  }
-
-  .add-form .button {
-    width: 100%;
-  }
-}
-
-@media (prefers-reduced-motion: reduce) {
-  *,
-  *::before,
-  *::after {
-    scroll-behavior: auto !important;
-    transition-duration: 0.01ms !important;
-    animation-duration: 0.01ms !important;
-    animation-iteration-count: 1 !important;
-  }
+  /* Identity ramp. One lightness and chroma across the wheel so eight profiles
+     read as one family rather than a bag of colours. */
+  --id-0: oklch(0.62 0.15 25);
+  --id-1: oklch(0.64 0.14 55);
+  --id-2: oklch(0.66 0.13 95);
+  --id-3: oklch(0.62 0.13 145);
+  --id-4: oklch(0.63 0.12 190);
+  --id-5: oklch(0.58 0.14 235);
+  --id-6: oklch(0.56 0.15 285);
+  --id-7: oklch(0.60 0.15 330);
 }
 
 @media (prefers-color-scheme: dark) {
   :root {
-    --paper: #1b2635;
-    --paper-deep: #263548;
-    --card: #223044;
-    --ink: #f5efe4;
-    --ink-soft: #b7c0c9;
-    --line: #405168;
-    --orange: #ef8950;
-    --orange-deep: #ffac79;
-    --orange-wash: #4b3030;
-    --warning: #f4c77b;
-    --warning-wash: #4a3d2c;
-    --danger: #ff9b91;
-    --danger-wash: #492f35;
-    --shadow: rgba(0, 0, 0, 0.22);
+    /* Warm charcoal, not blue-black. This is where the warmth lives. */
+    --bg: oklch(0.17 0.006 45);
+    --surface: oklch(0.21 0.007 45);
+    --sunken: oklch(0.24 0.008 45);
+    --raised: oklch(0.25 0.008 45);
+
+    --ink: oklch(0.95 0.004 60);
+    --ink-2: oklch(0.76 0.008 60);
+    --ink-3: oklch(0.60 0.009 55);
+    --ink-4: oklch(0.44 0.009 50);
+
+    --line: oklch(0.31 0.008 45);
+    --hairline: oklch(0.27 0.008 45);
+
+    --accent: oklch(0.68 0.15 27);
+    --accent-ink: oklch(0.18 0.02 27);
+    --accent-weak: oklch(0.30 0.05 27);
+
+    --live: oklch(0.75 0.15 155);
+    --warning: oklch(0.79 0.13 80);
+    --danger: oklch(0.68 0.16 27);
+
+    --shadow-sm: 0 1px 2px oklch(0 0 0 / 0.4);
+    --shadow-md: 0 1px 2px oklch(0 0 0 / 0.4), 0 8px 24px -12px oklch(0 0 0 / 0.7);
+
+    --id-0: oklch(0.70 0.14 25);
+    --id-1: oklch(0.73 0.13 55);
+    --id-2: oklch(0.76 0.12 95);
+    --id-3: oklch(0.72 0.12 145);
+    --id-4: oklch(0.73 0.11 190);
+    --id-5: oklch(0.68 0.13 235);
+    --id-6: oklch(0.67 0.14 285);
+    --id-7: oklch(0.70 0.14 330);
+  }
+}
+
+@theme inline {
+  --color-bg: var(--bg);
+  --color-surface: var(--surface);
+  --color-sunken: var(--sunken);
+  --color-raised: var(--raised);
+
+  --color-ink: var(--ink);
+  --color-ink-2: var(--ink-2);
+  --color-ink-3: var(--ink-3);
+  --color-ink-4: var(--ink-4);
+
+  --color-line: var(--line);
+  --color-hairline: var(--hairline);
+
+  --color-accent: var(--accent);
+  --color-accent-ink: var(--accent-ink);
+  --color-accent-weak: var(--accent-weak);
+
+  --color-live: var(--live);
+  --color-warning: var(--warning);
+  --color-danger: var(--danger);
+
+  /* beUI's components are written against the shadcn token names. Mapping those
+     names onto this palette is what makes them wear this window's colours;
+     without it they would arrive carrying a second theme, and every call site
+     would have to argue with it in `className`. */
+  --color-background: var(--surface);
+  --color-foreground: var(--ink);
+  --color-card: var(--surface);
+  --color-muted: var(--sunken);
+  --color-muted-foreground: var(--ink-2);
+  --color-border: var(--line);
+  --color-ring: var(--accent);
+  --color-primary: var(--accent);
+  --color-primary-foreground: var(--accent-ink);
+  --color-destructive: var(--danger);
+
+  /* The system face, not a vendored one: this window sits next to Finder and
+     System Settings, and text that is not SF reads as a web page pretending to
+     be an app. `-apple-system` also hands us SF's optical sizing for free. */
+  --font-sans: -apple-system, BlinkMacSystemFont, system-ui, sans-serif;
+  --font-mono: ui-monospace, "SF Mono", SFMono-Regular, Menlo, monospace;
+
+  /* macOS's own type scale (AppKit text styles). Five sizes, no in-between:
+     the window had ten before, and 10.5 next to 11 is not a distinction anyone
+     can see — it is just two places to forget to keep in step. */
+  --text-title: 15px; /* title 3 — the empty state's headline */
+  --text-body: 13px; /* body — profile names, sentences */
+  --text-callout: 12px; /* callout — controls, secondary lines */
+  --text-sub: 11px; /* subheadline — paths, figures, footnotes */
+  --text-caption: 10px; /* caption — section labels, tags */
+
+  --shadow-card: var(--shadow-sm);
+  --shadow-float: var(--shadow-md);
+
+  /* Ease-out-quint. No bounce, no elastic — this is a tool, not a toy. */
+  --ease-out-quint: cubic-bezier(0.22, 1, 0.36, 1);
+}
+
+@layer base {
+  :root {
+    color-scheme: light dark;
+    font-synthesis: none;
+    text-rendering: optimizeLegibility;
+    -webkit-font-smoothing: antialiased;
+    -moz-osx-font-smoothing: grayscale;
   }
 
   body {
-    background:
-      radial-gradient(circle at 88% 8%, rgba(239, 137, 80, 0.13), transparent 16rem),
-      linear-gradient(135deg, rgba(255, 255, 255, 0.025), transparent 38%),
-      var(--paper);
+    margin: 0;
+    min-width: 320px;
+    background: var(--bg);
+    color: var(--ink);
+    font-family: var(--font-sans);
+    font-size: var(--text-body);
+    line-height: 1.45;
+    /* Text selection is a document affordance, not an app one. */
+    -webkit-user-select: none;
+    user-select: none;
+    /* Nor is rubber-banding: the webview is the window, and a window does not
+       bounce when a list inside it reaches its end. */
+    overscroll-behavior: none;
   }
 
-  .button-primary {
-    color: #211a17;
+  input,
+  textarea {
+    -webkit-user-select: text;
+    user-select: text;
+  }
+
+  /* `hidden` puts whole bands away, and several are flex or grid containers —
+     an author `display` outranks the user agent's rule for `[hidden]`. */
+  [hidden] {
+    display: none !important;
+  }
+
+  :focus-visible {
+    outline: 2px solid var(--accent);
+    outline-offset: 2px;
   }
 }
 
-.inline-panel {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: center;
-  gap: 0.5rem;
-  margin-top: 0.75rem;
-  padding: 0.75rem;
-  border: 1px solid var(--border, rgba(128, 128, 128, 0.35));
-  border-radius: 0.5rem;
-}
-
-.inline-panel input {
-  flex: 1 1 12rem;
-  min-width: 0;
-}
-
-.inline-panel .helper {
-  flex: 1 1 100%;
-  margin: 0;
-}
-
-.inline-panel-danger {
-  border-color: rgba(190, 60, 60, 0.6);
-}
-
-/* Text selection is a document affordance, not an app one. */
-body {
-  -webkit-user-select: none;
-  user-select: none;
-}
-
-input,
-textarea {
-  -webkit-user-select: text;
-  user-select: text;
-}
-
-.settings-section {
-  display: grid;
-  gap: 1rem;
-  padding: 1.8rem 0 0;
-  border-top: 1px solid var(--line);
-}
-
-.toggle-row {
-  display: flex;
-  align-items: center;
-  gap: 0.6rem;
-  cursor: pointer;
-}
-
-.toggle-row input {
-  width: 1rem;
-  height: 1rem;
-  cursor: pointer;
+@layer utilities {
+  /* Every animation in the window has a reduced-motion answer; these are the
+     entrances, which become instant rather than merely faster. */
+  @media (prefers-reduced-motion: reduce) {
+    *,
+    *::before,
+    *::after {
+      animation-duration: 0.01ms !important;
+      animation-iteration-count: 1 !important;
+      transition-duration: 0.01ms !important;
+      scroll-behavior: auto !important;
+    }
+  }
 }

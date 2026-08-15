@@ -3,68 +3,14 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <meta name="theme-color" content="#f4f0e8" />
+    <!-- `--surface`, which is what the window paints edge to edge. -->
+    <meta name="theme-color" content="#ffffff" media="(prefers-color-scheme: light)" />
+    <meta name="theme-color" content="#2b2724" media="(prefers-color-scheme: dark)" />
     <title>Agent Profiles</title>
     <link rel="icon" type="image/png" href="/src/favicon.png" />
   </head>
   <body>
-    <main class="container">
-      <header class="page-header">
-        <div class="brand-mark" aria-hidden="true"><span>ap</span></div>
-        <div>
-          <p class="eyebrow">Profile cabinet</p>
-          <h1>Agent Profiles</h1>
-          <p class="lede">Keep each coding agent workspace separate and ready to open.</p>
-        </div>
-      </header>
-
-      <section class="profiles-section" aria-labelledby="profiles-heading">
-        <div class="section-heading">
-          <div>
-            <p class="eyebrow">Your workspaces</p>
-            <h2 id="profiles-heading">Profiles</h2>
-          </div>
-          <span id="profile-count" class="count-badge" aria-live="polite">0</span>
-        </div>
-        <div id="error" class="error" role="alert" hidden></div>
-        <div id="apps" aria-live="polite"></div>
-      </section>
-
-      <section class="add-section" aria-labelledby="add-heading">
-        <div>
-          <p class="eyebrow">Make room for another sign-in</p>
-          <h2 id="add-heading">Add a profile</h2>
-          <p class="helper">Choose a label you will recognize. Account details stay inside the app itself.</p>
-        </div>
-        <div class="add-column">
-          <form id="add-profile-form" class="add-form">
-            <span class="app-picker" hidden>
-              <label class="sr-only" for="new-app">App</label>
-              <select id="new-app" name="app"></select>
-            </span>
-            <label class="sr-only" for="new-label">Profile label</label>
-            <input id="new-label" name="label" type="text" maxlength="80" autocomplete="off" placeholder="e.g. Work" required />
-            <button type="submit" class="button button-primary">Add profile</button>
-          </form>
-          <!-- Refusals belong beside the control that caused them. This one used
-               to render in the banner at the top of the page, far enough above
-               the form to be off screen, so a rejected label looked like a
-               button that did nothing. -->
-          <div id="add-error" class="error error-inline" role="alert" hidden></div>
-        </div>
-      </section>
-      <section class="settings-section" id="autostart-section" aria-labelledby="settings-heading" hidden>
-        <div>
-          <p class="eyebrow">Startup</p>
-          <h2 id="settings-heading">Launch at login</h2>
-          <p class="helper">Start Agent Profiles automatically when you sign in. This only starts the tray; no profile is opened for you.</p>
-        </div>
-        <label class="toggle-row">
-          <input id="autostart" type="checkbox" />
-          <span>Start Agent Profiles at login</span>
-        </label>
-      </section>
-    </main>
-    <script type="module" src="/src/main.ts"></script>
+    <div id="root"></div>
+    <script type="module" src="/src/main.tsx"></script>
   </body>
 </html>

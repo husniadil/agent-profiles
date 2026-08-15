@@ -2,9 +2,57 @@
 
 Notable changes, newest first. This project follows [Semantic Versioning](https://semver.org).
 
-## [Unreleased]
+## [0.3.0] — 2026-08-15
 
-Nothing yet.
+The management window rebuilt. Every existing behaviour is kept; only the presentation changes.
+
+### Added
+
+- **The window is a React app** built with [beUI](https://beui.dev) components, replacing the hand-written DOM builder in `src/main.ts` that had grown to 394 lines of element creation and manual event wiring. The behaviour it drew is unchanged; what it is made of is not.
+- **A profile has an identity colour** — a stable hue derived from the profile, shown as a chip carrying its initial — so a profile is recognisable at a glance rather than only by reading its name. The hue follows the profile, not its position in the list.
+- **The maximize button is disabled.** This is a fixed-purpose window opened from the tray for a few seconds; a zoomed full-screen state serves nothing. It still resizes freely. On macOS the green title-bar button greys out; on Linux Tauri does not support the setting, so the window can still be maximized there.
+- **The socket path budget appears only when the margin is thin** — under eight bytes of headroom, or already over. The refusal does not live in that block: `profile_store::add` turns down a profile that leaves no room whether or not anything was drawn, so on a machine that will never reach the limit the meter was a number nobody could act on, held permanently in a window with no room to spare. It cannot move as you type either — a profile directory is named after a generated id, so for one machine it is a fixed verdict rather than a gauge. Eight bytes is the spread between app ids plus margin: a data root that clears `code` can still refuse `claude`. An ordinary home directory sits about sixteen bytes clear.
+- **A profile can be opened from the management window**, not only from the tray. The row's open action launches the profile, or focuses it if it is already running, deciding from a fresh process scan rather than from what the window last drew.
+- **A running dot on every row.** Running state used to be visible only in the tray.
+- **Windsurf is a supported app** — the Devin rebrand, declared alongside the agents already handled.
+
+### Changed
+
+- **The window sizes itself to its content** instead of holding a fixed height with the list stretched to fill it. A tray window is a popover, not a panel: three profiles no longer sit in a frame built for nine, and the empty band that used to open below a short list is gone. Past the point where the list would run off the screen it scrolls inside the window instead of growing it. Measured from the frontend — the gap between the list's natural height and the height the window currently gives it — and applied through the Tauri window API, so it stays a property of what is on screen rather than a count kept in the backend. macOS/Linux; the resize is a no-op where the platform gives no window to size.
+- **The add button is `Add`, without a trailing plus.** The plus sat after the word and only said it twice; the button is narrower for losing it, and its width is now pinned to its widest running state (`Adding`) so the label swapping through Add → Adding → Added → Retry never resizes it under the pointer.
+- **A new profile's name is capped at 15 characters.** The name is a label, not a path — the profile directory is named after a generated id — so its length costs nothing but row space, and fifteen sits on one line beside the running badge without truncating.
+- The window is achromatic and follows the system theme, with full light and dark palettes. Colour is spent on two things only: **identity** — a profile's own hue, on its chip — and **state**, green for running, amber for a shared sign-in, red for destructive. Nothing else in the window is coloured. It previously painted one fixed warm palette regardless of the system.
+- **The window is set in the system face** on a five-step type scale — `title`, `body`, `callout`, `sub`, `caption` — and the vendored Archivo and IBM Plex Mono files are gone from the bundle. A window that belongs to the menu bar should read as part of the system it sits in, and the fonts it was carrying were weight the download did not need to include.
+- **The three-line page header is one status line**: profile count, running count, total size on disk, and the data root. The window previously carried an eyebrow, a heading and a lede before the first row, then a second heading below that.
+- **Profile rows carry their size on disk** in place of the `01 / 02` index column. The index numbered rows in an order that meant nothing and changed when a profile was deleted; the size is the number the delete confirmation already computes.
+- **Open, rename and delete are icons**, shown on hover or keyboard focus in the slot the size occupies at rest, so the row's width never changes. The rename and delete confirmations keep their words — an action that destroys 1.4 GB should be read, not recognised from a picture.
+- **Section headings are sentence case at the subheadline size**, the way the Finder sidebar and System Settings set a group heading — `Claude`, `VS Code`, `New profile`. They were small caps on a wide track, which is a dashboard's idea of a section label rather than this platform's. The typeface never changed: it has been the system face throughout.
+- **The Default profile shows a disabled delete rather than an empty slot.** An empty slot reads as an icon that failed to load; a greyed one reads as an action this row does not have. The label says the profile is the app's own installation and cannot be deleted, so the greyed control promises no condition under which it could be.
+- The `Default` badge is gone: that profile is recognisable from being the one with no delete action. The shared-sign-in badge stays, and gains a border so it is findable on an achromatic surface.
+- The total size on disk is published only once every profile has been measured. A total that counts half the profiles is a wrong number stated confidently.
+- The helper line under the add form is gone with the rest of the prose. Its assurance — that account details stay inside the app itself — is not dropped: it is stated at more length under **Important safety behavior** in the README, which says that labels are manual and that account email addresses are never read from disk or displayed.
+- **A profile's state is the row's own icon rather than a `●` inside its label.** Every profile row now carries an image — a filled green disc while it is running, a grey ring while it is not — in the column the Wi-Fi menu puts a network's icon in. It is drawn from the window's `--live` token, so running is the same green in both surfaces. The old `●` and `○` sat in the text column, aligned against nothing.
+- **Profile names are set a step below the menu's own type size** — 12pt against AppKit's 14pt — so a person with nine profiles gets a shorter menu out of it. `Settings…` and `Quit` stay at full size: they are commands rather than data, and the contrast is what makes the smaller rows read as a decision rather than as a menu that came out wrong. macOS only. muda's menu item takes a plain `String` and has nowhere to put a font, so the size is set through AppKit itself, down through the tray's `NSStatusItem` to the `NSMenu` it owns; Windows and Linux offer no equivalent and are unchanged.
+- **The path under a profile's name is set at `text-sub`**, the same step the New profile card sets its own path in, one below the name beside it — and in one quiet grey rather than ending in full-strength ink, with the last segment held apart by weight instead. The path is where a profile lives, not what it is called; the name is what the eye should land on. It stays in the monospace face every path and id here is set in.
+- **Profiles are no longer padded with three spaces under an app's name.** Their icon indents them, and the app name above sits flush left without one, the way `Known Network` sits above the networks under it. Every profile stays on the top level: this is a menu opened to reach a profile, and a profile behind a submenu is one hover further away than it was.
+- A profile that is running but cannot be focused keeps its filled dot while staying unclickable, which reads as *running, nothing to do here* rather than as a row that failed.
+- **The row that opens the window is `Settings…` rather than `Manage Profiles…`.** It opens the same window and does the same thing; `Settings…` is what every other menu bar app calls the row that opens its window, and it no longer repeats the word the rows above it are already full of.
+- **The last row is `Quit` rather than `Quit Agent Profiles`.** It still ends this app and never one of the agents it manages.
+- **The menu bar icon is two stacked profile cards bearing the AI sparkle**, rather than the letters `ap`. The cards carry "profiles" — the app runs several at once — and on the front one sits the concave four-point sparkle that reads as AI across the whole field now (Gemini, Copilot, ChatGPT, Slack), which the old wordmark said nothing of. It is a template image: only the alpha channel survives and the system recolours it, so the cards are outlines rather than fills — a solid card would arrive as a black block among a menu bar full of line-weight icons — and the card behind is cut away around the front so the two do not merge into one shape at menu-bar size.
+- Each profile is measured once per visit to the window rather than on every list reload. Renaming or opening a profile cannot change a byte of it, and both reload the list; re-walking every directory each time made a rename cost seconds of I/O to arrive back at the same numbers.
+
+### Fixed
+
+- **`cn()` was deleting this window's type sizes before they reached the DOM.** The window styles with Tailwind and merges class lists through `tailwind-merge`, which only knows Tailwind's own class names, and `text-<name>` is a colour in stock Tailwind, so `text-body`, `text-sub` and `text-caption` were all classified as colours: any class list naming a size *and* a colour lost the size, and the element silently inherited `body`'s 13px instead. `extendTailwindMerge` now names the scale as a `font-size` group. One element was affected — the path under a profile's name, the only `cn()` call combining the two — and it had been rendering three sizes larger than the code said for as long as the class existed.
+- Every colour pairing in the window now clears WCAG AA for its role. Several did not: the app name that says whose profiles a group holds read at 2.4:1, and the red that reports an unusable data root read at 4.3:1 against the page.
+
+### Removed
+
+- **The `Quit <profile>` row in the tray menu.** Quitting an application belongs to that application: the row put a destructive action directly beneath the navigational one it looked like, in a menu opened to switch between profiles. Focus and Launch stay, and so does **Quit** (see **Changed**), which ends this app rather than one of the agents it manages. Deletion still refuses while a profile is running, and still says so.
+
+### Note
+
+The tray menu has no stylesheet to apply — it is a native platform menu, and it follows the system theme by being a system menu. Its rounded hover highlight, its state column and its section spacing are all drawn by the operating system; what changed above is what the menu asks for, not how any of it is painted.
 
 ## [0.2.0] — 2026-08-14
 

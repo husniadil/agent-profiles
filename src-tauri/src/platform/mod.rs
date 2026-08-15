@@ -15,7 +15,7 @@ pub mod win_proc;
 #[cfg(any(target_os = "linux", test))]
 mod linux;
 #[cfg(target_os = "macos")]
-mod macos;
+pub(crate) mod macos;
 #[cfg(any(target_os = "windows", test))]
 mod windows;
 
@@ -106,6 +106,15 @@ pub trait Platform: Send + Sync {
 
     fn focus(&self, pid: i32, hint: &FocusHint) -> Result<FocusOutcome>;
 
+    /// Ending a running instance.
+    ///
+    /// Nothing in the shipping binary calls this any more: the tray used to
+    /// offer a `Quit <profile>` row beside each running profile and no longer
+    /// does — quitting an application belongs to that application, not to a
+    /// menu opened to switch between profiles. It stays on the contract because
+    /// the verification harness and the probe both launch real applications and
+    /// have to be able to put them away again.
+    #[cfg_attr(not(test), allow(dead_code))]
     fn quit(&self, pid: i32) -> Result<()>;
 
     /// Extra arguments this OS needs on every launch, whatever the app.
@@ -167,8 +176,10 @@ pub fn current() -> Box<dyn Platform> {
 }
 
 /// How long an application is given to close on its own before we insist.
+#[cfg_attr(not(test), allow(dead_code))]
 const QUIT_GRACE: std::time::Duration = std::time::Duration::from_secs(10);
 /// How often it is asked whether it has gone.
+#[cfg_attr(not(test), allow(dead_code))]
 pub(crate) const QUIT_POLL: std::time::Duration = std::time::Duration::from_millis(100);
 
 /// Waits out the grace period, reporting whether the process left on its own.
@@ -178,6 +189,7 @@ pub(crate) const QUIT_POLL: std::time::Duration = std::time::Duration::from_mill
 /// still there, and an operating system hands a pid to the next process that
 /// asks. Escalating on the clock alone therefore aims a kill at whatever
 /// inherited the number.
+#[cfg_attr(not(test), allow(dead_code))]
 pub(crate) fn waited_for_exit(
     mut still_alive: impl FnMut() -> bool,
     mut wait: impl FnMut(),
@@ -193,6 +205,7 @@ pub(crate) fn waited_for_exit(
 }
 
 #[cfg(unix)]
+#[cfg_attr(not(test), allow(dead_code))]
 pub fn unix_signal_quit(pid: i32) -> Result<()> {
     unsafe { libc::kill(pid, libc::SIGTERM) };
     let gone = waited_for_exit(

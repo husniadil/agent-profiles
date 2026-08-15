@@ -1,5 +1,7 @@
 use crate::app_spec::AppSpec;
-use crate::platform::{find_for, wm_class, Platform};
+use crate::instance_manager;
+use crate::paths::Paths;
+use crate::platform::{find_for, wm_class, FocusHint, FocusOutcome, Platform, RunningProcess};
 use crate::profile_store::{Profile, ProfileStore};
 use crate::runtime::{AppRuntime, AppState};
 use serde::Serialize;
@@ -13,6 +15,9 @@ pub struct ProfileView {
     pub path: String,
     pub is_default: bool,
     pub shares_account: bool,
+    /// Whether this profile has a live process right now. The window draws a
+    /// dot from it; it is a snapshot of scan time, never cached.
+    pub running: bool,
 }
 
 #[derive(Serialize, Clone)]
@@ -24,7 +29,11 @@ pub struct AppView {
     pub profiles: Vec<ProfileView>,
 }
 
-pub fn to_views(spec: &AppSpec, store: &ProfileStore) -> Vec<ProfileView> {
+pub fn to_views(
+    spec: &AppSpec,
+    store: &ProfileStore,
+    processes: &[RunningProcess],
+) -> Vec<ProfileView> {
     let dupes = crate::account::duplicate_accounts(store.list());
     store
         .list()
@@ -40,8 +49,42 @@ pub fn to_views(spec: &AppSpec, store: &ProfileStore) -> Vec<ProfileView> {
                 .as_deref()
                 .map(|account| dupes.contains(account))
                 .unwrap_or(false),
+            running: find_for(processes, spec.id, &p.path, p.is_default).is_some(),
         })
         .collect()
+}
+
+#[derive(Serialize, Clone)]
+pub struct SocketBudget {
+    /// The directory a profile added now would get, with the id standing in as
+    /// a placeholder of the right width rather than a real one — the id is not
+    /// drawn until the profile exists. `x` is outside the lowercase hex alphabet
+    /// `fresh_id` draws from, so this can never name a profile that turns up on
+    /// disk. Drawn verbatim, but as an illustration of the length, not a path to
+    /// go looking for.
+    pub profile_dir: String,
+    /// How long the socket path *inside* that directory would be — the directory
+    /// plus the longest socket name an app puts in it, so it is a little longer
+    /// than `profile_dir` itself. This is the number the meter fills.
+    pub used_bytes: usize,
+    /// What `used_bytes` is measured against. `None` on Windows, where named
+    /// pipes live outside the profile and there is no budget to keep. The window
+    /// draws nothing at all in that case.
+    pub limit_bytes: Option<usize>,
+}
+
+/// The socket budget for the next profile of this app.
+///
+/// Deliberately independent of the label: `ProfileStore::add` names a profile
+/// directory after a generated id, never after what the user typed, so this
+/// number is a property of the data root and does not move as they type.
+pub(crate) fn budget_for(paths: &Paths) -> SocketBudget {
+    let sample = paths.profile_dir(&"x".repeat(crate::profile_store::ID_LEN));
+    SocketBudget {
+        profile_dir: sample.display().to_string(),
+        used_bytes: crate::paths::socket_path_len(&sample),
+        limit_bytes: crate::paths::SOCKET_PATH_LIMIT,
+    }
 }
 
 pub(crate) fn refuse_if_running(
@@ -116,19 +159,62 @@ fn register_identity(platform: &dyn Platform, runtime: &AppRuntime, profile: &Pr
 
 #[tauri::command]
 pub fn list_apps(state: tauri::State<AppState>) -> Result<Vec<AppView>, String> {
-    state
-        .apps
-        .iter()
-        .map(|runtime| {
+    // One sweep for every app, the same shape the tray rebuild uses, so the cost
+    // of the window does not grow with the number of apps installed. Availability
+    // is answered by looking for a binary on disk, and it is wanted twice — to
+    // decide what to scan and to fill the view — so it is carried, not re-asked.
+    let mut apps = Vec::new();
+    let mut targets = Vec::new();
+    for runtime in &state.apps {
+        let unavailable = state.availability(runtime);
+        if unavailable.is_none() {
+            // Failing to describe what to look for is dropped for the same reason
+            // failing to look is, below. Deliberately the opposite of `tray.rs`,
+            // which propagates instead — and rightly, because a tray that cannot
+            // scan cannot tell launch from focus and would offer the wrong action,
+            // whereas the window only loses a dot.
+            if let Ok(target) = crate::instance_manager::scan_target(&*state.platform, runtime.spec)
+            {
+                targets.push(target);
+            }
+        }
+        apps.push((runtime, unavailable));
+    }
+    // A scan that fails costs the dots, not the list. The window's job is to let
+    // someone rename and delete profiles; refusing to draw any of them because a
+    // process listing hiccuped would be a worse answer than an unlit dot.
+    let processes = state.platform.scan(&targets).unwrap_or_default();
+
+    apps.into_iter()
+        .map(|(runtime, unavailable)| {
             let store = runtime.store.lock().map_err(|e| e.to_string())?;
             Ok(AppView {
                 id: runtime.spec.id.to_string(),
                 label: runtime.spec.label.to_string(),
-                unavailable: state.availability(runtime),
-                profiles: to_views(runtime.spec, &store),
+                unavailable,
+                profiles: to_views(runtime.spec, &store, &processes),
             })
         })
         .collect()
+}
+
+/// Where every profile of every app lives. Drawn at the right of the status line.
+#[tauri::command]
+pub fn data_root(state: tauri::State<AppState>) -> Result<String, String> {
+    state
+        .platform
+        .data_root()
+        .map(|root| root.display().to_string())
+        .map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+pub fn socket_budget(
+    state: tauri::State<AppState>,
+    app_id: String,
+) -> Result<SocketBudget, String> {
+    let runtime = state.app(&app_id).map_err(|e| e.to_string())?;
+    Ok(budget_for(&runtime.paths))
 }
 
 #[tauri::command]
@@ -144,7 +230,9 @@ pub fn add_profile(
     let created = store
         .add(&label, &runtime.paths)
         .map_err(|e| e.to_string())?;
-    let view = to_views(runtime.spec, &store)
+    // A profile cannot already be running the moment it is created, so an empty
+    // scan is the truth here rather than a shortcut.
+    let view = to_views(runtime.spec, &store, &[])
         .into_iter()
         .find(|v| v.id == created.id)
         .ok_or_else(|| "profile vanished after creation".to_string())?;
@@ -262,6 +350,99 @@ pub fn profile_size_bytes(
     directory_size(&profile.path).map_err(|e| e.to_string())
 }
 
+/// What opening one profile amounts to, given what is running right now.
+#[derive(Debug, PartialEq)]
+pub(crate) enum OpenAction {
+    Launch,
+    Focus(i32),
+    /// Live already, and this app has no window to raise — the state `tray.rs`
+    /// renders as a disabled `running` row. The window has one control per
+    /// profile and has to say something, so this becomes a refusal rather than a
+    /// second process on a directory that already has one.
+    AlreadyRunning,
+}
+
+/// Takes the app id and the focus capability rather than the whole `AppSpec`:
+/// they are the only two fields that move the answer, and a `focus: false` spec
+/// would have to be spelled out in full as a test fixture — every one of the six
+/// declared specs sets `focus: true`. The single caller reads both from the same
+/// `runtime.spec`, so the pair cannot drift.
+pub(crate) fn open_action(
+    processes: &[RunningProcess],
+    app_id: &str,
+    can_focus: bool,
+    profile: &Profile,
+) -> OpenAction {
+    match find_for(processes, app_id, &profile.path, profile.is_default) {
+        Some(pid) if can_focus => OpenAction::Focus(pid),
+        Some(_) => OpenAction::AlreadyRunning,
+        None => OpenAction::Launch,
+    }
+}
+
+/// Launch this profile, or raise it if it is already running.
+///
+/// The window's copy of the running flag is a snapshot from the last `list_apps`,
+/// and a person can quit an app between that render and the click, so the choice
+/// is made from a fresh scan here rather than from anything the page sends.
+#[tauri::command]
+pub fn open_profile(
+    app: tauri::AppHandle,
+    state: tauri::State<AppState>,
+    app_id: String,
+    id: String,
+) -> Result<(), String> {
+    let (runtime, profile) = state.profile(&app_id, &id).map_err(|e| e.to_string())?;
+    // Fails closed, like `instance_manager::launch`: a scan that could not be run
+    // is not evidence that nothing is running, and treating it as such is exactly
+    // how a second process lands on a live profile directory.
+    let target =
+        instance_manager::scan_target(&*state.platform, runtime.spec).map_err(|e| e.to_string())?;
+    let processes = state.platform.scan(&[target]).map_err(|error| {
+        format!(
+            "could not check whether {} is running ({error})",
+            profile.label
+        )
+    })?;
+
+    match open_action(
+        &processes,
+        runtime.spec.id,
+        runtime.spec.capabilities.focus,
+        &profile,
+    ) {
+        OpenAction::Focus(pid) => {
+            let hint = FocusHint {
+                wm_class: &wm_class(runtime.spec.id, &profile.id),
+            };
+            match state
+                .platform
+                .focus(pid, &hint)
+                .map_err(|error| format!("Could not focus {}: {error}", profile.label))?
+            {
+                FocusOutcome::Focused => {}
+                FocusOutcome::Unsupported(message) => {
+                    return Err(format!("Could not focus {}: {message}", profile.label));
+                }
+            }
+        }
+        OpenAction::AlreadyRunning => {
+            return Err(format!(
+                "{} is already running, and {} cannot be brought to the front",
+                profile.label, runtime.spec.product
+            ));
+        }
+        OpenAction::Launch => {
+            instance_manager::launch(&*state.platform, runtime.spec, &profile, &runtime.paths)
+                .map_err(|e| e.to_string())?;
+        }
+    }
+    // The tray shows running state, so it is now out of date. A tray that fails to
+    // redraw must not turn a launch that worked into a reported failure.
+    let _ = crate::tray::rebuild(&app);
+    Ok(())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -288,7 +469,7 @@ mod tests {
         store.set_account(&a.id, Some("same".into()));
         store.set_account(&b.id, Some("same".into()));
 
-        let views = to_views(&app_spec::CLAUDE, &store);
+        let views = to_views(&app_spec::CLAUDE, &store, &[]);
 
         assert!(views.iter().find(|v| v.id == a.id).unwrap().shares_account);
         assert!(views.iter().find(|v| v.id == b.id).unwrap().shares_account);
@@ -300,7 +481,122 @@ mod tests {
         // The window needs it to send the right app id back on every action.
         let d = tempfile::tempdir().unwrap();
         let (_, store) = store_in(d.path());
-        assert_eq!(to_views(&app_spec::CODEX, &store)[0].app_id, "codex");
+        assert_eq!(to_views(&app_spec::CODEX, &store, &[])[0].app_id, "codex");
+    }
+
+    #[test]
+    fn a_view_reports_whether_that_profile_has_a_running_process() {
+        // The window draws a dot per row, so the running flag has to be per
+        // profile — not "this app has something running somewhere".
+        let d = tempfile::tempdir().unwrap();
+        let (paths, mut store) = store_in(d.path());
+        let work = store.add("Work", &paths).unwrap();
+        let idle = store.add("Idle", &paths).unwrap();
+
+        let processes = vec![RunningProcess {
+            app_id: "codex",
+            pid: 4242,
+            profile_dir: Some(work.path.clone()),
+        }];
+
+        let views = to_views(&app_spec::CODEX, &store, &processes);
+        assert!(views.iter().find(|v| v.id == work.id).unwrap().running);
+        assert!(!views.iter().find(|v| v.id == idle.id).unwrap().running);
+    }
+
+    #[test]
+    fn nothing_is_running_when_the_scan_found_nothing() {
+        let d = tempfile::tempdir().unwrap();
+        let (_, store) = store_in(d.path());
+        assert!(to_views(&app_spec::CODEX, &store, &[])
+            .iter()
+            .all(|v| !v.running));
+    }
+
+    // The literals below spell the path with `/`; on Windows `PathBuf::join`
+    // writes `\` and the assert would fail on the separator alone. A socket path
+    // is a Unix concept anyway — `SOCKET_PATH_LIMIT` is `None` on Windows — so
+    // there is nothing here to measure off Unix.
+    #[cfg(unix)]
+    #[test]
+    fn the_budget_spells_out_the_whole_path_it_measures() {
+        // Written out as a literal rather than rebuilt from `profile_dir` and
+        // `socket_path_len` — the latter would restate `budget_for`'s own body and
+        // could not fail. This version breaks if the `p/` layout, the id width or
+        // the socket-name budget ever move, which is exactly what it is for.
+        let budget = budget_for(&Paths::new("/root/claude"));
+
+        assert_eq!(budget.profile_dir, "/root/claude/p/xxxxxxxx");
+        assert_eq!(
+            budget.used_bytes,
+            "/root/claude/p/xxxxxxxx".len() + "/1.13-main.sock".len()
+        );
+        // `limit_bytes` is deliberately not asserted here: against
+        // `SOCKET_PATH_LIMIT` it would restate `budget_for`'s own body, and it is
+        // already pinned non-vacuously by `a_cramped_root_reports_over_its_limit`.
+    }
+
+    #[test]
+    fn the_budget_measures_a_profile_that_does_not_exist_yet() {
+        // Nothing may be created just to answer "would one fit?".
+        let d = tempfile::tempdir().unwrap();
+        let paths = Paths::new(d.path().join("root"));
+
+        budget_for(&paths);
+
+        assert!(
+            !paths.profiles_dir().exists(),
+            "asking must not create anything"
+        );
+    }
+
+    #[test]
+    fn the_predicted_width_matches_a_profile_actually_created() {
+        // `budget_for` guesses the directory width from `ID_LEN` before any
+        // profile exists. If `fresh_id` ever produced a different width the
+        // meter would quietly measure the wrong path, so pin the two together.
+        let d = tempfile::tempdir().unwrap();
+        let (paths, mut store) = store_in(d.path());
+        let created = store.add("Work", &paths).unwrap();
+
+        assert_eq!(
+            budget_for(&paths).used_bytes,
+            crate::paths::socket_path_len(&created.path)
+        );
+        // The sample path pads with `x`, which is safe only because `fresh_id`
+        // draws lowercase hex. Swapping it for base32 or base58 would let the
+        // illustration collide with a real profile directory; fail here first.
+        //
+        // Asserted as a character class rather than as "contains no `x`": one
+        // random id drawn from base32 has no `x` about four times in five, so
+        // the narrower check would pass through the very change it guards and
+        // read as a flake when it finally fired.
+        assert!(
+            created
+                .id
+                .chars()
+                .all(|c| c.is_ascii_digit() || ('a'..='f').contains(&c)),
+            "the sample id is no longer impossible: {}",
+            created.id
+        );
+    }
+
+    #[test]
+    fn a_cramped_root_reports_over_its_limit() {
+        // The whole point of drawing the meter: a home directory long enough that
+        // no profile can be created must say so before the user types a name.
+        //
+        // Asserted against the macOS number directly rather than against whatever
+        // this platform's limit happens to be, so the assertion actually runs on
+        // Windows CI instead of being skipped there — the same reason `paths.rs`
+        // split `fits_within` out from the platform question.
+        let paths = Paths::new(format!("/Users/{}/agent-profiles/claude", "n".repeat(120)));
+        let used = budget_for(&paths).used_bytes;
+        assert!(
+            used > crate::paths::MACOS_SOCKET_PATH_LIMIT,
+            "got {used} against {}",
+            crate::paths::MACOS_SOCKET_PATH_LIMIT
+        );
     }
 
     #[test]
@@ -343,6 +639,50 @@ mod tests {
         }]);
 
         assert!(refuse_if_running(&platform, &app_spec::CODEX, &profile).is_ok());
+    }
+
+    fn work() -> Profile {
+        Profile {
+            id: "work".into(),
+            label: "Work".into(),
+            path: PathBuf::from("/profiles/work"),
+            is_default: false,
+            account: None,
+        }
+    }
+
+    fn running(app_id: &'static str, profile: &Profile) -> Vec<RunningProcess> {
+        vec![RunningProcess {
+            app_id,
+            pid: 4242,
+            profile_dir: Some(profile.path.clone()),
+        }]
+    }
+
+    #[test]
+    fn a_profile_with_no_process_is_launched() {
+        assert_eq!(open_action(&[], "codex", true, &work()), OpenAction::Launch);
+    }
+
+    #[test]
+    fn a_running_profile_is_focused_rather_than_launched_again() {
+        let profile = work();
+        assert_eq!(
+            open_action(&running("codex", &profile), "codex", true, &profile),
+            OpenAction::Focus(4242)
+        );
+    }
+
+    #[test]
+    fn a_running_profile_of_an_app_that_cannot_be_raised_is_left_alone() {
+        // The case the window's own running flag cannot be trusted for: with no
+        // window to raise, the only alternative to doing nothing is a second
+        // process on a profile directory that already has one.
+        let profile = work();
+        assert_eq!(
+            open_action(&running("codex", &profile), "codex", false, &profile),
+            OpenAction::AlreadyRunning
+        );
     }
 
     #[test]

@@ -17,6 +17,9 @@ dist-ssr
 !.vscode/extensions.json
 .idea
 .DS_Store
+
+# Claude Code local state — agent memory, launch config, per-machine settings.
+.claude/
 *.suo
 *.ntvs*
 *.njsproj

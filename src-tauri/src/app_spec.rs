@@ -364,6 +364,45 @@ pub static DEVIN: AppSpec = AppSpec {
     },
 };
 
+/// The app `DEVIN` above is a rebrand of: same fork, same `--user-data-dir`, and
+/// the two can be installed side by side, which is the only reason both are
+/// declared rather than one.
+///
+/// NOT probed against a real installation — the machine this was added on had no
+/// Windsurf. The shape is inherited from Devin, which is this app under another
+/// name, but the bundle path is the one thing a rebrand does change: if it is
+/// wrong, Windsurf reads as "not installed" and nothing worse. Run
+/// `PROBE_APP=/Applications/Windsurf.app cargo test -- --ignored probe` on a
+/// machine that has it and correct the path from the draft it prints.
+///
+/// Declared as `surf`, not `windsurf`, for the family's terseness reason above
+/// and not merely to match it: the full name is eight bytes, which puts the
+/// socket path one byte over the macOS limit. `every_app_id_leaves_room_for_a_socket`
+/// is what said so.
+pub static WINDSURF: AppSpec = AppSpec {
+    id: "surf",
+    label: "Windsurf",
+    product: "Windsurf",
+    locations: Locations {
+        macos: Some(MacLocation {
+            binary: "/Applications/Windsurf.app/Contents/MacOS/Windsurf",
+            default_profile: "Library/Application Support/Windsurf",
+        }),
+        linux: None,
+        windows: None,
+    },
+    designation: Designation {
+        writes: &[Designator::Arg("--user-data-dir={}")],
+        read_from: Readback::Arg("--user-data-dir="),
+    },
+    shared_config: None,
+    identity: None,
+    capabilities: Capabilities {
+        focus: true,
+        desktop_identity: true,
+    },
+};
+
 /// The bundle name carries a space and brackets, which is what exposed the
 /// process parser's assumption that a command is one whitespace-delimited token.
 pub static T3_CODE: AppSpec = AppSpec {
@@ -418,7 +457,9 @@ pub static VS_CODE: AppSpec = AppSpec {
 };
 
 /// The registry. Adding an app is adding a constant above and a line here.
-static ALL: &[&AppSpec] = &[&CLAUDE, &CODEX, &CURSOR, &DEVIN, &T3_CODE, &VS_CODE];
+static ALL: &[&AppSpec] = &[
+    &CLAUDE, &CODEX, &CURSOR, &DEVIN, &WINDSURF, &T3_CODE, &VS_CODE,
+];
 
 pub fn all() -> &'static [&'static AppSpec] {
     ALL

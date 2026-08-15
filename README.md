@@ -135,7 +135,6 @@ Confirmed by the harness driving real installations of the supported application
 - [x] Account identity read from both shapes of file — a top-level field for Claude, a nested one for ChatGPT
 - [x] A profile launches, and a process scan attributes that pid back to it — for the argument-only app and for the argument-plus-environment one
 - [x] The designation takes effect: the launched app writes its state into the profile directory, not the stock one
-- [x] Quit terminates the instance and it disappears from the process table
 - [x] **Two apps run side by side, and neither app's process is ever attributed to the other** — the premise the whole design rests on
 - [x] A profile path leaves room for the socket an application creates inside it, verified by launching one at the real profile path
 - [x] A profile deleted after quitting leaves nothing behind
@@ -155,7 +154,20 @@ Confirmed by a person driving the app with all six applications installed:
 - [x] The window refuses to be resized below its usable minimum
 - [x] Tray liveness marker follows an app being launched and quit
 
-One box remains, and it cannot be closed before a release exists:
+The window follows your system theme, in both light and dark. Colour in it means
+exactly one thing each time it appears — green for a running profile, amber for a
+shared sign-in, red for a destructive action — so nothing else is coloured.
+
+The redesign added controls that need a person in front of them, and these boxes
+are open:
+
+- [ ] The size on each row matches the directory, and the total in the status line matches their sum
+- [ ] The running dot follows an app being launched and quit, as the tray marker does
+- [ ] Open, rename and delete appear on hover and on keyboard focus, and every one is reachable by Tab
+- [ ] Opening a profile from the window launches it, and focuses it rather than launching a second copy when it is already running
+- [ ] The socket path budget under the add form shows this machine's real numbers
+
+One box remains from before, and it cannot be closed until a release exists:
 
 - [ ] The Launch at login toggle registers and removes a login item, and survives a reboot
 

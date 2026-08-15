@@ -92,6 +92,61 @@ impl Platform for MacOs {
     }
 }
 
+/// Sets the profile rows of a tray menu one step below the menu's own type size.
+///
+/// muda has no opinion about type size and no way to express one: a menu item
+/// takes a `String`, and AppKit sets it in the menu font. The size lives on
+/// `NSMenuItem.attributedTitle`, so the item has to be reached directly — down
+/// through the tray's `NSStatusItem` to the `NSMenu` it owns. Indices rather
+/// than titles, because the menu is built from `rows` in order and two profiles
+/// may legitimately share a label.
+///
+/// Only the profile rows shrink. `Settings…` and `Quit` are commands
+/// rather than data and stay at the size every other menu on the bar uses, which
+/// is also what keeps the smaller rows readable as a deliberate size rather than
+/// as a menu that came out wrong.
+pub(crate) fn set_row_type_size<R: tauri::Runtime>(
+    tray: &tauri::tray::TrayIcon<R>,
+    rows: Vec<usize>,
+    points: f64,
+) {
+    use objc2::rc::Retained;
+    use objc2::runtime::AnyObject;
+    use objc2_app_kit::{NSFont, NSFontAttributeName};
+    use objc2_foundation::{MainThreadMarker, NSAttributedString, NSDictionary, NSString};
+
+    // `Retained` is not `Send`, so nothing crosses back out of the closure; the
+    // whole traversal happens inside it, which is also the main thread AppKit
+    // requires for any of this.
+    let _ = tray.with_inner_tray_icon(move |inner| {
+        let Some(mtm) = MainThreadMarker::new() else {
+            return;
+        };
+        let Some(status_item) = inner.ns_status_item() else {
+            return;
+        };
+        let Some(menu) = status_item.menu(mtm) else {
+            return;
+        };
+        let font = NSFont::menuFontOfSize(points);
+        let attributes = NSDictionary::from_slices(&[unsafe { NSFontAttributeName }], &[&*font]);
+        // `from_slices` types the values as `NSFont`; an attribute dictionary is
+        // heterogeneous by definition, and this one holds exactly what it says.
+        let attributes: Retained<NSDictionary<NSString, AnyObject>> =
+            unsafe { Retained::cast_unchecked(attributes) };
+        for index in rows {
+            let Some(item) = menu.itemAtIndex(index as isize) else {
+                continue;
+            };
+            let title = item.title();
+            // Safe here: the dictionary holds the one attribute key it was just
+            // built with, and the value under it really is an `NSFont`.
+            let styled = unsafe { NSAttributedString::new_with_attributes(&title, &attributes) };
+            item.setAttributedTitle(Some(&styled));
+        }
+    });
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

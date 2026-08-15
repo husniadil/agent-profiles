@@ -1,6 +1,24 @@
 <svg xmlns="http://www.w3.org/2000/svg" width="44" height="44" viewBox="0 0 44 44" role="img" aria-label="Agent Profiles">
   <!-- A macOS template image: only the alpha channel is used, and the system
-       recolours it for light, dark and highlighted menu bars. So this is the
-       wordmark alone — the orange tile would be flattened to a solid block. -->
-  <text x="22" y="31" font-family="Georgia, 'Times New Roman', serif" font-size="27" font-weight="700" fill="#000000" text-anchor="middle">ap</text>
+       recolours it for light, dark and highlighted menu bars. So everything is
+       one flat black and the cards are outlines rather than fills — a solid card
+       would arrive as a black block among a menu bar full of line-weight icons.
+
+       Two stacked profile cards, one tucked behind another, carry "profiles" —
+       the app runs several at once. On the front card sits the concave
+       four-point sparkle that reads as AI across the whole field now (Gemini,
+       Copilot, ChatGPT, Slack): the cards say profiles, the sparkle says agent.
+
+       The card behind is cut away around the front one rather than simply
+       overlapped: at menu-bar size two touching outlines merge into one shape,
+       and the gap is what keeps them reading as two. -->
+  <mask id="behind">
+    <rect width="44" height="44" fill="#fff"/>
+    <rect x="2.6" y="13.6" width="28.8" height="28.8" rx="9.5" fill="#000"/>
+  </mask>
+  <g fill="none" stroke="#000000" stroke-width="3.1">
+    <rect x="15.5" y="4.5" width="24" height="24" rx="6.5" mask="url(#behind)"/>
+    <rect x="4.5" y="15.5" width="24" height="24" rx="6.5"/>
+  </g>
+  <path d="M 16.5 20.5 Q 18.5 25.5 23.5 27.5 Q 18.5 29.5 16.5 34.5 Q 14.5 29.5 9.5 27.5 Q 14.5 25.5 16.5 20.5 Z" fill="#000000"/>
 </svg>
