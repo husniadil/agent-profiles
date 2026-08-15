@@ -1,5 +1,4 @@
 import { useEffect, useState, type FormEvent } from "react";
-import { Plus } from "lucide-react";
 
 import { BudgetMeter } from "@/components/BudgetMeter";
 import {
@@ -134,7 +133,10 @@ export function ComposeCard({
         <Input
           id="new-label"
           type="text"
-          maxLength={80}
+          // A display name, not a path: the profile directory is named after a
+          // generated id, so length here costs nothing but row space. Fifteen
+          // sits on one line beside the running badge without truncating.
+          maxLength={15}
           autoComplete="off"
           placeholder="Name this profile"
           aria-label="Profile name"
@@ -193,15 +195,19 @@ export function ComposeCard({
         <StatefulButton
           type="submit"
           size="sm"
-          className={`${CONTROL} w-[124px] shrink-0`}
+          // Fixed so the label swapping through Add → Adding → Added → Retry
+          // never resizes the button under the pointer. 88px is the widest of
+          // those, "Adding" with its spinner and padding; the resting "Add"
+          // sits comfortably inside. No idle icon: "Add" is the whole label,
+          // and a trailing plus only repeated the word.
+          className={`${CONTROL} w-[88px] shrink-0`}
           disabled={over}
           state={state}
-          icon={<Plus size={14} strokeWidth={2} aria-hidden="true" />}
           loadingText="Adding"
           successText="Added"
-          errorText="Try again"
+          errorText="Retry"
         >
-          Add profile
+          Add
         </StatefulButton>
       </form>
 
