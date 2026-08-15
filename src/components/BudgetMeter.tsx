@@ -8,11 +8,29 @@ import { shortenPath, usePathNames } from "@/lib/paths";
 import { systemNames } from "@/lib/system";
 import { cn } from "@/lib/utils";
 
+/// Bytes of headroom below which the budget is worth a permanent block in a
+/// 560×480 window.
+///
+/// The figure cannot move as someone types — a profile directory is named after
+/// a generated id, never after the label — so for one machine this is a fixed
+/// verdict rather than a gauge: there is room, or there never will be. What the
+/// band is for is the spread between apps, whose ids run 4 to 6 bytes and put
+/// their totals 2 apart: a data root that clears `code` can still refuse
+/// `claude`. Eight bytes covers that spread with margin, and an ordinary home
+/// directory sits about sixteen clear of it.
+const TIGHT_BYTES = 8;
+
 /// How much of the socket path a profile under this data root would use.
 ///
 /// Drawn only where there is a limit to draw against: Windows puts its named
 /// pipes outside the profile, so `limit_bytes` is null there and a meter would
 /// invent a limit that means nothing.
+///
+/// And only where that limit is close. The refusal itself does not live here —
+/// `profile_store::add` turns down a profile that leaves no room whether or not
+/// anything was ever drawn — so on the machines that will never reach the limit
+/// this block was a number nobody could act on, held permanently in a window
+/// with no room to spare. It comes back the moment the margin gets thin.
 export function BudgetMeter({ budget, appLabel }: { budget: SocketBudget; appLabel: string }) {
   const names = usePathNames();
   const still = useReducedMotion();
@@ -20,6 +38,7 @@ export function BudgetMeter({ budget, appLabel }: { budget: SocketBudget; appLab
   if (limit === null) return null;
 
   const over = budget.used_bytes > limit;
+  if (!over && limit - budget.used_bytes >= TIGHT_BYTES) return null;
   const danger = readable("var(--danger)");
 
   // `profile_dir` carries a placeholder id of the right width, not a directory
