@@ -19,7 +19,7 @@ type Panel = { kind: "none" } | { kind: "rename" } | { kind: "delete"; bytes: nu
 // Tailwind's emerald and amber — this palette has its own, and they are set as
 // styles so the same token drives the tag, the dot and the meter.
 const TAG =
-  "h-auto rounded-full px-1.5 py-px text-[10px] tracking-[0.04em] uppercase";
+  "h-auto rounded-full px-1.5 py-px text-caption tracking-[0.04em] uppercase";
 
 /// A fact about state, never about identity.
 ///
@@ -116,7 +116,7 @@ export function ProfileRow({
 
         <div className="min-w-0 flex-1">
           <div className="flex min-w-0 items-center gap-1.5">
-            <span className="truncate text-[12.5px] font-medium text-ink">{profile.label}</span>
+            <span className="truncate text-body font-medium text-ink">{profile.label}</span>
             {/* Colour is never the whole message: the badge on the chip and this
                 word say the same thing twice on purpose. */}
             {profile.running ? (
@@ -163,7 +163,7 @@ export function ProfileRow({
         <div className={cn("grid shrink-0 grid-cols-[minmax(0,1fr)] justify-items-end", TRAILING)}>
           <span
             aria-hidden={bytes === undefined}
-            className="col-start-1 row-start-1 self-center font-mono text-[10.5px] text-ink-2 transition-opacity duration-150 ease-out group-hover:opacity-0 group-focus-within:opacity-0"
+            className="col-start-1 row-start-1 self-center font-mono text-sub text-ink-2 transition-opacity duration-150 ease-out group-hover:opacity-0 group-focus-within:opacity-0"
           >
             {bytes !== undefined ? (
               <ByteCount bytes={bytes} />
@@ -201,11 +201,23 @@ export function ProfileRow({
                 The slot is kept even where the action is not, because position
                 is how this row is read: if the last 28px means Delete on one
                 row and Open on the next, the hand that learned the first row
-                mis-clicks the second. Inert, unfocusable, unannounced — a
-                disabled trash would instead promise a condition under which
-                the Default profile could be deleted, and there is none. */}
+                mis-clicks the second.
+                It holds a disabled trash rather than nothing. An empty slot
+                reads as an icon that failed to load; a greyed one reads as an
+                action this row does not have, which is the truth. The label
+                says why, because a disabled control that does not is a dead end
+                — and it says *cannot*, not *not yet*, so it promises no
+                condition under which this profile could be deleted. */}
             {profile.is_default ? (
-              <span className="size-7" aria-hidden="true" />
+              <Button
+                variant="ghost"
+                size="icon"
+                className={ICON_ACTION}
+                disabled
+                aria-label={`${profile.label} is the app's own installation and cannot be deleted`}
+              >
+                <Trash2 size={15} strokeWidth={1.75} aria-hidden="true" />
+              </Button>
             ) : (
               <Button
                 variant="ghost"

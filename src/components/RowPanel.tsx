@@ -15,7 +15,7 @@ import { cn } from "@/lib/utils";
 
 // beUI's buttons are 40px pills at 12px; this window's controls are 32px
 // rounded rectangles at 13px, and the compose row above agrees with that.
-const ACTION = "h-7 rounded-lg px-2.5 text-[12px]";
+const ACTION = "h-7 rounded-lg px-2.5 text-callout";
 
 // Destructive is not one of beUI's four variants, and it is not a colour to
 // invent per call site either — it is the danger token, the same one the meter
@@ -38,7 +38,7 @@ const HOLD_MS = 1400;
 // sits in is sunken, so the field takes the surface back to stay a field.
 const FIELD: InputClassNames = {
   field: "h-7 rounded-lg bg-surface",
-  input: "px-2 text-[12px] placeholder:text-ink-3",
+  input: "px-2 text-callout placeholder:text-ink-3",
 };
 
 /// The panel is a reveal, not an entrance: it exists because the user asked a
@@ -146,7 +146,7 @@ export function DeletePanel({
           above. It is one of the two facts this sentence turns on, and the row
           is already showing the other — the path — so this says "its folder"
           rather than pushing the sentence to three lines to repeat it. */}
-      <p className="text-[12px] text-ink-2">
+      <p className="text-callout text-ink-2">
         Delete <strong className="font-semibold text-ink">{label}</strong> and the{" "}
         <strong className="font-mono font-normal text-ink">{formatBytes(bytes)}</strong> in its
         folder. This can’t be undone.
@@ -170,7 +170,7 @@ export function DeletePanel({
           holdingLabel="Keep holding…"
           completeLabel="Deleting…"
           fillClassName={HOLD_FILL}
-          labelClassName="text-[12px] font-medium"
+          labelClassName="text-callout font-medium"
           className={cn(
             ACTION,
             DESTRUCTIVE,

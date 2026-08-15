@@ -25,10 +25,10 @@ export function IdentityChip({
       <span
         className={cn(
           "grid size-7 place-items-center rounded-[9px]",
-          "font-wide text-[11px] leading-none font-semibold",
-          // Archivo's width axis, narrowed a little so two letters sit as
-          // comfortably in the square as one does.
-          "[font-stretch:88%]",
+          "text-sub leading-none font-semibold",
+          // ponytail: two letters in a 28px square is tight; SF has no width
+          // axis to narrow, so the tracking does that work instead.
+          "tracking-[-0.03em]",
         )}
         style={{
           background: identityColor(appId, profileId),

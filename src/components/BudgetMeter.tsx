@@ -42,9 +42,9 @@ export function BudgetMeter({ budget, appLabel }: { budget: SocketBudget; appLab
           content={budget.profile_dir}
           side="bottom"
           wrapperClassName="block min-w-0 max-w-full"
-          className="max-w-[min(420px,calc(100vw-16px))] break-all whitespace-normal font-mono text-[11px] font-normal"
+          className="max-w-[min(420px,calc(100vw-16px))] break-all whitespace-normal font-mono text-sub font-normal"
         >
-          <p tabIndex={0} className="truncate rounded-sm font-mono text-[10.5px] text-ink">
+          <p tabIndex={0} className="truncate rounded-sm font-mono text-sub text-ink">
             <span className="sr-only">{budget.profile_dir}</span>
             <span aria-hidden="true">
               {inside ? (
@@ -79,7 +79,7 @@ export function BudgetMeter({ budget, appLabel }: { budget: SocketBudget; appLab
           />
         </div>
 
-        <div className="mt-1.5 flex items-baseline justify-between gap-3 text-[10.5px]">
+        <div className="mt-1.5 flex items-baseline justify-between gap-3 text-sub">
           <span
             className={cn("truncate", over ? "font-medium" : "text-ink-2")}
             style={over ? { color: danger } : undefined}
@@ -120,7 +120,7 @@ export function BudgetMeter({ budget, appLabel }: { budget: SocketBudget; appLab
       </div>
 
       {over ? (
-        <p className="mt-1.5 text-[11px] text-ink-2">
+        <p className="mt-1.5 text-sub text-ink-2">
           {appLabel} would not be able to create its socket here. Move the data root somewhere
           shorter to make room.
         </p>

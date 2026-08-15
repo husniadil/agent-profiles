@@ -20,10 +20,10 @@ export function AutostartRow({ autostart }: { autostart: Autostart }) {
   return (
     <div className="flex h-10 shrink-0 items-center justify-between gap-4 border-t border-hairline bg-surface px-5">
       <div>
-        <p className={offered ? "text-[12px] text-ink" : "text-[12px] text-ink-2"}>
+        <p className={offered ? "text-callout text-ink" : "text-callout text-ink-2"}>
           Start at login
         </p>
-        <p className="text-[11px] text-ink-2">
+        <p className="text-sub text-ink-2">
           {offered
             ? "opens the tray only — no profile is launched"
             : "available once Agent Profiles is installed"}

@@ -28,19 +28,31 @@ export function PathText({ path, className }: { path: string; className?: string
       wrapperClassName="block min-w-0 max-w-full"
       // A path is long and a window this narrow is not; it wraps rather than
       // running off the edge with its middle unreadable.
-      className="max-w-[min(420px,calc(100vw-16px))] break-all whitespace-normal font-mono text-[11px] font-normal"
+      className="max-w-[min(420px,calc(100vw-16px))] break-all whitespace-normal font-mono text-sub font-normal"
     >
+      {/* The quietest line in the window. The path is where a profile lives,
+          not what it is called: the name is what the eye should land on, and a
+          directory set as loudly as the name competes with it. So: the same
+          `text-sub` the New profile card sets its own path in — one step below
+          the name beside it — but in `ink-2` rather than full ink.
+          The face stays monospace, like every path and id here. A proportional
+          one was tried and reverted: it made this the one path in the window
+          that did not look like a path, a few rows from one that did.
+          The tail used to take the full-strength ink and was the loudest thing
+          on the row after the name; it carries its emphasis in weight now, so
+          the whole line sits at one value. Not `ink-3`, which would be quieter
+          still: against the light theme's surface it reads at 3.5:1. */}
       <p
         tabIndex={0}
         className={cn(
-          "truncate rounded-sm font-mono text-[10.5px] text-ink-2",
+          "truncate rounded-sm font-mono text-sub text-ink-2",
           className,
         )}
       >
         <span className="sr-only">{path}</span>
         <span aria-hidden="true">
           {head}
-          <span className="text-ink">{tail}</span>
+          <span className="font-medium">{tail}</span>
         </span>
       </p>
     </Tooltip>

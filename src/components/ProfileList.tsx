@@ -64,7 +64,13 @@ export function ProfileList({
                 apart. With one app installed the list is simply the list. */}
             {apps.length > 1 ? (
               <div className="flex items-center gap-2 px-2 pt-1.5 pb-0.5">
-                <h2 className="font-wide text-[10px] font-semibold tracking-[0.06em] text-ink-2 uppercase [font-stretch:112%]">
+                {/* Sentence case, no tracking. The typeface was always the
+                    system one; the setting was not — small caps on a wide track
+                    is a dashboard's idea of a section label. macOS sets a group
+                    heading in plain semibold at the subheadline size, the way
+                    the Finder sidebar and System Settings do, and this window
+                    sits next to both. */}
+                <h2 className="text-sub font-semibold text-ink-2">
                   {app.label}
                 </h2>
                 <span aria-hidden="true" className="h-px flex-1 bg-hairline" />
@@ -117,7 +123,7 @@ function Rows({
   // that now runs the full height of the window reads as something that failed
   // to load rather than as a fact about this app.
   if (app.profiles.length === 0) {
-    return <p className="px-2 py-1.5 text-[12px] text-ink-2">No profiles yet.</p>;
+    return <p className="px-2 py-1.5 text-callout text-ink-2">No profiles yet.</p>;
   }
 
   return (

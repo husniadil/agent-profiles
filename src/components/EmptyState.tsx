@@ -23,14 +23,14 @@ export function EmptyState({ apps }: { apps: AppView[] }) {
         aria-hidden="true"
         className="mx-auto text-ink-3"
       />
-      <p className="mt-3 font-wide text-[15px] font-semibold text-ink [font-stretch:105%]">
+      <p className="mt-3 text-title font-semibold text-ink">
         Nothing to open yet
       </p>
-      <p className="mx-auto mt-1.5 max-w-[46ch] text-[13px] text-ink-2">
+      <p className="mx-auto mt-1.5 max-w-[46ch] text-body text-ink-2">
         Agent Profiles runs the coding agents already installed on {systemNames().machine}
         {names ? ` — ${names}` : ""}. Install one, then reopen this window.
       </p>
-      <p className="mt-3 font-mono text-[11px] text-ink-2">{apps.length} apps found</p>
+      <p className="mt-3 font-mono text-sub text-ink-2">{apps.length} apps found</p>
     </div>
   );
 }

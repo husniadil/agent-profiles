@@ -20,15 +20,15 @@ import type { AppView, SocketBudget } from "@/lib/api";
 // One band of 32px controls at 13px: the field, the picker and the button are
 // the same height and the same type size, so the compose row reads as one thing
 // rather than three things of three sizes. beUI ships all three larger.
-const CONTROL = "h-7 rounded-lg px-2.5 text-[12px]";
+const CONTROL = "h-7 rounded-lg px-2.5 text-callout";
 
 const FIELD: InputClassNames = {
   field: "h-7 rounded-lg",
-  input: "px-2 text-[12px] placeholder:text-ink-3",
+  input: "px-2 text-callout placeholder:text-ink-3",
   // The refusal keeps the pulled-toward-ink mix it had as a standalone banner,
   // which is what clears 4.5:1 at this size in both themes.
   errorMessage:
-    "px-0 text-[12px] font-medium text-[color-mix(in_oklab,var(--danger)_70%,var(--ink))]",
+    "px-0 text-callout font-medium text-[color-mix(in_oklab,var(--danger)_70%,var(--ink))]",
 };
 
 export function ComposeCard({
@@ -122,7 +122,7 @@ export function ComposeCard({
     >
       <h2
         id="compose-heading"
-        className="mb-1.5 font-wide text-[10px] font-semibold tracking-[0.06em] text-ink-2 uppercase [font-stretch:112%]"
+        className="mb-1.5 text-sub font-semibold text-ink-2"
       >
         New profile
       </h2>

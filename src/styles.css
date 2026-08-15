@@ -1,4 +1,3 @@
-@import "./fonts.css";
 @import "tailwindcss";
 
 /* ==========================================================================
@@ -136,9 +135,20 @@
   --color-primary-foreground: var(--accent-ink);
   --color-destructive: var(--danger);
 
-  --font-sans: "Inter Tight", ui-sans-serif, -apple-system, system-ui, sans-serif;
-  --font-mono: "IBM Plex Mono", ui-monospace, "SF Mono", Menlo, monospace;
-  --font-wide: "Archivo", "Inter Tight", ui-sans-serif, system-ui, sans-serif;
+  /* The system face, not a vendored one: this window sits next to Finder and
+     System Settings, and text that is not SF reads as a web page pretending to
+     be an app. `-apple-system` also hands us SF's optical sizing for free. */
+  --font-sans: -apple-system, BlinkMacSystemFont, system-ui, sans-serif;
+  --font-mono: ui-monospace, "SF Mono", SFMono-Regular, Menlo, monospace;
+
+  /* macOS's own type scale (AppKit text styles). Five sizes, no in-between:
+     the window had ten before, and 10.5 next to 11 is not a distinction anyone
+     can see — it is just two places to forget to keep in step. */
+  --text-title: 15px; /* title 3 — the empty state's headline */
+  --text-body: 13px; /* body — profile names, sentences */
+  --text-callout: 12px; /* callout — controls, secondary lines */
+  --text-sub: 11px; /* subheadline — paths, figures, footnotes */
+  --text-caption: 10px; /* caption — section labels, tags */
 
   --shadow-card: var(--shadow-sm);
   --shadow-float: var(--shadow-md);
@@ -162,7 +172,7 @@
     background: var(--bg);
     color: var(--ink);
     font-family: var(--font-sans);
-    font-size: 14px;
+    font-size: var(--text-body);
     line-height: 1.45;
     /* Text selection is a document affordance, not an app one. */
     -webkit-user-select: none;

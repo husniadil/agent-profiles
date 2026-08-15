@@ -31,7 +31,7 @@ export function StatusStrip({
     // overlap waiting to happen. `px-5` lines its content up with the first
     // row's chip and with the bar on the floor.
     <header className="flex h-10 shrink-0 items-center justify-between gap-3 border-b border-hairline bg-surface px-5">
-      <p aria-hidden="true" className="flex items-baseline gap-1.5 text-[12px] text-ink-2">
+      <p aria-hidden="true" className="flex items-baseline gap-1.5 text-callout text-ink-2">
         <Count value={profiles} className="font-mono text-ink" />
         <span>{profiles === 1 ? "profile" : "profiles"}</span>
         <Separator />
@@ -62,7 +62,7 @@ export function StatusStrip({
           content={dataRoot}
           side="bottom"
           wrapperClassName="flex min-w-0 shrink"
-          className="max-w-[min(420px,calc(100vw-16px))] break-all whitespace-normal font-mono text-[11px] font-normal"
+          className="max-w-[min(420px,calc(100vw-16px))] break-all whitespace-normal font-mono text-sub font-normal"
         >
           <button
             type="button"
@@ -76,7 +76,7 @@ export function StatusStrip({
             <span className="sr-only">
               Show the profiles folder in the file manager: {dataRoot}
             </span>
-            <bdi aria-hidden="true" className="truncate font-mono text-[10.5px]">
+            <bdi aria-hidden="true" className="truncate font-mono text-sub">
               {shortenRoot(dataRoot, homePath)}
             </bdi>
           </button>

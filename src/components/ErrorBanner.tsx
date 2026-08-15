@@ -12,7 +12,7 @@ export function ErrorBanner({ message }: { message: string | null }) {
   return (
     <div
       role="alert"
-      className="flex shrink-0 items-start gap-2 rounded-lg border px-3 py-2 text-[12.5px]"
+      className="flex shrink-0 items-start gap-2 rounded-lg border px-3 py-2 text-body"
       style={{
         color: readable("var(--danger)"),
         background: wash("var(--danger)"),
