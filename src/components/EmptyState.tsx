@@ -30,7 +30,13 @@ export function EmptyState({ apps }: { apps: AppView[] }) {
         Agent Profiles runs the coding agents already installed on {systemNames().machine}
         {names ? ` — ${names}` : ""}. Install one, then reopen this window.
       </p>
-      <p className="mt-3 font-mono text-sub text-ink-2">{apps.length} apps found</p>
+      {/* These are the apps this tool supports, not ones found on the machine:
+          this screen only renders when nothing is installed, so a "found" count
+          would always be the whole list under a heading that says nothing was
+          found — a contradiction. "supported" is the reading that stays true. */}
+      <p className="mt-3 font-mono text-sub text-ink-2">
+        {apps.length} apps supported
+      </p>
     </div>
   );
 }

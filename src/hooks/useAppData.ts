@@ -38,7 +38,16 @@ function signature(apps: AppView[]): string {
       (app) =>
         `${app.id}|${app.unavailable ?? ""}|` +
         app.profiles
-          .map((p) => `${p.id},${p.label},${p.running ? 1 : 0},${p.shares_account ? 1 : 0}`)
+          // `path` and `is_default` join the signature so a change confined to
+          // either is still seen as news. Neither moves at runtime today, but a
+          // list that changed only there would otherwise hash identically and
+          // never re-render — silent stale data the day the data root becomes
+          // configurable, with no crash for a test to catch.
+          .map(
+            (p) =>
+              `${p.id},${p.label},${p.path},${p.is_default ? 1 : 0},` +
+              `${p.running ? 1 : 0},${p.shares_account ? 1 : 0}`,
+          )
           .join(";"),
     )
     .join("//");

@@ -513,6 +513,11 @@ mod tests {
             .all(|v| !v.running));
     }
 
+    // The literals below spell the path with `/`; on Windows `PathBuf::join`
+    // writes `\` and the assert would fail on the separator alone. A socket path
+    // is a Unix concept anyway — `SOCKET_PATH_LIMIT` is `None` on Windows — so
+    // there is nothing here to measure off Unix.
+    #[cfg(unix)]
     #[test]
     fn the_budget_spells_out_the_whole_path_it_measures() {
         // Written out as a literal rather than rebuilt from `profile_dir` and
