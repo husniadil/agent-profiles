@@ -1,6 +1,24 @@
 <svg xmlns="http://www.w3.org/2000/svg" width="44" height="44" viewBox="0 0 44 44" role="img" aria-label="Agent Profiles">
-  <!-- A macOS template image: only the alpha channel is used, and the system
-       recolours it for light, dark and highlighted menu bars. So this is the
-       wordmark alone — the orange tile would be flattened to a solid block. -->
-  <text x="22" y="31" font-family="Georgia, 'Times New Roman', serif" font-size="27" font-weight="700" fill="#000000" text-anchor="middle">ap</text>
+  <!-- The stacked cards of the app icon and the banner: one profile tucked
+       behind another. This is a macOS template image, so only the alpha channel
+       survives and the system recolours it for light, dark and highlighted menu
+       bars — which is why both cards are outlines and neither is filled. A solid
+       card would arrive in the menu bar as a black block; every other icon up
+       there is drawn in line weight, and this one has to sit among them.
+
+       The card behind is cut away around the card in front rather than simply
+       overlapped: at 18pt two touching outlines merge into one shape, and the
+       gap is what keeps them reading as two.
+
+       The 7° tilt of the larger marks is dropped here. At this size it amounts
+       to about a pixel of lean, which reads as a rasterising fault rather than
+       as a card set down askew. Offset alone carries the same idea. -->
+  <mask id="behind">
+    <rect width="44" height="44" fill="#fff"/>
+    <rect x="0.9" y="11.9" width="30.4" height="30.4" rx="10.1" fill="#000"/>
+  </mask>
+  <g fill="none" stroke="#000000" stroke-width="3.2">
+    <rect x="15.5" y="4.5" width="24" height="24" rx="6.5" mask="url(#behind)"/>
+    <rect x="4.5" y="15.5" width="24" height="24" rx="6.5"/>
+  </g>
 </svg>

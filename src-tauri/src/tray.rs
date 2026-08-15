@@ -5,12 +5,67 @@ use crate::runtime::AppState;
 use anyhow::{anyhow, Result};
 use tauri::Manager;
 
-pub type MenuSignature = (String, String, bool);
+pub type MenuSignature = (String, String, bool, bool);
 
 pub(crate) fn signature(rows: &[MenuRow]) -> Vec<MenuSignature> {
     rows.iter()
-        .map(|r| (r.id.clone(), r.text.clone(), r.enabled))
+        .map(|r| (r.id.clone(), r.text.clone(), r.enabled, r.running))
         .collect()
+}
+
+/// The window's own `--live` green, midway between the value it takes in the
+/// light theme and the one it takes in the dark. A menu item's image is a plain
+/// bitmap rather than a template, so it arrives in whatever colours it was built
+/// with and has to hold up against both a light and a dark menu.
+const LIVE: [u8; 3] = [47, 164, 101];
+/// Stopped is drawn, not left blank: a row with no image would lose the indent
+/// every other row has, and the list would comb in and out as profiles start.
+const IDLE: [u8; 3] = [142, 142, 147];
+
+/// 32px for a mark that lands at 16pt, so it still has edges to anti-alias on a
+/// display that is not retina.
+const DOT: u32 = 32;
+
+/// Profile labels are set a step below the menu font's own 14pt, so that a
+/// person with nine profiles gets a shorter menu out of it. Only the profiles
+/// move: `Settings…` and `Quit` stay at full size, and that contrast is
+/// what makes the smaller rows read as a decision rather than as a mistake.
+#[cfg(target_os = "macos")]
+const PROFILE_TYPE_SIZE: f64 = 12.0;
+
+/// A disc while a profile is running, a ring while it is not — the pairing the
+/// Wi-Fi menu uses for a joined network against a merely known one.
+///
+/// Built here rather than bundled as two PNGs: it is two circles, and this way
+/// the green stays written down once, next to the token it was taken from.
+pub(crate) fn status_dot(running: bool) -> tauri::image::Image<'static> {
+    let (rgb, inner) = if running {
+        (LIVE, None)
+    } else {
+        (IDLE, Some(6.4_f32))
+    };
+    let outer = 9.0_f32;
+    let centre = DOT as f32 / 2.0;
+    let mut rgba = Vec::with_capacity((DOT * DOT * 4) as usize);
+    for y in 0..DOT {
+        for x in 0..DOT {
+            let dx = x as f32 + 0.5 - centre;
+            let dy = y as f32 + 0.5 - centre;
+            let d = (dx * dx + dy * dy).sqrt();
+            let mut alpha = edge(outer - d);
+            if let Some(inner) = inner {
+                alpha *= edge(d - inner);
+            }
+            rgba.extend_from_slice(&[rgb[0], rgb[1], rgb[2], (alpha * 255.0).round() as u8]);
+        }
+    }
+    tauri::image::Image::new_owned(rgba, DOT, DOT)
+}
+
+/// One pixel of feathering either side of a boundary, so a circle this small
+/// does not arrive with a staircase for an outline.
+fn edge(distance_inside: f32) -> f32 {
+    (distance_inside + 0.5).clamp(0.0, 1.0)
 }
 
 /// macOS delivers tray events inconsistently across versions: some send only
@@ -35,6 +90,10 @@ pub struct MenuRow {
     pub id: String,
     pub text: String,
     pub enabled: bool,
+    /// Which of the two status dots this row carries. Only profile rows have
+    /// one; a header or an error row is drawn without an image and so sits
+    /// flush left, the way `Known Network` does above the networks under it.
+    pub running: bool,
 }
 
 /// One app's contribution to the menu, flattened out of the locks so that
@@ -106,10 +165,10 @@ pub fn menu_rows(
                 id: format!("header:{}", section.spec.id),
                 text: section.spec.label.to_string(),
                 enabled: false,
+                running: false,
             });
         }
         let dupes = crate::account::duplicate_accounts(&section.profiles);
-        let indent = if headed { "   " } else { "" };
         for profile in &section.profiles {
             let pid = find_for(
                 processes,
@@ -117,14 +176,13 @@ pub fn menu_rows(
                 &profile.path,
                 profile.is_default,
             );
-            let marker = if pid.is_some() { "●" } else { "○" };
             let shares_account = profile
                 .account
                 .as_deref()
                 .map(|account| dupes.contains(account))
                 .unwrap_or(false);
             let suffix = if shares_account {
-                "  (same account)"
+                " (same account)"
             } else {
                 ""
             };
@@ -138,8 +196,9 @@ pub fn menu_rows(
 
             rows.push(MenuRow {
                 id: row_id(action, section.spec.id, &profile.id),
-                text: format!("{indent}{marker} {}{suffix}", profile.label),
+                text: format!("{}{suffix}", profile.label),
                 enabled: enabled && action != "running",
+                running: pid.is_some(),
             });
         }
     }
@@ -153,6 +212,7 @@ pub fn menu_rows(
                     id: format!("error:{}", section.spec.id),
                     text: reason.clone(),
                     enabled: false,
+                    running: false,
                 });
             }
         }
@@ -163,6 +223,7 @@ pub fn menu_rows(
             id: "error".into(),
             text: message.to_string(),
             enabled: false,
+            running: false,
         });
     }
     rows
@@ -259,29 +320,58 @@ pub(crate) fn rebuild_with_error(
     }
 
     let menu = tauri::menu::Menu::new(app)?;
-    for row in rows {
-        let item =
-            tauri::menu::MenuItem::with_id(app, &row.id, &row.text, row.enabled, None::<&str>)?;
-        menu.append(&item)?;
+    // Every profile stays on the top level, whatever it costs in height: this is
+    // a menu opened to reach a profile, and a profile behind a submenu is one
+    // hover further away than it was. An app's name is a label above its own
+    // profiles, not a door in front of them.
+    //
+    // Items go in in `rows` order and nothing is skipped, so a row's position
+    // here is its position in the finished menu — which is what lets the type
+    // size be set afterwards without matching on labels.
+    let mut profile_rows = Vec::new();
+    for (index, row) in rows.iter().enumerate() {
+        // The id is already the discriminant everywhere else in this file, so it
+        // stays the discriminant here: only a profile row parses into an action,
+        // and only a profile row carries a status dot.
+        if parse_row_id(&row.id).is_some() {
+            profile_rows.push(index);
+            menu.append(&tauri::menu::IconMenuItem::with_id(
+                app,
+                &row.id,
+                &row.text,
+                row.enabled,
+                Some(status_dot(row.running)),
+                None::<&str>,
+            )?)?;
+        } else {
+            menu.append(&tauri::menu::MenuItem::with_id(
+                app,
+                &row.id,
+                &row.text,
+                row.enabled,
+                None::<&str>,
+            )?)?;
+        }
     }
     menu.append(&tauri::menu::PredefinedMenuItem::separator(app)?)?;
     menu.append(&tauri::menu::MenuItem::with_id(
         app,
         "manage",
-        "Manage Profiles…",
+        "Settings…",
         true,
         None::<&str>,
     )?)?;
     menu.append(&tauri::menu::MenuItem::with_id(
         app,
         "quit_app",
-        "Quit Agent Profiles",
+        "Quit",
         true,
         None::<&str>,
     )?)?;
 
-    if let Some(tray) = app.tray_by_id("main") {
+    let tray = if let Some(tray) = app.tray_by_id("main") {
         tray.set_menu(Some(menu))?;
+        Some(tray)
     } else {
         let icon = tauri::image::Image::from_bytes(include_bytes!("../icons/tray/tray-icon.png"))?;
         let tray = tauri::tray::TrayIconBuilder::with_id("main")
@@ -292,8 +382,18 @@ pub(crate) fn rebuild_with_error(
         // other platform uses is an error under `-D warnings` on Windows and Linux.
         #[cfg(target_os = "macos")]
         let tray = tray.icon_as_template(true);
-        tray.build(app)?;
+        Some(tray.build(app)?)
+    };
+
+    // After the menu is attached, never before: the items have to exist as
+    // `NSMenuItem`s before their type can be set. A no-op off macOS, where the
+    // platform gives no way to say this at all.
+    #[cfg(target_os = "macos")]
+    if let Some(tray) = tray {
+        crate::platform::macos::set_row_type_size(&tray, profile_rows, PROFILE_TYPE_SIZE);
     }
+    #[cfg(not(target_os = "macos"))]
+    let _ = (tray, profile_rows);
 
     Ok(())
 }
@@ -371,7 +471,8 @@ mod tests {
         let sections = vec![section(&app_spec::CLAUDE, profiles(&["Kerja"]))];
         let rows = menu_rows(&sections, &[running("claude", "/p/id0")], None);
         let row = rows.iter().find(|r| r.id == "focus:claude:id0").unwrap();
-        assert!(row.text.contains('●'));
+        assert!(row.running, "running is a dot, never a glyph in the label");
+        assert_eq!(row.text, "Kerja");
         assert!(row.enabled);
     }
 
@@ -395,7 +496,46 @@ mod tests {
         let sections = vec![section(&app_spec::CLAUDE, profiles(&["Kerja"]))];
         let rows = menu_rows(&sections, &[], None);
         let row = rows.iter().find(|r| r.id == "launch:claude:id0").unwrap();
-        assert!(row.text.contains('○'));
+        assert!(!row.running);
+    }
+
+    #[test]
+    fn no_row_draws_its_own_state_or_hierarchy_into_the_label() {
+        // State is the row's image and hierarchy is the indent that image gives
+        // it. Glyphs and padded labels were how both used to be faked.
+        let sections = vec![
+            section(&app_spec::CLAUDE, profiles(&["Kerja"])),
+            section(&app_spec::CODEX, profiles(&["Pribadi"])),
+        ];
+        let rows = menu_rows(&sections, &[running("claude", "/p/id0")], None);
+        assert!(rows
+            .iter()
+            .all(|r| !r.text.contains(['●', '○', '✓']) && r.text.trim() == r.text));
+        assert_eq!(
+            rows.iter().filter(|r| r.running).count(),
+            1,
+            "only the live profile gets the filled dot"
+        );
+    }
+
+    #[test]
+    fn the_running_dot_is_filled_and_the_stopped_one_is_a_ring() {
+        let alpha_at = |image: &tauri::image::Image<'_>, x: u32, y: u32| {
+            image.rgba()[((y * DOT + x) * 4 + 3) as usize]
+        };
+        let c = DOT / 2;
+
+        let live = status_dot(true);
+        let idle = status_dot(false);
+
+        assert_eq!(alpha_at(&live, c, c), 255, "running is a solid disc");
+        assert_eq!(alpha_at(&idle, c, c), 0, "stopped is hollow");
+        // Both carry the same outer edge, so a profile starting does not make
+        // the row's mark change size under the pointer.
+        for image in [&live, &idle] {
+            assert_eq!(alpha_at(image, c, c - 8), 255, "the rim is opaque");
+            assert_eq!(alpha_at(image, 0, 0), 0, "the corners stay clear");
+        }
     }
 
     #[test]
@@ -424,7 +564,7 @@ mod tests {
     }
 
     #[test]
-    fn with_two_apps_installed_each_gets_a_header_and_indented_rows() {
+    fn with_two_apps_installed_each_gets_a_header_above_its_profiles() {
         let sections = vec![
             section(&app_spec::CLAUDE, profiles(&["Kerja"])),
             section(&app_spec::CODEX, profiles(&["Pribadi"])),
@@ -434,12 +574,13 @@ mod tests {
         assert_eq!(rows[0].text, "Claude");
         assert!(!rows[0].enabled, "a header is a label, not an action");
         assert!(rows.iter().any(|r| r.id == "header:codex"));
+        // Only profile rows carry a dot, and that dot is what indents them under
+        // the header — nothing is padded into a label.
         assert!(rows
             .iter()
-            .find(|r| r.id == "launch:claude:id0")
-            .unwrap()
-            .text
-            .starts_with("   "));
+            .filter(|r| r.running)
+            .all(|r| parse_row_id(&r.id).is_some()));
+        assert!(rows.iter().all(|r| r.text.trim() == r.text));
     }
 
     #[test]

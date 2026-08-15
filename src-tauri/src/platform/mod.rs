@@ -15,7 +15,7 @@ pub mod win_proc;
 #[cfg(any(target_os = "linux", test))]
 mod linux;
 #[cfg(target_os = "macos")]
-mod macos;
+pub(crate) mod macos;
 #[cfg(any(target_os = "windows", test))]
 mod windows;
 

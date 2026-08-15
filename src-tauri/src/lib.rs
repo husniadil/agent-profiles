@@ -104,14 +104,14 @@ pub(crate) fn autostart_is_offered() -> bool {
 
 /// A tray app outlives its windows. Closing the management window must hide it,
 /// never destroy it: the webview is created once, and `get_webview_window` would
-/// return `None` from then on, leaving "Manage Profiles…" permanently broken.
+/// return `None` from then on, leaving "Settings…" permanently broken.
 pub(crate) fn close_hides_window(label: &str) -> bool {
     label == "main"
 }
 
 /// `None` means a person closed the last window, which for a tray app is not a
 /// request to quit — the tray is still there. `Some` only ever comes from our own
-/// `app.exit()`, i.e. the "Quit Agent Profiles" row, which really must quit.
+/// `app.exit()`, i.e. the "Quit" row, which really must quit.
 pub(crate) fn exit_should_be_prevented(code: Option<i32>) -> bool {
     code.is_none()
 }
@@ -221,7 +221,7 @@ mod tests {
     fn only_our_own_quit_row_is_allowed_to_end_the_process() {
         // A person closing the last window reports no code; the tray lives on.
         assert!(exit_should_be_prevented(None));
-        // `app.exit(0)` from "Quit Agent Profiles" reports one, and must win.
+        // `app.exit(0)` from "Quit" reports one, and must win.
         assert!(!exit_should_be_prevented(Some(0)));
     }
 }

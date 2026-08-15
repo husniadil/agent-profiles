@@ -36,7 +36,17 @@ libc = "0.2"
 
 [target.'cfg(target_os = "macos")'.dependencies]
 objc2 = "0.6.4"
-objc2-app-kit = { version = "0.3.2", features = ["NSRunningApplication"] }
+objc2-app-kit = { version = "0.3.2", features = [
+  "NSRunningApplication",
+  # The tray menu's type size is set through AppKit directly; muda's menu item
+  # takes a plain `String` and has nowhere to put a font.
+  "NSAttributedString",
+  "NSFont",
+  "NSMenu",
+  "NSMenuItem",
+  "NSStatusItem",
+] }
+objc2-foundation = { version = "0.3.2", features = ["NSAttributedString"] }
 
 [target.'cfg(target_os = "windows")'.dependencies]
 windows = { version = "0.62.2", features = [
