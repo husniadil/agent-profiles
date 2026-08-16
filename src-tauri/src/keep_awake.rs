@@ -1,9 +1,11 @@
 //! Holding the machine awake with the lid shut, and giving it back.
 
+use crate::agent_activity::Freshness;
 use crate::platform::Power;
 use anyhow::Result;
 use serde::{Deserialize, Serialize};
-use std::path::Path;
+use std::path::{Path, PathBuf};
+use std::sync::Mutex;
 use std::time::Duration;
 
 /// What arms the hold.
@@ -195,6 +197,66 @@ pub fn decide(settings: &Settings, inputs: &Inputs) -> Phase {
     Phase::Holding
 }
 
+/// How often the app revises its decision.
+///
+/// This is the one loop in the app whose cost is paid when nobody is watching —
+/// the lid is shut and the machine is on battery. Fifteen seconds is a few
+/// hundred `stat` calls and one `pmset` spawn, and it bounds how long a hold
+/// outlives the agent that asked for it.
+const SWEEP: Duration = Duration::from_secs(15);
+
+/// Creates or removes the flag the root loop watches.
+///
+/// Empty on purpose. The loop tests only for existence, and a flag with contents
+/// is an invitation for some later change to read them in a root shell.
+pub fn apply(data_root: &Path, hold: bool) -> Result<()> {
+    let flag = crate::paths::keep_awake_flag(data_root);
+    if hold {
+        if let Some(parent) = flag.parent() {
+            std::fs::create_dir_all(parent)?;
+        }
+        std::fs::write(&flag, b"")?;
+    } else if flag.exists() {
+        std::fs::remove_file(&flag)?;
+    }
+    Ok(())
+}
+
+/// What one sweep has to remember from the last one.
+///
+/// Kept in the thread rather than in the [`Handle`]: nothing outside the loop
+/// has any business advancing the clock, and a shared copy would let a command
+/// that merely reads the state reset a running cap.
+#[derive(Default)]
+pub struct Sweep {
+    pub held_for: Duration,
+    pub capped: bool,
+}
+
+impl Sweep {
+    /// Folds one decision into the running state.
+    ///
+    /// The clock runs while anything is asking, not only while holding: the cap
+    /// bounds one stretch of keeping the machine from sleeping, and a pause for
+    /// low battery is an interruption of that stretch rather than the end of it.
+    /// Only the trigger going quiet — `Off` or `Idle` — starts a fresh one.
+    pub fn observe(&mut self, phase: Phase, elapsed: Duration) {
+        match phase {
+            Phase::Off | Phase::Idle => {
+                self.held_for = Duration::ZERO;
+                self.capped = false;
+            }
+            Phase::PausedCapReached => {
+                self.capped = true;
+                self.held_for = self.held_for.saturating_add(elapsed);
+            }
+            Phase::Holding | Phase::PausedLowBattery => {
+                self.held_for = self.held_for.saturating_add(elapsed);
+            }
+        }
+    }
+}
+
 /// What the previous run left behind.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct Recovery {
@@ -241,6 +303,224 @@ pub fn recover_at_startup(data_root: &Path) -> Recovery {
         // Only a `prior` of 0 strands anyone. At 1 the machine was already not
         // sleeping before this app ran, and putting it back is exactly right.
         stranded: prior == 0,
+    }
+}
+
+/// Everything the window asks for in one call.
+#[derive(Serialize, Clone)]
+pub struct Status {
+    /// Whether this platform can hold the machine awake at all.
+    pub supported: bool,
+    /// Whether the privileged watchdog is running for this app run.
+    pub authorized: bool,
+    /// Whether a previous run may have left the machine unable to sleep.
+    pub stranded: bool,
+    pub phase: Phase,
+    pub settings: Settings,
+    pub roots: Vec<Freshness>,
+    pub battery_percent: Option<u8>,
+    pub on_external_power: bool,
+    pub held_for_secs: u64,
+    /// Why the feature cannot be offered on this machine, if it cannot. Today
+    /// only a data root that cannot be safely quoted.
+    pub refusal: Option<String>,
+}
+
+/// The shared state, owned by `AppState` and read by both the thread and the
+/// commands.
+pub struct Handle {
+    pub data_root: PathBuf,
+    pub home: PathBuf,
+    settings: Mutex<Settings>,
+    status: Mutex<Status>,
+    /// The value the next watchdog must reset the sleep setting to, taken from
+    /// a breadcrumb at startup. Consumed by the first authorization.
+    reclaimed_prior: Mutex<Option<u8>>,
+}
+
+impl Handle {
+    pub fn new(data_root: PathBuf, home: PathBuf, supported: bool, recovery: Recovery) -> Self {
+        let settings = Settings::load(&crate::paths::keep_awake_settings(&data_root));
+        let refusal = crate::paths::unquotable_refusal(&data_root);
+        let status = Status {
+            // A root that cannot be quoted is as unsupported as a platform that
+            // cannot hold: in both cases the honest answer to "can this machine
+            // do it?" is no, and the tab says which.
+            supported: supported && refusal.is_none(),
+            authorized: false,
+            stranded: recovery.stranded,
+            phase: Phase::Off,
+            settings,
+            roots: Vec::new(),
+            battery_percent: None,
+            on_external_power: false,
+            held_for_secs: 0,
+            refusal,
+        };
+        Self {
+            data_root,
+            home,
+            settings: Mutex::new(settings),
+            status: Mutex::new(status),
+            reclaimed_prior: Mutex::new(recovery.reclaimed_prior),
+        }
+    }
+
+    pub fn settings(&self) -> Settings {
+        self.settings.lock().map(|held| *held).unwrap_or_default()
+    }
+
+    pub fn status(&self) -> Status {
+        match self.status.lock() {
+            Ok(held) => held.clone(),
+            Err(poisoned) => poisoned.into_inner().clone(),
+        }
+    }
+
+    pub fn set_settings(&self, next: Settings) -> Result<()> {
+        let next = next.clamped();
+        next.save(&crate::paths::keep_awake_settings(&self.data_root))?;
+        if let Ok(mut held) = self.settings.lock() {
+            *held = next;
+        }
+        if let Ok(mut status) = self.status.lock() {
+            status.settings = next;
+        }
+        Ok(())
+    }
+
+    /// The prior value for a watchdog about to be spawned, taken once.
+    ///
+    /// Consumed rather than read: a second watchdog in the same run would
+    /// otherwise reclaim a value the first one has already put back.
+    pub fn take_reclaimed_prior(&self) -> Option<u8> {
+        self.reclaimed_prior
+            .lock()
+            .ok()
+            .and_then(|mut it| it.take())
+    }
+
+    pub fn mark_authorized(&self) {
+        if let Ok(mut status) = self.status.lock() {
+            status.authorized = true;
+            status.stranded = false;
+        }
+    }
+
+    pub fn mark_restored(&self) {
+        if let Ok(mut status) = self.status.lock() {
+            status.stranded = false;
+        }
+    }
+
+    fn publish(&self, phase: Phase, roots: Vec<Freshness>, power: Power, held: Duration) {
+        if let Ok(mut status) = self.status.lock() {
+            status.phase = phase;
+            status.roots = roots;
+            status.battery_percent = power.percent;
+            status.on_external_power = power.external;
+            status.held_for_secs = held.as_secs();
+            // The watchdog writes the breadcrumb at spawn and removes it on a
+            // clean exit, so its presence is a free liveness check — no `pgrep`,
+            // no second channel that can disagree with the first.
+            if status.authorized {
+                status.authorized = crate::paths::keep_awake_breadcrumb(&self.data_root).exists();
+            }
+        }
+    }
+}
+
+/// Every root worth watching: the agent CLIs, plus any profile directory whose
+/// app relocates its sessions into the profile.
+fn roots_for(state: &crate::runtime::AppState, home: &Path) -> Vec<crate::agent_activity::Root> {
+    let mut roots = crate::agent_activity::cli_roots(home);
+    for runtime in &state.apps {
+        let Some(trace) = runtime.spec.session_trace else {
+            continue;
+        };
+        let Ok(store) = runtime.store.lock() else {
+            continue;
+        };
+        for profile in store.list() {
+            roots.push(crate::agent_activity::Root {
+                label: format!("{} · {}", runtime.spec.label, profile.label),
+                path: profile.path.join(trace),
+            });
+        }
+    }
+    roots
+}
+
+/// The sweep, forever.
+///
+/// One thread for the life of the app rather than one started and stopped with
+/// the trigger. While the trigger is `Off` a sweep is a mutex read and a sleep,
+/// which is cheaper than the lifecycle management that avoiding it would need.
+///
+/// ponytail: a fixed fifteen-second tick. If the `stat` sweep ever shows up in a
+/// power profile, watch the roots with FSEvents and keep the tick only for the
+/// guards.
+pub fn watch(app: tauri::AppHandle) {
+    use tauri::Manager;
+
+    let mut sweep = Sweep::default();
+    let mut last = std::time::Instant::now();
+
+    loop {
+        std::thread::sleep(SWEEP);
+        let elapsed = last.elapsed();
+        last = std::time::Instant::now();
+
+        let Some(state) = app.try_state::<crate::runtime::AppState>() else {
+            continue;
+        };
+        let handle = &state.keep_awake;
+        let settings = handle.settings();
+
+        // `Off` costs one lock and nothing else — no process table, no `pmset`,
+        // no filesystem walk. The default has to be free.
+        if settings.trigger == Trigger::Off {
+            sweep = Sweep::default();
+            let _ = apply(&handle.data_root, false);
+            handle.publish(
+                Phase::Off,
+                Vec::new(),
+                Power {
+                    percent: None,
+                    external: false,
+                },
+                Duration::ZERO,
+            );
+            continue;
+        }
+
+        // `state.inner()`, not `&state`: `roots_for` takes an `&AppState` and
+        // `state` is a `tauri::State` wrapper around one.
+        let roots = crate::agent_activity::scan(
+            &roots_for(state.inner(), &handle.home),
+            std::time::SystemTime::now(),
+        );
+        let window = Duration::from_secs(u64::from(settings.idle_window_minutes) * 60);
+        let power = state.platform.power().unwrap_or(Power {
+            percent: None,
+            external: false,
+        });
+
+        let phase = decide(
+            &settings,
+            &Inputs {
+                agent_active: crate::agent_activity::any_within(&roots, window),
+                power,
+                held_for: sweep.held_for,
+                capped: sweep.capped,
+            },
+        );
+        sweep.observe(phase, elapsed);
+
+        if let Err(error) = apply(&handle.data_root, phase.holds()) {
+            eprintln!("could not update the keep-awake flag: {error}");
+        }
+        handle.publish(phase, roots, power, sweep.held_for);
     }
 }
 
@@ -453,6 +733,81 @@ mod tests {
             ..working()
         };
         assert_eq!(decide(&s, &quiet), Phase::Idle);
+    }
+
+    #[test]
+    fn the_flag_appears_and_disappears_with_the_decision() {
+        // The only channel between this app and the root loop. Everything else
+        // in the feature exists to get this one file right.
+        let d = tempfile::tempdir().unwrap();
+        let flag = crate::paths::keep_awake_flag(d.path());
+
+        apply(d.path(), true).unwrap();
+        assert!(flag.exists());
+        apply(d.path(), false).unwrap();
+        assert!(!flag.exists());
+    }
+
+    #[test]
+    fn applying_the_same_decision_twice_is_harmless() {
+        // The sweep runs every fifteen seconds and most sweeps change nothing.
+        let d = tempfile::tempdir().unwrap();
+        apply(d.path(), true).unwrap();
+        apply(d.path(), true).unwrap();
+        assert!(crate::paths::keep_awake_flag(d.path()).exists());
+        apply(d.path(), false).unwrap();
+        apply(d.path(), false).unwrap();
+        assert!(!crate::paths::keep_awake_flag(d.path()).exists());
+    }
+
+    #[test]
+    fn the_flag_carries_nothing_the_root_loop_could_be_made_to_run() {
+        // The loop only tests for existence, and this is the belt to that
+        // braces: even if a future change read it, there is nothing there.
+        let d = tempfile::tempdir().unwrap();
+        apply(d.path(), true).unwrap();
+        assert_eq!(
+            std::fs::read(crate::paths::keep_awake_flag(d.path())).unwrap(),
+            Vec::<u8>::new()
+        );
+    }
+
+    #[test]
+    fn a_hold_that_ends_forgets_its_clock_and_its_cap() {
+        // Otherwise the next agent inherits the last one's elapsed time and is
+        // capped early, or inherits its latch and never holds at all.
+        let mut sweep = Sweep::default();
+        sweep.observe(Phase::Holding, Duration::from_secs(60));
+        assert!(sweep.held_for > Duration::ZERO);
+
+        sweep.observe(Phase::Idle, Duration::from_secs(15));
+        assert_eq!(sweep.held_for, Duration::ZERO);
+        assert!(!sweep.capped);
+    }
+
+    #[test]
+    fn a_hold_that_reaches_the_cap_latches_it() {
+        let mut sweep = Sweep::default();
+        sweep.observe(Phase::PausedCapReached, Duration::from_secs(15));
+        assert!(sweep.capped, "the latch is what stops the cap stuttering");
+        // Still asking, still capped: the clock must not restart.
+        sweep.observe(Phase::PausedCapReached, Duration::from_secs(15));
+        assert!(sweep.capped);
+    }
+
+    #[test]
+    fn a_battery_pause_keeps_the_clock_running() {
+        // The cap measures how long the machine has been kept from sleeping in
+        // one stretch. A pause for low battery does not restart that stretch —
+        // plugging in resumes it rather than granting a fresh four hours.
+        let mut sweep = Sweep::default();
+        sweep.observe(Phase::Holding, Duration::from_secs(3600));
+        let before = sweep.held_for;
+        sweep.observe(Phase::PausedLowBattery, Duration::from_secs(15));
+        assert!(
+            sweep.held_for >= before,
+            "a battery pause must not reset the clock"
+        );
     }
 
     #[test]

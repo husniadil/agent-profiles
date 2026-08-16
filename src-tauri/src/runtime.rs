@@ -19,6 +19,9 @@ pub struct AppState {
     /// What the tray menu currently shows. Replacing an attached menu closes it
     /// if it happens to be open, so we only replace it when it would differ.
     pub last_menu: Mutex<Option<Vec<MenuSignature>>>,
+    /// Keeping the machine awake while an agent works. Present on every
+    /// platform; inert where [`Platform::can_hold_awake`] is false.
+    pub keep_awake: crate::keep_awake::Handle,
 }
 
 impl AppState {
@@ -137,6 +140,15 @@ mod tests {
             }),
             apps,
             last_menu: Mutex::new(None),
+            keep_awake: crate::keep_awake::Handle::new(
+                root.join("data"),
+                root.join("home"),
+                false,
+                crate::keep_awake::Recovery {
+                    reclaimed_prior: None,
+                    stranded: false,
+                },
+            ),
         }
     }
 
