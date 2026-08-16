@@ -443,6 +443,69 @@ pub fn open_profile(
     Ok(())
 }
 
+#[tauri::command]
+pub fn keep_awake_status(
+    state: tauri::State<AppState>,
+) -> Result<crate::keep_awake::Status, String> {
+    Ok(state.keep_awake.status())
+}
+
+#[tauri::command]
+pub fn set_keep_awake(
+    state: tauri::State<AppState>,
+    settings: crate::keep_awake::Settings,
+) -> Result<crate::keep_awake::Status, String> {
+    state
+        .keep_awake
+        .set_settings(settings)
+        .map_err(|e| e.to_string())?;
+    Ok(state.keep_awake.status())
+}
+
+/// Asks for the administrator password, once, and starts the watchdog.
+///
+/// Explicitly a command rather than something `setup` does when the trigger is
+/// on: an unsigned app that users already have to right-click past a "damaged"
+/// warning to open, and which then asks for an admin password unprompted, is
+/// shaped exactly like a malware install. The prompt has to follow a click on a
+/// button that has already explained what it is for.
+#[tauri::command]
+pub fn authorize_keep_awake(
+    state: tauri::State<AppState>,
+) -> Result<crate::keep_awake::Status, String> {
+    let handle = &state.keep_awake;
+    if let Some(refusal) = crate::paths::unquotable_refusal(&handle.data_root) {
+        return Err(refusal);
+    }
+    let flag = crate::paths::keep_awake_flag(&handle.data_root);
+    let breadcrumb = crate::paths::keep_awake_breadcrumb(&handle.data_root);
+    // Taken, not read: a second authorization in the same run must not reclaim
+    // a value the first one has already put back.
+    let reclaimed_prior = handle.take_reclaimed_prior();
+
+    state
+        .platform
+        .start_awake_watchdog(&crate::platform::Watchdog {
+            flag: &flag,
+            breadcrumb: &breadcrumb,
+            reclaimed_prior,
+            app_pid: std::process::id(),
+        })
+        .map_err(|e| e.to_string())?;
+
+    handle.mark_authorized();
+    Ok(handle.status())
+}
+
+/// Puts sleep back after a run that died holding it, without starting a
+/// watchdog. The way out for someone who does not want the feature on.
+#[tauri::command]
+pub fn restore_sleep(state: tauri::State<AppState>) -> Result<crate::keep_awake::Status, String> {
+    state.platform.restore_sleep().map_err(|e| e.to_string())?;
+    state.keep_awake.mark_restored();
+    Ok(state.keep_awake.status())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

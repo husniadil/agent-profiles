@@ -139,6 +139,10 @@ pub fn run() {
             commands::data_root,
             commands::socket_budget,
             commands::open_profile,
+            commands::keep_awake_status,
+            commands::set_keep_awake,
+            commands::authorize_keep_awake,
+            commands::restore_sleep,
         ])
         .on_menu_event(|app, event| {
             let id = event.id().as_ref();
