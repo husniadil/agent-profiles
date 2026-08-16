@@ -147,6 +147,58 @@ pub trait Platform: Send + Sync {
     fn unregister_identity(&self, _wm_class: &str) -> Result<()> {
         Ok(())
     }
+
+    /// Whether this platform can hold the machine awake with the lid shut.
+    ///
+    /// `false` everywhere but macOS, and the honest answer rather than a
+    /// pessimistic one: Windows makes lid-close a power-plan action with no
+    /// user-space override, and Linux varies by logind configuration. Neither
+    /// has been built, so neither claims it.
+    fn can_hold_awake(&self) -> bool {
+        false
+    }
+
+    /// What the machine is running on. Only ever asked where `can_hold_awake`
+    /// is true, so a platform that cannot hold has nothing to answer.
+    fn power(&self) -> Result<Power> {
+        anyhow::bail!("this platform does not report power state")
+    }
+
+    /// Start the privileged watchdog for this app run.
+    ///
+    /// Asks the user for an administrator password exactly once, and never
+    /// again for the life of the process: from here on the app arms and
+    /// disarms by creating and deleting the flag file, with no further
+    /// escalation.
+    fn start_awake_watchdog(&self, _watchdog: &Watchdog) -> Result<()> {
+        anyhow::bail!("this platform cannot hold the machine awake with the lid closed")
+    }
+
+    /// Put sleep back the way it was found, once, without starting a watchdog.
+    ///
+    /// The way out of a run that died holding the setting when the user does
+    /// not want the feature enabled again.
+    fn restore_sleep(&self) -> Result<()> {
+        anyhow::bail!("this platform does not manage the sleep setting")
+    }
+}
+
+/// Everything the privileged watchdog needs, gathered so the call site cannot
+/// get the argument order wrong between two paths and a pid.
+pub struct Watchdog<'a> {
+    /// Tested for existence only, never read. Its contents would otherwise
+    /// reach a root shell.
+    pub flag: &'a Path,
+    /// Where the loop records who owns the sleep setting.
+    pub breadcrumb: &'a Path,
+    /// The `SleepDisabled` value from before a previous run died holding it,
+    /// recovered from a stale breadcrumb. `Some` means the new loop must reset
+    /// the setting to this value as its first act; `None` means read the live
+    /// value and treat it as the user's own.
+    pub reclaimed_prior: Option<u8>,
+    /// The pid the loop watches. It exits when this process goes, which is what
+    /// stops a crash from leaving the machine permanently unable to sleep.
+    pub app_pid: u32,
 }
 
 /// The window class, and Linux desktop-entry name, for one profile of one app.

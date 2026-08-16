@@ -1,6 +1,6 @@
 use crate::app_spec::{AppSpec, Locations};
 use crate::platform::{
-    unix_ps, FocusHint, FocusOutcome, Platform, RunningProcess, ScanTarget, DATA_DIR_NAME,
+    unix_ps, FocusHint, FocusOutcome, Platform, Power, RunningProcess, ScanTarget, DATA_DIR_NAME,
 };
 use anyhow::{anyhow, Result};
 use std::path::{Path, PathBuf};
@@ -36,6 +36,35 @@ fn here<'a>(locations: &'a Locations, product: &str) -> Result<&'a crate::app_sp
         .macos
         .as_ref()
         .ok_or_else(|| anyhow!("{product} has not been declared for macOS"))
+}
+
+/// Reads `pmset -g batt`.
+///
+/// Shelling out rather than reaching for IOKit through `objc2`: this is two
+/// lines of text asked for once every sweep, and the IOKit version is a
+/// `CFDictionary` walk that would have to be kept correct across macOS releases
+/// for the same two numbers.
+///
+/// ponytail: shells out once per sweep. Swap for `IOPSCopyPowerSourcesInfo` if
+/// the process spawn ever shows up in a profile.
+fn parse_batt(raw: &str) -> Power {
+    let external = raw.contains("'AC Power'");
+    // Only the battery line is trusted for the number. The remaining-time field
+    // on the same line also carries digits, and a future macOS adding a line
+    // that does would otherwise be read as a charge.
+    let percent = raw
+        .lines()
+        .find(|line| line.trim_start().starts_with("-InternalBattery"))
+        .and_then(|line| line.split_once('%'))
+        .and_then(|(before, _)| {
+            let digits: String = before
+                .chars()
+                .rev()
+                .take_while(char::is_ascii_digit)
+                .collect();
+            digits.chars().rev().collect::<String>().parse().ok()
+        });
+    Power { percent, external }
 }
 
 impl Platform for MacOs {
@@ -89,6 +118,17 @@ impl Platform for MacOs {
         _wm_class: &str,
     ) -> Result<()> {
         Ok(())
+    }
+
+    fn can_hold_awake(&self) -> bool {
+        true
+    }
+
+    fn power(&self) -> Result<Power> {
+        let out = std::process::Command::new("pmset")
+            .args(["-g", "batt"])
+            .output()?;
+        Ok(parse_batt(&String::from_utf8_lossy(&out.stdout)))
     }
 }
 
@@ -221,6 +261,72 @@ mod tests {
             err.contains("Claude Desktop"),
             "must name the product, got: {err}"
         );
+    }
+
+    #[test]
+    fn a_laptop_on_battery_reports_its_charge_and_that_it_is_unplugged() {
+        // Real output from `pmset -g batt`, captured on the target machine.
+        let raw = concat!(
+            "Now drawing from 'Battery Power'\n",
+            " -InternalBattery-0 (id=21823587)\t89%; discharging; 15:53 remaining present: true\n",
+        );
+        assert_eq!(
+            parse_batt(raw),
+            Power {
+                percent: Some(89),
+                external: false
+            }
+        );
+    }
+
+    #[test]
+    fn a_laptop_on_the_charger_reports_external_power() {
+        let raw = concat!(
+            "Now drawing from 'AC Power'\n",
+            " -InternalBattery-0 (id=21823587)\t89%; charging; 0:45 remaining present: true\n",
+        );
+        assert_eq!(
+            parse_batt(raw),
+            Power {
+                percent: Some(89),
+                external: true
+            }
+        );
+    }
+
+    #[test]
+    fn a_desktop_reports_no_charge_rather_than_zero() {
+        // A Mac with no battery prints the source line and nothing else. Zero
+        // here would put every desktop permanently under the battery guard.
+        assert_eq!(
+            parse_batt("Now drawing from 'AC Power'\n"),
+            Power {
+                percent: None,
+                external: true
+            }
+        );
+    }
+
+    #[test]
+    fn unreadable_output_reports_nothing_rather_than_guessing() {
+        assert_eq!(
+            parse_batt(""),
+            Power {
+                percent: None,
+                external: false
+            }
+        );
+    }
+
+    #[test]
+    fn a_percentage_is_read_from_the_battery_line_not_from_anywhere_else() {
+        // The remaining-time field also carries digits, and a future macOS may
+        // add a line that does. Only the `-InternalBattery` line is trusted.
+        let raw = concat!(
+            "Now drawing from 'Battery Power'\n",
+            " -InternalBattery-0 (id=1)\t7%; discharging; 0:12 remaining present: true\n",
+        );
+        assert_eq!(parse_batt(raw).percent, Some(7));
     }
 
     #[test]
