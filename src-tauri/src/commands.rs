@@ -503,10 +503,33 @@ pub fn authorize_keep_awake(
 
 /// Puts sleep back after a run that died holding it, without starting a
 /// watchdog. The way out for someone who does not want the feature on.
+///
+/// Disarms the trigger and drops the flag before restoring anything, because
+/// the way out has to stay out. It is tempting to argue that neither is needed
+/// — `stranded` and `authorized` cannot both be true inside one `Handle`, so
+/// this app's own sweep is writing a flag nothing is watching. That argument is
+/// about a process, and `disablesleep` is a machine. Nothing stops a second
+/// copy of the app running — `cargo tauri dev` beside the installed build is
+/// the likeliest way, and both derive the same data root from `$HOME`. The
+/// second copy's startup deletes the flag and the breadcrumb, so it reports a
+/// stranded machine while the first copy's root loop is still alive and still
+/// polling that same flag every three seconds. Pressing this button there put
+/// sleep back and the older loop took it away again within one poll, with the
+/// banner cleared and nothing on screen saying so.
+///
+/// So the order matters and each step earns its place: the trigger goes first
+/// or this app's own sweep rewrites the flag fifteen seconds later; the flag
+/// goes next because it is the only channel to a loop this process did not
+/// start and cannot see — removing it is what makes a *foreign* watchdog let
+/// go, since the loop is edge-triggered on the flag existing; and only then is
+/// the setting put back, so nothing can re-take it between those two lines.
+/// The body is in `keep_awake::restore`, where a test can reach it without a
+/// `tauri::State`. That is not tidiness: the invariant this used to lean on was
+/// asserted by a test that could not have observed it failing.
 #[tauri::command]
 pub fn restore_sleep(state: tauri::State<AppState>) -> Result<crate::keep_awake::Status, String> {
-    state.platform.restore_sleep().map_err(|e| e.to_string())?;
-    state.keep_awake.mark_restored();
+    crate::keep_awake::restore(&state.keep_awake, state.platform.as_ref())
+        .map_err(|e| e.to_string())?;
     Ok(state.keep_awake.status())
 }
 

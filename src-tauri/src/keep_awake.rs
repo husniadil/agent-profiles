@@ -237,6 +237,51 @@ pub fn apply(data_root: &Path, hold: bool) -> Result<()> {
     Ok(())
 }
 
+/// Puts sleep back after a run that died holding it, and makes that stick.
+///
+/// Disarms the trigger and drops the flag before restoring anything, because
+/// the way out has to stay out. It is tempting to argue that neither is needed:
+/// `stranded` and `authorized` cannot both be true inside one `Handle` — where
+/// a password is needed the app starts unauthorized, and the only thing that
+/// authorizes it clears `stranded` in the same breath — so this app's own sweep
+/// would be writing a flag that nothing is watching.
+///
+/// That argument is about a process, and `disablesleep` is a machine. Nothing
+/// stops a second copy of the app running; `cargo tauri dev` beside the
+/// installed build is the likeliest way, and both derive the same data root
+/// from `$HOME`. The second copy's `recover_at_startup` deletes the flag and
+/// the breadcrumb, so it reports a stranded machine while the first copy's root
+/// loop is still alive and still polling that same flag every three seconds.
+/// Pressing the button there put sleep back and the older loop took it away
+/// again within one poll, with the banner cleared and nothing on screen saying
+/// so — which is the whole failure, arriving through the one door the state
+/// machine cannot see.
+///
+/// Each step earns its place, in this order:
+///
+/// 1. The trigger, or this app's own sweep rewrites the flag fifteen seconds
+///    later. Persisted rather than held in memory, so the next launch does not
+///    quietly start holding again either.
+/// 2. The flag, because it is the only channel to a loop this process did not
+///    start and cannot see. The loop is edge-triggered on the flag existing, so
+///    removing it is what makes a *foreign* watchdog let go.
+/// 3. The setting, last, so nothing can re-take it in between.
+///
+/// A flag that will not delete is reported but does not skip the restore: a
+/// machine that cannot sleep is the thing being fixed, and refusing to try
+/// would leave the user with neither half.
+pub fn restore(handle: &Handle, platform: &dyn crate::platform::Platform) -> Result<()> {
+    handle.set_settings(Settings {
+        trigger: Trigger::Off,
+        ..handle.settings()
+    })?;
+    let dropped = platform.hold(&handle.data_root, false);
+    platform.restore_sleep()?;
+    dropped?;
+    handle.mark_restored();
+    Ok(())
+}
+
 /// The one thing a sweep carries forward: how long this stretch of holding has
 /// run, which the window reports as "held 15m".
 ///
@@ -1017,6 +1062,70 @@ mod tests {
         // Only a watchdog that actually started forgets it.
         handle.clear_reclaimed_prior();
         assert_eq!(handle.reclaimed_prior(), None);
+    }
+
+    #[test]
+    fn restoring_sleep_disarms_the_trigger_and_drops_the_flag() {
+        // The failure this prevents is invisible: the user presses **Restore
+        // sleep**, the banner clears, and sleep is disabled again with nothing
+        // on screen saying so.
+        //
+        // The tempting argument is that it cannot happen, because `stranded`
+        // and `authorized` are mutually exclusive inside one `Handle`, so a
+        // sweep during the banner writes a flag nothing is watching. That
+        // reasons about a process; `disablesleep` is a machine. A second copy
+        // of the app — `cargo tauri dev` beside the installed build, same data
+        // root — starts by deleting the flag and breadcrumb and so reports a
+        // stranded machine, while the first copy's root loop is still alive and
+        // still polling that flag. It re-disabled sleep one poll after the
+        // restore.
+        //
+        // So the flag is what this asserts on, not the fields: it is the only
+        // channel to a loop this process did not start, and the loop is
+        // edge-triggered on it existing. The previous version of this test
+        // checked field transitions alone and stayed green through exactly
+        // that failure.
+        let d = tempfile::tempdir().unwrap();
+        let handle = handle_with(
+            Recovery {
+                reclaimed_prior: Some(0),
+                stranded: true,
+            },
+            d.path(),
+        );
+        handle
+            .set_settings(Settings {
+                trigger: Trigger::AgentActive,
+                ..Settings::default()
+            })
+            .unwrap();
+        // As a sweep would have left it, and as a foreign watchdog reads it.
+        apply(d.path(), true).unwrap();
+        let flag = crate::paths::keep_awake_flag(d.path());
+        assert!(flag.exists(), "the sweep's flag is the state being escaped");
+
+        restore(
+            &handle,
+            &crate::shared_config::tests_support::FakePlatform::with_running(Vec::new()),
+        )
+        .unwrap();
+
+        assert!(
+            !flag.exists(),
+            "a watchdog this process cannot see only lets go when the flag does"
+        );
+        let after = handle.status();
+        assert_eq!(
+            after.settings.trigger,
+            Trigger::Off,
+            "an armed trigger rewrites the flag on the next sweep"
+        );
+        assert!(!after.stranded, "the banner has served its purpose");
+        // And it has to outlive the process, or the next launch holds again.
+        assert_eq!(
+            Settings::load(&crate::paths::keep_awake_settings(d.path())).trigger,
+            Trigger::Off
+        );
     }
 
     #[test]
