@@ -2,7 +2,9 @@
 
 Notable changes, newest first. This project follows [Semantic Versioning](https://semver.org).
 
-## [Unreleased]
+## [0.3.1] — 2026-08-16
+
+The app icon redrawn. Artwork only; no behaviour changes.
 
 ### Changed
 
