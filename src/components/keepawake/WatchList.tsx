@@ -7,12 +7,18 @@ import type { Freshness } from "@/lib/api";
 /// user whose agent is plainly working, and whose Mac slept anyway, has no way to
 /// tell whether the detector was wrong or whether they were watching the wrong
 /// folder. This turns that into something they can look at.
-export function WatchList({ roots, windowMinutes }: { roots: Freshness[]; windowMinutes: number }) {
+export function WatchList({
+  roots,
+  windowMinutes,
+}: {
+  roots: Freshness[];
+  windowMinutes: number;
+}) {
   if (roots.length === 0) {
     return (
       <p className="text-sub text-ink-3">
-        Nothing to watch yet. Claude Code and Codex are found automatically once they have written a
-        session.
+        Nothing to watch yet. Claude Code and Codex are found automatically once
+        they have written a session.
       </p>
     );
   }
@@ -31,7 +37,10 @@ export function WatchList({ roots, windowMinutes }: { roots: Freshness[]; window
       {roots.map((root) => {
         const active = root.seconds_ago !== null && root.seconds_ago <= window;
         return (
-          <li key={root.path} className="flex items-baseline justify-between gap-3 text-sub">
+          <li
+            key={root.path}
+            className="flex items-baseline justify-between gap-3 text-sub"
+          >
             <span className="flex min-w-0 items-baseline gap-1.5">
               <span
                 aria-hidden="true"

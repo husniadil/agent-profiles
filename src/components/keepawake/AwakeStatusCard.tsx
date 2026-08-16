@@ -14,7 +14,10 @@ const CONTROL = "h-7 rounded-lg px-2.5 text-callout";
 /// the lid has to be able to tell why their Mac slept anyway. "Paused" on its own
 /// would leave them guessing, and "keeping your Mac awake" while a guard has
 /// already dropped the hold would be a lie they only discover by losing work.
-const PHASES: Record<Phase, { title: string; detail: string; dot: string; tone: string }> = {
+const PHASES: Record<
+  Phase,
+  { title: string; detail: string; dot: string; tone: string }
+> = {
   off: {
     title: "Off",
     detail: "Your Mac sleeps when you close the lid, as usual.",
@@ -43,7 +46,8 @@ const PHASES: Record<Phase, { title: string; detail: string; dot: string; tone: 
   },
   "paused-cap-reached": {
     title: "Paused — time limit reached",
-    detail: "This hold ran its full length. It resumes when the agent next starts.",
+    detail:
+      "This hold ran its full length. It resumes when the agent next starts.",
     dot: "bg-warning",
     tone: "text-ink",
   },
@@ -91,12 +95,18 @@ export function AwakeStatusCard({
   if (status.stranded) {
     return (
       <Band
-        icon={<AlertTriangle size={13} aria-hidden="true" className="mt-0.5 shrink-0" />}
+        icon={
+          <AlertTriangle
+            size={13}
+            aria-hidden="true"
+            className="mt-0.5 shrink-0"
+          />
+        }
         tone="text-warning"
         title="Your Mac may not be able to sleep"
       >
-        Agent Profiles ended unexpectedly while holding the lid-closed state, and that setting
-        survives a restart.
+        Agent Profiles ended unexpectedly while holding the lid-closed state,
+        and that setting survives a restart.
         <span className="mt-1.5 flex flex-wrap items-center gap-2.5">
           <Button
             size="sm"
@@ -109,7 +119,9 @@ export function AwakeStatusCard({
           {/* Said out loud as well as offered as a button: someone who would
               rather not hand this app a password should still leave knowing
               exactly how to fix their machine. */}
-          <code className="font-mono text-sub text-ink-3">sudo pmset -a disablesleep 0</code>
+          <code className="font-mono text-sub text-ink-3">
+            sudo pmset -a disablesleep 0
+          </code>
         </span>
       </Band>
     );
@@ -118,12 +130,19 @@ export function AwakeStatusCard({
   if (!status.authorized) {
     return (
       <Band
-        icon={<ShieldCheck size={13} aria-hidden="true" className="mt-0.5 shrink-0" />}
+        icon={
+          <ShieldCheck
+            size={13}
+            aria-hidden="true"
+            className="mt-0.5 shrink-0"
+          />
+        }
         tone="text-ink-2"
         title="Not yet authorized"
       >
-        Needs an administrator password once per run. A helper turns the setting on while an agent
-        works, off when it stops, and shuts down with Agent Profiles.
+        Needs an administrator password once per run. A helper turns the setting
+        on while an agent works, off when it stops, and shuts down with Agent
+        Profiles.
         <span className="mt-1.5 flex">
           <Button
             size="sm"
@@ -138,10 +157,38 @@ export function AwakeStatusCard({
     );
   }
 
+  // A failed flag write outranks the phase, because it contradicts it: the
+  // decision was to hold, and the one channel that could carry that decision to
+  // the privileged loop did not take it. Saying "keeping your Mac awake" here
+  // would be the single lie this feature cannot afford.
+  if (status.hold_error !== null) {
+    return (
+      <Band
+        icon={
+          <AlertTriangle
+            size={13}
+            aria-hidden="true"
+            className="mt-0.5 shrink-0"
+          />
+        }
+        tone="text-warning"
+        title="Not holding — the flag could not be written"
+      >
+        Your Mac will sleep as usual. Agent Profiles could not write to its own
+        folder: {status.hold_error}
+      </Band>
+    );
+  }
+
   const phase = PHASES[status.phase];
   return (
     <Band
-      icon={<span aria-hidden="true" className={`mt-1.5 size-1.5 shrink-0 rounded-full ${phase.dot}`} />}
+      icon={
+        <span
+          aria-hidden="true"
+          className={`mt-1.5 size-1.5 shrink-0 rounded-full ${phase.dot}`}
+        />
+      }
       tone={phase.tone}
       title={phase.title}
     >
@@ -150,7 +197,9 @@ export function AwakeStatusCard({
         {status.battery_percent === null
           ? "No battery"
           : `Battery ${status.battery_percent}%${status.on_external_power ? ", plugged in" : ""}`}
-        {status.held_for_secs > 0 ? ` · held ${formatDuration(status.held_for_secs)}` : ""}
+        {status.held_for_secs > 0
+          ? ` · held ${formatDuration(status.held_for_secs)}`
+          : ""}
       </span>
     </Band>
   );
@@ -172,7 +221,9 @@ function Band({
 }) {
   return (
     <div className="flex gap-1.5">
-      <span className={`flex w-3.5 shrink-0 justify-center ${tone}`}>{icon}</span>
+      <span className={`flex w-3.5 shrink-0 justify-center ${tone}`}>
+        {icon}
+      </span>
       <div className="min-w-0 flex-1">
         <p className={`text-callout font-medium ${tone}`}>{title}</p>
         <p className="mt-0.5 text-sub text-ink-2">{children}</p>

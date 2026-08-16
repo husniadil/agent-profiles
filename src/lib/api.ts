@@ -71,6 +71,9 @@ export type KeepAwakeStatus = {
   on_external_power: boolean;
   held_for_secs: number;
   refusal: string | null;
+  /// Why the last sweep could not make the flag match its decision. Non-null
+  /// means the machine is not being held whatever `phase` says.
+  hold_error: string | null;
 };
 
 export const keepAwakeStatus = () => invoke<KeepAwakeStatus>("keep_awake_status");

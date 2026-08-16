@@ -324,6 +324,14 @@ pub struct Status {
     /// Why the feature cannot be offered on this machine, if it cannot. Today
     /// only a data root that cannot be safely quoted.
     pub refusal: Option<String>,
+    /// Why the last sweep could not make the flag match its decision, if it
+    /// could not.
+    ///
+    /// The flag is the only channel to the privileged loop, so a write that
+    /// fails means the machine is not being held whatever the phase says. The
+    /// window has to be able to say that: this feature's whole promise is that
+    /// a user who trusted it and shut the lid can find out why it did not work.
+    pub hold_error: Option<String>,
 }
 
 /// The shared state, owned by `AppState` and read by both the thread and the
@@ -356,6 +364,7 @@ impl Handle {
             on_external_power: false,
             held_for_secs: 0,
             refusal,
+            hold_error: None,
         };
         Self {
             data_root,
@@ -389,15 +398,27 @@ impl Handle {
         Ok(())
     }
 
-    /// The prior value for a watchdog about to be spawned, taken once.
+    /// The prior value a watchdog about to be spawned must reset the setting to.
     ///
-    /// Consumed rather than read: a second watchdog in the same run would
-    /// otherwise reclaim a value the first one has already put back.
-    pub fn take_reclaimed_prior(&self) -> Option<u8> {
-        self.reclaimed_prior
-            .lock()
-            .ok()
-            .and_then(|mut it| it.take())
+    /// Read without consuming, because spawning can fail — the password prompt
+    /// is cancellable, and it is the most likely thing to go wrong here. Taking
+    /// the value up front meant one cancelled prompt discarded the only record
+    /// of a stranded machine: the retry would spawn with nothing to reclaim,
+    /// adopt the live `SleepDisabled=1` as the user's own, and clear the banner
+    /// that was the last thing telling them their Mac could not sleep.
+    pub fn reclaimed_prior(&self) -> Option<u8> {
+        self.reclaimed_prior.lock().ok().and_then(|it| *it)
+    }
+
+    /// Forgets the reclaim value, once a watchdog has actually taken it on.
+    ///
+    /// Separate from reading it so the two happen either side of the spawn: a
+    /// second watchdog in the same run must not reclaim a value the first one
+    /// has already put back.
+    pub fn clear_reclaimed_prior(&self) {
+        if let Ok(mut it) = self.reclaimed_prior.lock() {
+            *it = None;
+        }
     }
 
     pub fn mark_authorized(&self) {
@@ -413,13 +434,21 @@ impl Handle {
         }
     }
 
-    fn publish(&self, phase: Phase, roots: Vec<Freshness>, power: Power, held: Duration) {
+    fn publish(
+        &self,
+        phase: Phase,
+        roots: Vec<Freshness>,
+        power: Power,
+        held: Duration,
+        hold_error: Option<String>,
+    ) {
         if let Ok(mut status) = self.status.lock() {
             status.phase = phase;
             status.roots = roots;
             status.battery_percent = power.percent;
             status.on_external_power = power.external;
             status.held_for_secs = held.as_secs();
+            status.hold_error = hold_error;
             // The watchdog writes the breadcrumb at spawn and removes it on a
             // clean exit, so its presence is a free liveness check — no `pgrep`,
             // no second channel that can disagree with the first.
@@ -481,7 +510,7 @@ pub fn watch(app: tauri::AppHandle) {
         // no filesystem walk. The default has to be free.
         if settings.trigger == Trigger::Off {
             sweep = Sweep::default();
-            let _ = apply(&handle.data_root, false);
+            let released = apply(&handle.data_root, false);
             handle.publish(
                 Phase::Off,
                 Vec::new(),
@@ -490,6 +519,7 @@ pub fn watch(app: tauri::AppHandle) {
                     external: false,
                 },
                 Duration::ZERO,
+                released.err().map(|error| error.to_string()),
             );
             continue;
         }
@@ -517,10 +547,16 @@ pub fn watch(app: tauri::AppHandle) {
         );
         sweep.observe(phase, elapsed);
 
-        if let Err(error) = apply(&handle.data_root, phase.holds()) {
+        // Carried into the status rather than only logged. The flag is the only
+        // channel to the privileged loop, so a write that failed means the
+        // machine is not being held no matter what the phase says — and a
+        // window that goes on claiming otherwise is the one failure this
+        // feature cannot afford.
+        let hold_error = apply(&handle.data_root, phase.holds()).err().map(|error| {
             eprintln!("could not update the keep-awake flag: {error}");
-        }
-        handle.publish(phase, roots, power, sweep.held_for);
+            error.to_string()
+        });
+        handle.publish(phase, roots, power, sweep.held_for, hold_error);
     }
 }
 
@@ -808,6 +844,103 @@ mod tests {
             sweep.held_for >= before,
             "a battery pause must not reset the clock"
         );
+    }
+
+    fn handle_with(recovery: Recovery, root: &Path) -> Handle {
+        Handle::new(root.to_path_buf(), root.join("home"), true, recovery)
+    }
+
+    #[test]
+    fn a_reclaim_value_survives_an_authorization_that_never_happened() {
+        // The password prompt is cancellable, and it is the likeliest thing to
+        // fail here. Discarding the reclaim value on the way *into* the spawn
+        // meant one cancelled prompt lost the only record that a previous run
+        // had died holding the setting: the retry would find nothing to
+        // reclaim, adopt the stuck `SleepDisabled=1` as the user's own, and
+        // clear the banner that was telling them their Mac could not sleep.
+        let d = tempfile::tempdir().unwrap();
+        let handle = handle_with(
+            Recovery {
+                reclaimed_prior: Some(0),
+                stranded: true,
+            },
+            d.path(),
+        );
+
+        // Reading it — as a spawn attempt does — must not consume it.
+        assert_eq!(handle.reclaimed_prior(), Some(0));
+        assert_eq!(
+            handle.reclaimed_prior(),
+            Some(0),
+            "a failed attempt must leave the next one something to reclaim"
+        );
+
+        // Only a watchdog that actually started forgets it.
+        handle.clear_reclaimed_prior();
+        assert_eq!(handle.reclaimed_prior(), None);
+    }
+
+    #[test]
+    fn a_flag_that_could_not_be_written_is_reported_rather_than_only_logged() {
+        // The flag is the only channel to the privileged loop. If the write
+        // fails the machine is not being held, whatever the phase says, and a
+        // window that keeps claiming otherwise is the single failure this
+        // feature cannot afford.
+        let d = tempfile::tempdir().unwrap();
+        let unwritable = d.path().join("not-a-directory");
+        // A file where the data root should be: every write beneath it fails.
+        std::fs::write(&unwritable, b"").unwrap();
+
+        let error = apply(&unwritable, true).unwrap_err().to_string();
+        assert!(!error.is_empty(), "the failure must carry a reason");
+
+        let handle = handle_with(
+            Recovery {
+                reclaimed_prior: None,
+                stranded: false,
+            },
+            d.path(),
+        );
+        handle.publish(
+            Phase::Holding,
+            Vec::new(),
+            Power {
+                percent: Some(80),
+                external: false,
+            },
+            Duration::ZERO,
+            Some(error.clone()),
+        );
+        assert_eq!(handle.status().hold_error, Some(error));
+    }
+
+    #[test]
+    fn a_sweep_that_wrote_the_flag_clears_a_previous_failure() {
+        // Otherwise a single transient failure would leave the window warning
+        // about a hold that is now working perfectly well.
+        let d = tempfile::tempdir().unwrap();
+        let handle = handle_with(
+            Recovery {
+                reclaimed_prior: None,
+                stranded: false,
+            },
+            d.path(),
+        );
+        let power = Power {
+            percent: Some(80),
+            external: false,
+        };
+        handle.publish(
+            Phase::Holding,
+            Vec::new(),
+            power,
+            Duration::ZERO,
+            Some("disk full".into()),
+        );
+        assert!(handle.status().hold_error.is_some());
+
+        handle.publish(Phase::Holding, Vec::new(), power, Duration::ZERO, None);
+        assert_eq!(handle.status().hold_error, None);
     }
 
     #[test]

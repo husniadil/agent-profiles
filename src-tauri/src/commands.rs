@@ -479,9 +479,12 @@ pub fn authorize_keep_awake(
     }
     let flag = crate::paths::keep_awake_flag(&handle.data_root);
     let breadcrumb = crate::paths::keep_awake_breadcrumb(&handle.data_root);
-    // Taken, not read: a second authorization in the same run must not reclaim
-    // a value the first one has already put back.
-    let reclaimed_prior = handle.take_reclaimed_prior();
+    // Read, not taken. The spawn below asks for a password and the user can
+    // cancel it; discarding the reclaim value before knowing whether a watchdog
+    // actually took it on would leave a stranded machine with nothing to put
+    // the setting back — and the retry would then adopt the stuck value as the
+    // user's own. It is forgotten only once a loop is running with it.
+    let reclaimed_prior = handle.reclaimed_prior();
 
     state
         .platform
@@ -493,6 +496,7 @@ pub fn authorize_keep_awake(
         })
         .map_err(|e| e.to_string())?;
 
+    handle.clear_reclaimed_prior();
     handle.mark_authorized();
     Ok(handle.status())
 }

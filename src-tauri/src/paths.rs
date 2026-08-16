@@ -146,7 +146,11 @@ pub fn unquotable_refusal(data_root: &std::path::Path) -> Option<String> {
     let shown = data_root.display().to_string();
     let found = shown
         .chars()
-        .find(|c| matches!(c, '\'' | '"' | '\\' | '\n'))?;
+        // `\r` belongs here as much as `\n`: AppleScript ends a statement on a
+        // carriage return too, so a path carrying one truncates the elevated
+        // script mid-command exactly as a newline would. macOS permits any byte
+        // but `/` and NUL in a filename, so this is reachable, not theoretical.
+        .find(|c| matches!(c, '\'' | '"' | '\\' | '\n' | '\r'))?;
     Some(format!(
         "keep awake is unavailable because this profile folder's path contains \
          {found:?}: {shown:?}. The privileged helper spells the path into a shell \
@@ -373,6 +377,9 @@ mod tests {
             "/Users/a\"b/x",
             "/Users/a\\b/x",
             "/Users/a\nb/x",
+            // AppleScript ends a statement on a carriage return as well as a
+            // newline, so this truncates the elevated script just the same.
+            "/Users/a\rb/x",
         ] {
             let reason = unquotable_refusal(Path::new(bad))
                 .unwrap_or_else(|| panic!("{bad:?} must be refused"));

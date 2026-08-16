@@ -1,8 +1,10 @@
+import { useEffect, useRef, useState } from "react";
+
 import { AwakeStatusCard } from "@/components/keepawake/AwakeStatusCard";
 import { WatchList } from "@/components/keepawake/WatchList";
 import { Input, type InputClassNames } from "@/components/motion/input";
 import type { KeepAwake } from "@/hooks/useKeepAwake";
-import type { KeepAwakeSettings, Trigger } from "@/lib/api";
+import type { KeepAwakeSettings, KeepAwakeStatus, Trigger } from "@/lib/api";
 
 /// Only the options that are not their own explanation carry a line of prose.
 /// "Off" saying "never hold the machine awake" is the label twice.
@@ -95,6 +97,93 @@ const FIELD: InputClassNames = {
 /// Section headings, matching the compose card's on the other tab.
 const LEGEND = "text-sub font-semibold text-ink-2";
 
+/// A value the control owns while it is being moved, saved once it settles.
+///
+/// Every setting here writes a file and crosses the IPC boundary, and both a
+/// dragged slider and a typed field produce a burst of intermediate values that
+/// are not choices — they are the motion between two choices. Saving each one
+/// wrote the settings file twenty times per drag and let the backend's clamp
+/// rewrite a half-typed number under the caret.
+///
+/// The draft follows the committed value whenever that changes from elsewhere —
+/// the three-second status poll, or the backend clamping what was sent — so this
+/// never becomes a second source of truth.
+function useCommitted<T>(
+  committed: T,
+  save: (value: T) => void,
+  delayMs = 250,
+) {
+  const [draft, setDraft] = useState(committed);
+  const timer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const latest = useRef(save);
+  latest.current = save;
+
+  useEffect(() => setDraft(committed), [committed]);
+  useEffect(
+    () => () => (timer.current ? clearTimeout(timer.current) : undefined),
+    [],
+  );
+
+  return [
+    draft,
+    (next: T) => {
+      setDraft(next);
+      if (timer.current) clearTimeout(timer.current);
+      timer.current = setTimeout(() => latest.current(next), delayMs);
+    },
+  ] as const;
+}
+
+/// One typed limit. Its own component so the draft lives per field rather than
+/// in one shared object, and so blur can commit without the other field's value
+/// riding along on a stale copy.
+function LimitField({
+  limit,
+  value,
+  onCommit,
+}: {
+  limit: (typeof LIMITS)[number];
+  value: number;
+  onCommit: (next: number) => void;
+}) {
+  const [draft, setDraft] = useState(String(value));
+  // Follows the committed value while the field is not being edited, so a
+  // number the backend clamped shows up here rather than being contradicted.
+  useEffect(() => setDraft(String(value)), [value]);
+
+  // Clamped here, not on every keystroke. Typing "10" into a field whose floor
+  // is 5 passes through "1", and clamping that turned the first digit into a 5
+  // under the caret — the value fought the hand holding it.
+  const commit = () => {
+    const parsed = Number(draft);
+    const next = Number.isFinite(parsed)
+      ? Math.min(Math.max(Math.round(parsed), limit.min), limit.max)
+      : value;
+    setDraft(String(next));
+    if (next !== value) onCommit(next);
+  };
+
+  return (
+    <Input
+      type="number"
+      min={limit.min}
+      max={limit.max}
+      label={limit.label}
+      aria-label={`${limit.label} (${limit.unit})`}
+      value={draft}
+      onChange={setDraft}
+      onBlur={commit}
+      // Enter commits without needing the field to lose focus first.
+      onKeyDown={(event) => {
+        if (event.key === "Enter") event.currentTarget.blur();
+      }}
+      rightIcon={<span className="text-sub text-ink-3">{limit.unit}</span>}
+      className="min-w-[120px] flex-1"
+      classNames={FIELD}
+    />
+  );
+}
+
 /// The bordered shell the compose card uses, so a container on this tab is the
 /// same object as a container on the other one.
 const CARD =
@@ -108,9 +197,13 @@ const CARD =
 const BAND = "p-2.5";
 const DIVIDED = "border-t border-hairline";
 
+/// Splits on the first read so the panel below can hold hooks.
+///
+/// The draft state the slider and the fields need cannot live behind an early
+/// return — hooks have to run in the same order every render — so the "no status
+/// yet" case is a separate component rather than a branch inside one.
 export function KeepAwakeTab({ keepAwake }: { keepAwake: KeepAwake }) {
-  const status = keepAwake.status;
-  if (!status) {
+  if (!keepAwake.status) {
     // Blank rather than a spinner: the first read lands in a few milliseconds,
     // and a spinner that flashes for one frame is noise, not feedback.
     return (
@@ -121,11 +214,25 @@ export function KeepAwakeTab({ keepAwake }: { keepAwake: KeepAwake }) {
       />
     );
   }
+  return <KeepAwakePanel keepAwake={keepAwake} status={keepAwake.status} />;
+}
 
+function KeepAwakePanel({
+  keepAwake,
+  status,
+}: {
+  keepAwake: KeepAwake;
+  status: KeepAwakeStatus;
+}) {
   const { settings } = status;
   const change = (patch: Partial<KeepAwakeSettings>) =>
     void keepAwake.save({ ...settings, ...patch });
   const armed = status.supported && settings.trigger !== "off";
+
+  const [floor, setFloor] = useCommitted(
+    settings.battery_floor_percent,
+    (next) => change({ battery_floor_percent: next }),
+  );
 
   return (
     // `p-2 gap-2` exactly as the profile panel: two tabs, one density, one inset.
@@ -201,7 +308,7 @@ export function KeepAwakeTab({ keepAwake }: { keepAwake: KeepAwake }) {
                   htmlFor="battery-floor"
                   className="font-mono text-callout tabular-nums text-ink"
                 >
-                  below {settings.battery_floor_percent}%
+                  below {floor}%
                 </output>
               </div>
               <input
@@ -210,17 +317,20 @@ export function KeepAwakeTab({ keepAwake }: { keepAwake: KeepAwake }) {
                 min={FLOOR.min}
                 max={FLOOR.max}
                 step={FLOOR.step}
-                value={settings.battery_floor_percent}
-                onChange={(event) =>
-                  change({ battery_floor_percent: Number(event.target.value) })
-                }
+                value={floor}
+                // React maps `onChange` to the `input` event, which a range
+                // fires on every step of a drag. Committing straight from here
+                // wrote the settings file and made an IPC round trip twenty
+                // times per sweep of the track; the draft moves the thumb at
+                // once and `useCommitted` saves when the hand stops.
+                onChange={(event) => setFloor(Number(event.target.value))}
                 // The filled half is painted as a gradient stop rather than with a
                 // second element: one box, no overlay to keep in sync with the
                 // thumb, and it survives the track being restyled.
                 style={{
                   background: `linear-gradient(to right, var(--accent) ${
-                    (settings.battery_floor_percent / FLOOR.max) * 100
-                  }%, var(--sunken) ${(settings.battery_floor_percent / FLOOR.max) * 100}%)`,
+                    (floor / FLOOR.max) * 100
+                  }%, var(--sunken) ${(floor / FLOOR.max) * 100}%)`,
                 }}
                 className={`mt-1.5 ${SLIDER}`}
               />
@@ -239,32 +349,11 @@ export function KeepAwakeTab({ keepAwake }: { keepAwake: KeepAwake }) {
               to a full day, which no usable track can resolve. */}
             <div className="flex flex-wrap items-end gap-2">
               {LIMITS.map((limit) => (
-                <Input
+                <LimitField
                   key={limit.key}
-                  type="number"
-                  min={limit.min}
-                  max={limit.max}
-                  label={limit.label}
-                  aria-label={`${limit.label} (${limit.unit})`}
-                  value={String(settings[limit.key])}
-                  onChange={(next) => {
-                    const parsed = Number(next);
-                    // The backend clamps too. This only stops the field showing a
-                    // number for the three seconds before it is corrected.
-                    if (next !== "" && Number.isFinite(parsed)) {
-                      change({
-                        [limit.key]: Math.min(
-                          Math.max(parsed, limit.min),
-                          limit.max,
-                        ),
-                      });
-                    }
-                  }}
-                  rightIcon={
-                    <span className="text-sub text-ink-3">{limit.unit}</span>
-                  }
-                  className="min-w-[120px] flex-1"
-                  classNames={FIELD}
+                  limit={limit}
+                  value={settings[limit.key]}
+                  onCommit={(next) => change({ [limit.key]: next })}
                 />
               ))}
             </div>
