@@ -111,6 +111,67 @@ pub fn classify_zones(millicelsius: &[i64]) -> Thermal {
     }
 }
 
+/// The command `systemd-inhibit` is given to run, and the entire reason the
+/// lock is safe to take.
+///
+/// It must be something that ends when its stdin does. Rust never kills a child
+/// on drop, and a child reparented to init outlives whatever spawned it, so a
+/// `sleep infinity` here would go on holding the lid-switch lock after this app
+/// died — a `kill -9`, a panic, a machine that lost power and came back — until
+/// someone found the process with `ps`. That is the same permanent hold the
+/// breadcrumb exists to prevent on macOS, reached by a different road.
+///
+/// A pipe cannot be leaked. However this process ends, the kernel closes the
+/// write end, `cat` reads EOF, and the lock goes with it.
+pub const INHIBIT_HOLDER: &str = "cat";
+
+/// Takes the lid-switch and idle locks, as the user, for as long as this
+/// process holds the other end of the child's stdin.
+///
+/// Deliberately not `--what=sleep`: that would also block a suspend the user
+/// asked for from their own menu, which is not what "keep the machine awake
+/// while an agent works" means. The lid and the idle timer are the two things
+/// that put a machine to sleep without being told to, and they are exactly the
+/// two this holds.
+///
+/// `--mode=block` rather than `delay`: a delay inhibitor buys a few seconds and
+/// then the machine suspends anyway, which for a hold is no hold at all.
+///
+/// Built here rather than inside the Linux-only backend so that the one thing
+/// no compiler on a developer's Mac would otherwise check — that this spawns a
+/// command which dies with its pipe — is checked on every platform's test run.
+pub fn inhibit_command() -> std::process::Command {
+    let mut command = std::process::Command::new("systemd-inhibit");
+    command
+        .args([
+            "--what=handle-lid-switch:idle",
+            "--who=Agent Profiles",
+            "--why=An agent session is working",
+            "--mode=block",
+            INHIBIT_HOLDER,
+        ])
+        .stdin(std::process::Stdio::piped())
+        .stdout(std::process::Stdio::null())
+        .stderr(std::process::Stdio::null());
+    command
+}
+
+/// Drops the lock, by the same door a crash would use.
+///
+/// Closing the pipe first rather than killing outright, so the deliberate
+/// release travels the path that has to work anyway — the one exercised on
+/// every release is then the one a crash depends on. The kill is the backstop:
+/// without it a child that somehow did not read its EOF would block the sweep
+/// thread inside `wait` for the life of the app.
+pub fn release(child: &mut std::process::Child) {
+    drop(child.stdin.take());
+    let _ = child.kill();
+    // Reaped, not abandoned: an unwaited child is a zombie for the life of the
+    // app, and this one is created and dropped every time an agent starts and
+    // stops.
+    let _ = child.wait();
+}
+
 pub fn data_root_from(xdg_config_home: Option<&str>, home: &str) -> PathBuf {
     match xdg_config_home {
         Some(path) if !path.is_empty() => PathBuf::from(path).join(DATA_DIR_SLUG),
@@ -339,56 +400,10 @@ mod imp {
         }
     }
 
-    /// Takes the lid-switch and idle locks, as the user, for as long as this
-    /// process holds the other end of the child's stdin.
-    ///
-    /// Deliberately not `--what=sleep`: that would also block a suspend the
-    /// user asked for from their own menu, which is not what "keep the machine
-    /// awake while an agent works" means. The lid and the idle timer are the
-    /// two things that put a machine to sleep without being told to, and they
-    /// are exactly the two this holds.
-    ///
-    /// `--mode=block` rather than `delay`: a delay inhibitor buys a few seconds
-    /// and then the machine suspends anyway, which for a hold is no hold at all.
-    ///
-    /// The command is `cat` on a pipe, and that choice is the whole teardown
-    /// story. Rust never kills a child on drop and a process reparented to init
-    /// outlives whatever spawned it, so `sleep infinity` here would survive this
-    /// app's death — a `kill -9`, a panic, a power-loss reboot into a stale
-    /// process — and hold the lid-switch lock until someone found it with `ps`.
-    /// That is the same permanent-hold failure the breadcrumb exists to prevent
-    /// on macOS, arrived at by a different road. A pipe cannot be leaked: when
-    /// this process ends, however it ends, the kernel closes the write end, the
-    /// child reads EOF, and the lock goes with it.
     fn inhibit() -> Result<std::process::Child> {
-        Command::new("systemd-inhibit")
-            .args([
-                "--what=handle-lid-switch:idle",
-                "--who=Agent Profiles",
-                "--why=An agent session is working",
-                "--mode=block",
-                "cat",
-            ])
-            .stdin(std::process::Stdio::piped())
-            .stdout(std::process::Stdio::null())
-            .stderr(std::process::Stdio::null())
+        inhibit_command()
             .spawn()
             .map_err(|error| anyhow!("could not take a logind inhibitor lock: {error}"))
-    }
-
-    /// Drops the lock, by the same door a crash would use.
-    ///
-    /// Closing the pipe first rather than killing outright, so the deliberate
-    /// release travels the path that has to work anyway. The kill is the
-    /// backstop: without it a child that somehow did not read its EOF would
-    /// block the sweep thread inside `wait` for the life of the app.
-    fn release(child: &mut std::process::Child) {
-        drop(child.stdin.take());
-        let _ = child.kill();
-        // Reaped, not abandoned: an unwaited child is a zombie for the life of
-        // the app, and this one is created and dropped every time an agent
-        // starts and stops.
-        let _ = child.wait();
     }
 
     /// Every battery and charger the kernel knows about. Plain files, read once
@@ -583,6 +598,104 @@ mod tests {
         // survives a build.
         assert!(!classify_zones(&[84_999]).is_danger());
         assert!(classify_zones(&[85_000]).is_danger());
+    }
+
+    /// How long the holder gets to notice its pipe closed before the test calls
+    /// it stuck. Milliseconds is the honest scale — this is a read returning
+    /// EOF — and the generous bound is here so a loaded CI box does not fail a
+    /// working implementation.
+    const EOF_DEADLINE: std::time::Duration = std::time::Duration::from_secs(5);
+
+    #[test]
+    fn the_command_holding_the_lock_ends_when_its_pipe_does() {
+        // The regression test for the defect that mattered: with `sleep
+        // infinity` here — which is what this shipped as — the child ignores
+        // its stdin, survives the app that spawned it, and holds the
+        // lid-switch lock until someone finds it with `ps`. Nothing else
+        // catches that. It compiles, it passes clippy, and the machine simply
+        // stops sleeping one day.
+        //
+        // Spawned directly rather than through `systemd-inhibit`, so this runs
+        // on a developer's Mac as well as on Linux. What is under test is the
+        // holder's behaviour, and `systemd-inhibit` only passes its stdin
+        // through and exits when it exits.
+        let mut child = std::process::Command::new(INHIBIT_HOLDER)
+            .stdin(std::process::Stdio::piped())
+            .stdout(std::process::Stdio::null())
+            .stderr(std::process::Stdio::null())
+            .spawn()
+            .expect("the inhibitor's holder command must exist on this machine");
+
+        // Exactly what happens to the write end when this process dies. No
+        // kill, deliberately — a holder that only stops when it is killed is
+        // the bug.
+        drop(child.stdin.take());
+
+        let deadline = std::time::Instant::now() + EOF_DEADLINE;
+        loop {
+            match child.try_wait() {
+                Ok(Some(_)) => break,
+                Ok(None) if std::time::Instant::now() < deadline => {
+                    std::thread::sleep(std::time::Duration::from_millis(20))
+                }
+                Ok(None) => {
+                    let _ = child.kill();
+                    let _ = child.wait();
+                    panic!(
+                        "`{INHIBIT_HOLDER}` outlived its own stdin. The logind lock would outlive \
+                         this app: a crash or a force quit leaves the machine unable to sleep on \
+                         the lid until the process is found by hand."
+                    );
+                }
+                Err(error) => panic!("could not wait on the holder: {error}"),
+            }
+        }
+    }
+
+    #[test]
+    fn releasing_a_hold_leaves_no_process_behind() {
+        let mut child = std::process::Command::new(INHIBIT_HOLDER)
+            .stdin(std::process::Stdio::piped())
+            .stdout(std::process::Stdio::null())
+            .stderr(std::process::Stdio::null())
+            .spawn()
+            .unwrap();
+
+        release(&mut child);
+
+        // Reaped, so a second wait has nothing left to find. An unreaped child
+        // is a zombie for the life of the app, and this one is spawned and
+        // dropped every time an agent starts and stops.
+        assert!(
+            child.try_wait().is_ok_and(|status| status.is_some()),
+            "release must reap the child, not just kill it"
+        );
+        assert!(
+            child.stdin.is_none(),
+            "release must give up the write end, which is what a crash would do"
+        );
+    }
+
+    #[test]
+    fn the_inhibitor_blocks_the_lid_and_the_idle_timer_and_nothing_else() {
+        let command = inhibit_command();
+        let args: Vec<_> = command
+            .get_args()
+            .map(|arg| arg.to_string_lossy().into_owned())
+            .collect();
+
+        assert_eq!(command.get_program(), "systemd-inhibit");
+        // `--mode=delay` would buy a few seconds and then let the machine
+        // suspend anyway, which for a hold is no hold at all.
+        assert!(args.contains(&"--mode=block".to_string()));
+        // Not `sleep`: blocking that would stop a suspend the user asked for
+        // from their own menu, which is not what this feature promises.
+        assert!(args.contains(&"--what=handle-lid-switch:idle".to_string()));
+        assert_eq!(
+            args.last().map(String::as_str),
+            Some(INHIBIT_HOLDER),
+            "the holder must be the last argument, or systemd-inhibit runs something else"
+        );
     }
 
     #[test]
