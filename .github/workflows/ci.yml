@@ -30,7 +30,7 @@ jobs:
             os: ubuntu-22.04
 
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
       - name: Install Linux system dependencies
         if: matrix.os == 'ubuntu-22.04'
@@ -57,13 +57,14 @@ jobs:
         with:
           workspaces: src-tauri
 
-      - uses: pnpm/action-setup@v4
-        with:
-          version: 9
+      # No version pinned here: the action reads `packageManager` from
+      # package.json, so CI installs the pnpm the repo declares rather than a
+      # number that has to be remembered in two places.
+      - uses: pnpm/action-setup@v6
 
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@v7
         with:
-          node-version: 20
+          node-version: 26
           cache: pnpm
 
       - run: pnpm install --frozen-lockfile
