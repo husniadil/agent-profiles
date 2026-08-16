@@ -286,7 +286,13 @@ function KeepAwakePanel({
   const { settings } = status;
   const change = (patch: Partial<KeepAwakeSettings>) =>
     void keepAwake.save({ ...settings, ...patch });
-  const armed = status.supported && settings.trigger !== "off";
+  // Authorize is the first gate. Until the machine can actually hold — a
+  // platform that needs a password and has not been given one — the trigger and
+  // its limits stay locked, so the only thing to act on is the Authorize button
+  // in the band above. Where no password is needed (Linux, Windows) this is
+  // always false and nothing is locked.
+  const pendingAuth = status.needs_authorization && !status.authorized;
+  const armed = status.supported && !pendingAuth && settings.trigger !== "off";
   // "this Mac" / "this PC" / "this computer". The tab is about the reader's own
   // hardware, and this feature now runs on all three.
   const { machine } = systemNames();
@@ -311,7 +317,7 @@ function KeepAwakePanel({
 
         <div className={`${BAND} ${DIVIDED}`}>
           <fieldset
-            disabled={!status.supported}
+            disabled={!status.supported || pendingAuth}
             className="disabled:opacity-50"
           >
             <legend className={`${LEGEND} mb-1.5`}>

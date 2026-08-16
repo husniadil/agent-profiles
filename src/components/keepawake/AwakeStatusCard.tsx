@@ -158,6 +158,10 @@ export function AwakeStatusCard({
   // owns; a button offering to authorize either would be asking for permission
   // that was never withheld, and teaching the user this app needs admin rights
   // it does not need.
+  //
+  // This leads the card and outranks the phase: authorization is the first gate,
+  // so until it is granted the trigger and its limits below stay locked and this
+  // Authorize button is the only thing to do here.
   if (status.needs_authorization && !status.authorized) {
     return (
       <Band

@@ -208,6 +208,25 @@ pub fn decide(settings: &Settings, inputs: &Inputs) -> Phase {
     Phase::Holding
 }
 
+/// The phase to act on, once authorization is taken into account.
+///
+/// [`decide`] is pure and knows nothing about the admin password the hold needs
+/// where the platform demands one — so on a working agent it returns `Holding`
+/// whether or not that password has been given. But an unauthorized run cannot
+/// hold anything: on macOS the flag it writes has no privileged watchdog reading
+/// it. Left alone it would light the window green and start the "held" clock for
+/// a machine that is free to sleep. So a decision to hold, while authorization is
+/// still pending, is downgraded to `Idle` — the run watches, it just does not
+/// claim a hold it cannot make. The window already says as much: before
+/// authorization the honest answer is always "you have not authorized yet".
+pub fn effective_phase(decided: Phase, awaiting_authorization: bool) -> Phase {
+    if awaiting_authorization {
+        Phase::Idle
+    } else {
+        decided
+    }
+}
+
 /// How often the app revises its decision.
 ///
 /// This is the one loop in the app whose cost is paid when nobody is watching —
@@ -423,6 +442,12 @@ pub struct Handle {
     /// The value the next watchdog must reset the sleep setting to, taken from
     /// a breadcrumb at startup. Consumed by the first authorization.
     reclaimed_prior: Mutex<Option<u8>>,
+    /// Wakes the sweep before its fifteen-second timer is up. A settings change
+    /// nudges this so a toggled trigger takes effect now, not on the next tick —
+    /// the boolean carries the nudge across the gap where the sweep is busy
+    /// computing rather than waiting, which a bare `notify` would drop.
+    wake: std::sync::Condvar,
+    wake_pending: Mutex<bool>,
 }
 
 impl Handle {
@@ -463,6 +488,32 @@ impl Handle {
             settings: Mutex::new(settings),
             status: Mutex::new(status),
             reclaimed_prior: Mutex::new(recovery.reclaimed_prior),
+            wake: std::sync::Condvar::new(),
+            wake_pending: Mutex::new(false),
+        }
+    }
+
+    /// Wakes the sweep now instead of at the end of its timer.
+    pub fn nudge(&self) {
+        if let Ok(mut pending) = self.wake_pending.lock() {
+            *pending = true;
+            self.wake.notify_all();
+        }
+    }
+
+    /// Waits until the next sweep is due or a [`nudge`](Self::nudge) arrives,
+    /// whichever comes first. A nudge that lands while the caller was not yet
+    /// waiting is not lost — it is left pending and consumed here at once.
+    pub fn wait_for_sweep(&self, timeout: Duration) {
+        let Ok(mut pending) = self.wake_pending.lock() else {
+            return;
+        };
+        if *pending {
+            *pending = false;
+            return;
+        }
+        if let Ok((mut guard, _)) = self.wake.wait_timeout(pending, timeout) {
+            *guard = false;
         }
     }
 
@@ -486,6 +537,10 @@ impl Handle {
         if let Ok(mut status) = self.status.lock() {
             status.settings = next;
         }
+        // Re-decide now rather than up to a tick later: a user who just turned
+        // this on is watching for the status to answer, and a fifteen-second
+        // wait reads as the toggle having done nothing.
+        self.nudge();
         Ok(())
     }
 
@@ -510,6 +565,17 @@ impl Handle {
         if let Ok(mut it) = self.reclaimed_prior.lock() {
             *it = None;
         }
+    }
+
+    /// Whether the hold still needs an admin password before it can act.
+    ///
+    /// The sweep reads this to keep an unauthorized run from claiming a hold it
+    /// cannot make — see [`effective_phase`].
+    pub fn awaiting_authorization(&self) -> bool {
+        self.status
+            .lock()
+            .map(|status| status.needs_authorization && !status.authorized)
+            .unwrap_or(false)
     }
 
     pub fn mark_authorized(&self) {
@@ -558,6 +624,7 @@ impl Handle {
 /// app relocates its sessions into the profile.
 fn roots_for(state: &crate::runtime::AppState, home: &Path) -> Vec<crate::agent_activity::Root> {
     let mut roots = crate::agent_activity::cli_roots(home);
+    let now = std::time::SystemTime::now();
     for runtime in &state.apps {
         let Some(trace) = runtime.spec.session_trace else {
             continue;
@@ -566,9 +633,19 @@ fn roots_for(state: &crate::runtime::AppState, home: &Path) -> Vec<crate::agent_
             continue;
         };
         for profile in store.list() {
+            let path = profile.path.join(trace);
+            // Only once this profile has actually written a session. The Default
+            // profile is the app's own existing install, listed for every app
+            // whether or not it has ever run — so an untouched ChatGPT showed
+            // `ChatGPT · Default … never`, a row watching an empty or absent
+            // folder. A profile earns its row by having been used, the same rule
+            // the Claude projects and the Codex CLI root already follow.
+            if crate::agent_activity::newest_age(&path, now).is_none() {
+                continue;
+            }
             roots.push(crate::agent_activity::Root {
                 label: format!("{} · {}", runtime.spec.label, profile.label),
-                path: profile.path.join(trace),
+                path,
                 // A profile's session trace is a directory this app does not
                 // read the contents of. Freshness is all there is.
                 reading: crate::agent_activity::Reading::Mtime,
@@ -581,10 +658,14 @@ fn roots_for(state: &crate::runtime::AppState, home: &Path) -> Vec<crate::agent_
 /// The sweep, forever.
 ///
 /// One thread for the life of the app rather than one started and stopped with
-/// the trigger. While the trigger is `Off` a sweep is a mutex read and a sleep,
+/// the trigger. While the trigger is `Off` a sweep is a mutex read and a wait,
 /// which is cheaper than the lifecycle management that avoiding it would need.
 ///
-/// ponytail: a fixed fifteen-second tick. If the `stat` sweep ever shows up in a
+/// The wait is nudgeable: fifteen seconds is the idle cadence, but a settings
+/// change wakes it at once so a toggled trigger is answered now rather than on
+/// the next tick.
+///
+/// ponytail: a fifteen-second idle tick. If the `stat` sweep ever shows up in a
 /// power profile, watch the roots with FSEvents and keep the tick only for the
 /// guards.
 pub fn watch(app: tauri::AppHandle) {
@@ -594,14 +675,19 @@ pub fn watch(app: tauri::AppHandle) {
     let mut last = std::time::Instant::now();
 
     loop {
-        std::thread::sleep(SWEEP);
-        let elapsed = last.elapsed();
-        last = std::time::Instant::now();
-
         let Some(state) = app.try_state::<crate::runtime::AppState>() else {
+            // No state yet (early startup): a plain sleep, so this is not a busy
+            // loop while there is nothing to wait on.
+            std::thread::sleep(SWEEP);
             continue;
         };
         let handle = &state.keep_awake;
+        // Wait out the tick, but return the moment a settings change nudges us,
+        // so a toggled trigger is re-decided now instead of up to a tick later.
+        handle.wait_for_sweep(SWEEP);
+        let elapsed = last.elapsed();
+        last = std::time::Instant::now();
+
         let settings = handle.settings();
 
         // `Off` costs one lock and nothing else — no process table, no `pmset`,
@@ -636,7 +722,7 @@ pub fn watch(app: tauri::AppHandle) {
         });
         let thermal = state.platform.thermal();
 
-        let phase = decide(
+        let decided = decide(
             &settings,
             &Inputs {
                 agent_active: crate::agent_activity::any_working(&roots, window),
@@ -644,6 +730,10 @@ pub fn watch(app: tauri::AppHandle) {
                 thermal,
             },
         );
+        // An unauthorized run cannot hold, so it must not say it is holding, try
+        // to, or start the "held" clock. Downgraded to `Idle` before anything
+        // acts on it.
+        let phase = effective_phase(decided, handle.awaiting_authorization());
         sweep.observe(phase, elapsed);
 
         // Carried into the status rather than only logged. Whatever the
@@ -694,6 +784,51 @@ mod tests {
             power: on_battery(80),
             thermal: Thermal::Nominal,
         }
+    }
+
+    #[test]
+    fn an_unauthorized_run_watches_but_never_claims_to_hold() {
+        // `decide` knows nothing about the admin password the hold needs, so on
+        // a working agent it returns Holding regardless. Until that password is
+        // given the machine cannot be held — the reported defect was the window
+        // going green and the "held" clock starting for a machine free to sleep.
+        assert_eq!(effective_phase(Phase::Holding, true), Phase::Idle);
+        assert_eq!(effective_phase(Phase::PausedLowBattery, true), Phase::Idle);
+        // Authorized, the phase is exactly the decision.
+        assert_eq!(effective_phase(Phase::Holding, false), Phase::Holding);
+        assert_eq!(effective_phase(Phase::Idle, false), Phase::Idle);
+    }
+
+    #[test]
+    fn a_pending_nudge_wakes_the_sweep_at_once() {
+        // The delay the user hit: a toggled trigger waited up to a full tick
+        // before anything re-decided. A nudge that lands while the sweep is busy
+        // (not yet waiting) must still be honoured — so the wait short-circuits
+        // on a pending nudge rather than blocking for the timeout.
+        let d = tempfile::tempdir().unwrap();
+        std::fs::create_dir_all(d.path().join("data")).unwrap();
+        let handle = Handle::new(
+            d.path().join("data"),
+            d.path().join("home"),
+            Capabilities {
+                hold: true,
+                thermal: false,
+                needs_authorization: true,
+            },
+            Recovery {
+                reclaimed_prior: None,
+                stranded: false,
+            },
+        );
+
+        handle.nudge();
+        let start = std::time::Instant::now();
+        handle.wait_for_sweep(Duration::from_secs(10));
+        assert!(
+            start.elapsed() < Duration::from_secs(2),
+            "a pending nudge must not block: waited {:?}",
+            start.elapsed()
+        );
     }
 
     #[test]

@@ -71,16 +71,26 @@ const END_TURN: &str = "end_turn";
 
 /// How deep a session root is walked.
 ///
-/// Both known layouts are `<root>/<project>/<session file>`, so two levels
-/// reaches every transcript. A bound rather than an unlimited walk because this
-/// runs on a timer, and an unlimited one would follow whatever a user happened
-/// to leave in the folder.
+/// Not two. A live agent's most recent write is often nowhere near the top of
+/// its project. A subagent's transcript sits at
+/// `<project>/<session>/subagents/agent-*.jsonl`, and a workflow's agents go two
+/// further down at `<project>/<session>/subagents/workflows/<wf>/agent-*.jsonl`
+/// — five levels under the project. Measured on a real machine those nested
+/// files were the *only* thing moving while the session was plainly working: a
+/// two-level walk saw nothing fresh, so freshness and the mid-turn read both
+/// came back stale and the row said "idle" on top of a running workflow.
 ///
-/// ponytail: a flat re-stat of every transcript each sweep — around a thousand
-/// `stat` calls on a heavily used machine, a few milliseconds. Directory mtimes
-/// cannot prune it, because appending to a file does not touch its directory.
-/// If this ever shows up in a profile, watch the roots with FSEvents instead.
-const MAX_DEPTH: u32 = 2;
+/// Deep enough to clear that with room for an agent that itself spawns
+/// subagents, and still bounded rather than unlimited: the walk follows
+/// directories through `metadata`, so a bound is what keeps a symlink loop or a
+/// stray tree from turning one sweep into an endless one.
+///
+/// ponytail: a flat re-stat of every transcript each sweep — a few thousand
+/// `stat` calls on a heavily used machine, still a few milliseconds. Directory
+/// mtimes cannot prune it, because appending to a file does not touch its
+/// directory. If this ever shows up in a profile, watch the roots with FSEvents
+/// instead.
+const MAX_DEPTH: u32 = 10;
 
 /// How a root's state can be read.
 ///
@@ -177,18 +187,45 @@ fn label_from_transcript(transcript: &Path) -> Option<String> {
     }
 }
 
-/// The newest transcript in a Claude Code project directory.
+/// The most recently written transcript under a Claude Code project, main
+/// session or subagent.
 ///
-/// Only the files directly inside it, matching `claude_sessions`: the
-/// `subagents` folder below belongs to a session already counted by its parent.
+/// Subagents are excluded from the session *list* — `claude_sessions` folds them
+/// into their parent so they are not drawn as their own rows — but they must not
+/// be excluded from the *activity* read. A subagent dispatched in the background
+/// keeps working after its parent's turn ends: the main transcript stamps
+/// `end_turn` and goes quiet, while `<session>/subagents/agent-*.jsonl` is still
+/// being appended. Reading only the main transcript called that live agent
+/// "idle" and let the machine sleep on top of it.
+///
+/// Walked to the same `MAX_DEPTH` as `newest_age`, so the freshness verdict and
+/// the mid-turn verdict describe the same file — the one whose process is
+/// writing right now.
 fn newest_transcript(project: &Path) -> Option<PathBuf> {
-    std::fs::read_dir(project)
-        .ok()?
-        .flatten()
-        .filter(|file| file.path().extension().is_some_and(|ext| ext == "jsonl"))
-        .filter_map(|file| Some((file.path().metadata().ok()?.modified().ok()?, file.path())))
-        .max_by_key(|(at, _)| *at)
-        .map(|(_, path)| path)
+    fn walk(dir: &Path, depth: u32, best: &mut Option<(SystemTime, PathBuf)>) {
+        let Ok(entries) = std::fs::read_dir(dir) else {
+            return;
+        };
+        for entry in entries.flatten() {
+            let path = entry.path();
+            let Ok(meta) = entry.metadata() else { continue };
+            if meta.is_dir() {
+                if depth > 0 {
+                    walk(&path, depth - 1, best);
+                }
+            } else if path.extension().is_some_and(|ext| ext == "jsonl") {
+                if let Ok(modified) = meta.modified() {
+                    if best.as_ref().is_none_or(|(seen, _)| modified > *seen) {
+                        *best = Some((modified, path));
+                    }
+                }
+            }
+        }
+    }
+
+    let mut best = None;
+    walk(project, MAX_DEPTH, &mut best);
+    best.map(|(_, path)| path)
 }
 
 /// Whether the agent in this transcript is part-way through a turn.
@@ -307,10 +344,18 @@ pub fn cli_roots(home: &Path) -> Vec<Root> {
         CLI_ROOTS
             .iter()
             .filter(|(_, rest)| *rest != CLAUDE_PROJECTS)
-            .map(|(label, rest)| Root {
-                label: (*label).to_string(),
-                path: home.join(rest),
-                reading: Reading::Mtime,
+            .filter_map(|(label, rest)| {
+                let path = home.join(rest);
+                // Only once the directory is actually there. A row for a CLI the
+                // user has never run — `Codex CLI · never` — watches a folder
+                // that does not exist, which reads as a bug rather than a
+                // status. Claude's own rows already appear only per real
+                // project; this holds the flat roots to the same rule.
+                path.exists().then_some(Root {
+                    label: (*label).to_string(),
+                    path,
+                    reading: Reading::Mtime,
+                })
             }),
     );
     roots
@@ -512,10 +557,25 @@ mod tests {
     }
 
     #[test]
-    fn a_home_with_no_claude_sessions_still_watches_the_other_agent() {
-        let roots = cli_roots(Path::new("/Users/h"));
+    fn a_home_with_no_claude_sessions_still_watches_a_codex_that_exists() {
+        let d = tempfile::tempdir().unwrap();
+        std::fs::create_dir_all(d.path().join(".codex/sessions")).unwrap();
+        let roots = cli_roots(d.path());
         let paths: Vec<_> = roots.iter().map(|r| r.path.clone()).collect();
-        assert!(paths.contains(&PathBuf::from("/Users/h/.codex/sessions")));
+        assert!(paths.contains(&d.path().join(".codex/sessions")));
+    }
+
+    #[test]
+    fn a_codex_that_was_never_installed_is_not_listed() {
+        // The reported defect: `Codex CLI · never` showed for a machine with no
+        // `~/.codex` at all — a row watching a folder that does not exist. A CLI
+        // earns its row by having been run, exactly as each Claude project does.
+        let d = tempfile::tempdir().unwrap();
+        let labels: Vec<_> = cli_roots(d.path())
+            .iter()
+            .map(|r| r.label.clone())
+            .collect();
+        assert!(!labels.contains(&"Codex CLI".to_string()), "got {labels:?}");
     }
 
     /// Writes one Claude Code project directory holding one transcript.
@@ -658,8 +718,9 @@ mod tests {
             );
         }
         // Capping the display cannot hide a working session: the newest N always
-        // contains every session fresh enough to count.
-        assert_eq!(cli_roots(d.path()).len() - 1, MAX_SESSIONS);
+        // contains every session fresh enough to count. No `+1` for Codex here —
+        // this home has no `~/.codex`, so no Codex row is added.
+        assert_eq!(cli_roots(d.path()).len(), MAX_SESSIONS);
     }
 
     #[test]
@@ -764,6 +825,88 @@ mod tests {
         std::fs::write(d.path().join("s.jsonl"), &body).unwrap();
 
         assert_eq!(mid_turn(&d.path().join("s.jsonl")), Some(false));
+    }
+
+    /// Sets a file's mtime without touching its contents, so a test can order
+    /// two transcripts in time.
+    fn set_mtime(path: &Path, when: SystemTime) {
+        let times = std::fs::FileTimes::new().set_modified(when);
+        std::fs::File::options()
+            .write(true)
+            .open(path)
+            .unwrap()
+            .set_times(times)
+            .unwrap();
+    }
+
+    #[test]
+    fn a_background_subagent_still_working_keeps_the_project_working() {
+        // The reported defect: the main session handed control back — its
+        // transcript ends with `end_turn` — while a subagent it spawned in the
+        // background is still mid-tool-call under `<session>/subagents/`.
+        // `newest_age` saw the subagent's write and read the row as fresh, but
+        // `mid_turn` read only the finished main transcript, so the row said
+        // "idle" and the Mac was free to sleep on top of a live agent.
+        let d = tempfile::tempdir().unwrap();
+        let now = SystemTime::now();
+        let project = d.path();
+
+        let main = project.join("session.jsonl");
+        std::fs::write(&main, format!("{ENDED}\n")).unwrap();
+        set_mtime(&main, now - Duration::from_secs(10));
+
+        let sub = project.join("session/subagents/agent-x.jsonl");
+        std::fs::create_dir_all(sub.parent().unwrap()).unwrap();
+        std::fs::write(&sub, format!("{CALLING}\n")).unwrap();
+        set_mtime(&sub, now - Duration::from_secs(2));
+
+        let roots = vec![Root {
+            label: "proj".into(),
+            path: project.to_path_buf(),
+            reading: Reading::Transcript,
+        }];
+        let seen = scan(&roots, now);
+        assert!(
+            seen[0].mid_turn,
+            "a live background subagent is still working"
+        );
+        assert!(any_working(&seen, Duration::from_secs(120)));
+    }
+
+    #[test]
+    fn a_workflow_agent_five_levels_down_is_still_seen_working() {
+        // The reported defect, from a real machine: the only file moving was a
+        // workflow's agent at
+        // `<project>/<session>/subagents/workflows/<wf>/agent-*.jsonl`, five
+        // levels under the project. A two-level walk read the project as stale
+        // and mid-turn as finished, so a running workflow showed "idle". Both
+        // reads have to reach that depth.
+        let d = tempfile::tempdir().unwrap();
+        let now = SystemTime::now();
+        let project = d.path();
+
+        let main = project.join("session.jsonl");
+        std::fs::write(&main, format!("{ENDED}\n")).unwrap();
+        set_mtime(&main, now - Duration::from_secs(600));
+
+        let deep = project.join("session/subagents/workflows/wf_abc/agent-x.jsonl");
+        std::fs::create_dir_all(deep.parent().unwrap()).unwrap();
+        std::fs::write(&deep, format!("{CALLING}\n")).unwrap();
+        set_mtime(&deep, now - Duration::from_secs(2));
+
+        let roots = vec![Root {
+            label: "proj".into(),
+            path: project.to_path_buf(),
+            reading: Reading::Transcript,
+        }];
+        let seen = scan(&roots, now);
+        assert_eq!(
+            seen[0].seconds_ago,
+            Some(2),
+            "freshness must reach the deepest transcript"
+        );
+        assert!(seen[0].mid_turn, "the workflow agent is mid tool call");
+        assert!(any_working(&seen, Duration::from_secs(120)));
     }
 
     #[test]
