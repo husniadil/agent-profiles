@@ -1,4 +1,5 @@
 import { formatDuration } from "@/components/keepawake/AwakeStatusCard";
+import { StateTag } from "@/components/StateTag";
 import type { Freshness } from "@/lib/api";
 
 /// The roots being watched, and how long ago each was last written.
@@ -17,8 +18,8 @@ export function WatchList({
   if (roots.length === 0) {
     return (
       <p className="text-sub text-ink-3">
-        Nothing to watch yet. Claude Code and Codex are found automatically once
-        they have written a session.
+        Nothing to watch yet. Claude Code and Codex are found automatically once they have written a
+        session.
       </p>
     );
   }
@@ -30,31 +31,53 @@ export function WatchList({
     // inside its own box rather than pushing the trigger and the limits out of
     // view — the controls stay put at every window size, and the diagnostic list
     // is the part that gives.
-    // 72px leaves a row half-showing rather than cutting cleanly between two,
+    // 88px leaves a row half-showing rather than cutting cleanly between two,
     // which is the affordance that says there is more without spending a
     // scrollbar's worth of chrome to say it.
-    <ul className="flex max-h-[72px] flex-col gap-1 overflow-y-auto">
+    <ul className="flex max-h-[88px] flex-col gap-1 overflow-y-auto">
       {roots.map((root) => {
         const active = root.seconds_ago !== null && root.seconds_ago <= window;
         return (
           <li
             key={root.path}
-            className="flex items-baseline justify-between gap-3 text-sub"
+            className="flex items-center justify-between gap-3 text-sub"
           >
-            <span className="flex min-w-0 items-baseline gap-1.5">
-              <span
-                aria-hidden="true"
-                className={`size-1.5 shrink-0 self-center rounded-full ${
-                  active ? "bg-live" : "bg-ink-4"
-                }`}
-              />
+            <span className="flex min-w-0 items-center gap-1.5">
+              {/* The ring is the only thing on this tab that moves on its own,
+                  and it earns that by marking the one condition the whole
+                  feature turns on: an agent working right now. Idle rows get a
+                  flat dot, so the motion is the signal rather than decoration. */}
+              <span className="relative flex size-1.5 shrink-0 items-center justify-center">
+                {active ? (
+                  <span
+                    aria-hidden="true"
+                    // Hidden outright under reduced motion rather than slowed:
+                    // the tag beside it already says "working", so removing the
+                    // ring costs the reader nothing.
+                    className="absolute inset-0 rounded-full bg-live animate-live-ping motion-reduce:hidden"
+                  />
+                ) : null}
+                <span
+                  aria-hidden="true"
+                  className={`relative size-1.5 rounded-full ${active ? "bg-live" : "bg-ink-4"}`}
+                />
+              </span>
               <span className="truncate text-ink-2">{root.label}</span>
+              {/* The same chip a running profile carries on the other tab.
+                  "Running" and "Working" are the same kind of claim, and the
+                  word is what a screen reader and a colour-blind reader get —
+                  the dot and its ring are decoration on top of it. */}
+              {active ? (
+                <StateTag token="var(--live)" status="success">
+                  Working
+                </StateTag>
+              ) : null}
             </span>
             <span className="shrink-0 font-mono text-ink-3">
               {root.seconds_ago === null
                 ? "never"
                 : active
-                  ? `active ${formatDuration(root.seconds_ago)} ago`
+                  ? `${formatDuration(root.seconds_ago)} ago`
                   : `idle ${formatDuration(root.seconds_ago)}`}
             </span>
           </li>

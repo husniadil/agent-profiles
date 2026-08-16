@@ -155,6 +155,27 @@
 
   /* Ease-out-quint. No bounce, no elastic — this is a tool, not a toy. */
   --ease-out-quint: cubic-bezier(0.22, 1, 0.36, 1);
+
+  /* A ring leaving a live dot, once every two seconds. Slow on purpose: this
+     marks an agent that is working, which is a condition lasting minutes, so
+     the motion has to read as a heartbeat rather than as something demanding
+     attention. Tailwind's own `animate-ping` is twice as fast and goes to
+     scale 2 with a hard stop; this eases out and rests. */
+  --animate-live-ping: live-ping 2s cubic-bezier(0.22, 1, 0.36, 1) infinite;
+}
+
+@keyframes live-ping {
+  0% {
+    transform: scale(1);
+    opacity: 0.5;
+  }
+  /* Faded well before the cycle ends, so the ring is a pulse with a pause
+     rather than a continuously throbbing dot. */
+  70%,
+  100% {
+    transform: scale(2.6);
+    opacity: 0;
+  }
 }
 
 @layer base {
