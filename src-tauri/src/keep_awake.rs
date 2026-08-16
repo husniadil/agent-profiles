@@ -195,6 +195,55 @@ pub fn decide(settings: &Settings, inputs: &Inputs) -> Phase {
     Phase::Holding
 }
 
+/// What the previous run left behind.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct Recovery {
+    /// The `SleepDisabled` value from before a run that died holding it. Handed
+    /// to the next watchdog, which resets the setting to it before doing
+    /// anything else.
+    pub reclaimed_prior: Option<u8>,
+    /// Whether the machine may be unable to sleep right now because of us.
+    /// Drives a banner, and it is the difference between a user who can fix
+    /// this in one click and one who has to find out that `pmset` exists.
+    pub stranded: bool,
+}
+
+/// Clears whatever the last run left, and reports what has to be put back.
+///
+/// Runs once, in `setup`, before the watcher thread starts — so the first sweep
+/// makes its decision from a clean slate rather than inheriting a hold that
+/// nothing has yet checked the battery against.
+pub fn recover_at_startup(data_root: &Path) -> Recovery {
+    // Unconditionally, and first. A flag surviving a crash would have the app
+    // asking to hold from the moment it launched.
+    let _ = std::fs::remove_file(crate::paths::keep_awake_flag(data_root));
+
+    let breadcrumb = crate::paths::keep_awake_breadcrumb(data_root);
+    let Ok(raw) = std::fs::read_to_string(&breadcrumb) else {
+        return Recovery {
+            reclaimed_prior: None,
+            stranded: false,
+        };
+    };
+    let _ = std::fs::remove_file(&breadcrumb);
+
+    // A breadcrumb we cannot read still means a run died owning the setting. The
+    // only question is which way to guess, and the two mistakes are not
+    // symmetric: guessing "ours" costs a user a `disablesleep` they can set
+    // again in one command, while guessing "theirs" costs them a machine that
+    // never sleeps for a reason they have no way to connect to this app.
+    let prior = match raw.trim().strip_prefix("prior=") {
+        Some("1") => 1,
+        _ => 0,
+    };
+    Recovery {
+        reclaimed_prior: Some(prior),
+        // Only a `prior` of 0 strands anyone. At 1 the machine was already not
+        // sleeping before this app ran, and putting it back is exactly right.
+        stranded: prior == 0,
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -404,6 +453,82 @@ mod tests {
             ..working()
         };
         assert_eq!(decide(&s, &quiet), Phase::Idle);
+    }
+
+    #[test]
+    fn a_clean_start_has_nothing_to_reclaim() {
+        let d = tempfile::tempdir().unwrap();
+        let found = recover_at_startup(d.path());
+        assert_eq!(found.reclaimed_prior, None);
+        assert!(!found.stranded);
+    }
+
+    #[test]
+    fn a_stale_flag_is_cleared_before_the_first_sweep() {
+        // Otherwise a run that crashed while holding would come back already
+        // asking to hold, before anything had looked at the battery.
+        let d = tempfile::tempdir().unwrap();
+        let flag = crate::paths::keep_awake_flag(d.path());
+        std::fs::write(&flag, b"").unwrap();
+
+        recover_at_startup(d.path());
+
+        assert!(!flag.exists(), "a stale flag must not survive startup");
+    }
+
+    #[test]
+    fn a_breadcrumb_left_by_a_run_that_died_holding_is_reclaimed() {
+        // The case the whole breadcrumb exists for: `disablesleep` is persistent
+        // and survives reboot, so without this the machine can never sleep again
+        // and the only way out is a command the user has no reason to know.
+        let d = tempfile::tempdir().unwrap();
+        std::fs::write(crate::paths::keep_awake_breadcrumb(d.path()), b"prior=0\n").unwrap();
+
+        let found = recover_at_startup(d.path());
+
+        assert_eq!(found.reclaimed_prior, Some(0));
+        assert!(
+            found.stranded,
+            "the user must be told their Mac may not sleep"
+        );
+    }
+
+    #[test]
+    fn a_breadcrumb_recording_the_users_own_setting_is_reclaimed_without_alarming_them() {
+        // `prior=1` means sleep was already disabled before this app touched
+        // anything. Nothing is stranded — restoring to 1 is restoring it — so
+        // there is nothing to warn about.
+        let d = tempfile::tempdir().unwrap();
+        std::fs::write(crate::paths::keep_awake_breadcrumb(d.path()), b"prior=1\n").unwrap();
+
+        let found = recover_at_startup(d.path());
+
+        assert_eq!(found.reclaimed_prior, Some(1));
+        assert!(!found.stranded);
+    }
+
+    #[test]
+    fn an_unreadable_breadcrumb_errs_toward_letting_the_machine_sleep() {
+        // Two ways to be wrong. Assuming we took it costs a user their manual
+        // `disablesleep`, which they can set again in one command. Assuming we
+        // did not costs them a machine that can never sleep, and they have no
+        // reason to suspect this app. Fail toward sleeping.
+        let d = tempfile::tempdir().unwrap();
+        std::fs::write(crate::paths::keep_awake_breadcrumb(d.path()), b"garbage").unwrap();
+
+        assert_eq!(recover_at_startup(d.path()).reclaimed_prior, Some(0));
+    }
+
+    #[test]
+    fn the_breadcrumb_is_removed_so_the_next_run_does_not_reclaim_twice() {
+        let d = tempfile::tempdir().unwrap();
+        let crumb = crate::paths::keep_awake_breadcrumb(d.path());
+        std::fs::write(&crumb, b"prior=0\n").unwrap();
+
+        recover_at_startup(d.path());
+
+        assert!(!crumb.exists());
+        assert_eq!(recover_at_startup(d.path()).reclaimed_prior, None);
     }
 
     #[test]
