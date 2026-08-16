@@ -46,14 +46,32 @@ fn env_path(var: &str) -> Result<PathBuf> {
     ))
 }
 
-/// What closing the lid did before this app took the setting over: the power
-/// scheme's lid-close action on mains and on battery.
+/// The highest lid-close action Windows defines: 0 do nothing, 1 sleep, 2
+/// hibernate, 3 shut down.
+///
+/// Used to validate what comes back off disk. The file sits in the user's own
+/// folder and nothing stops it being edited, and the value on the far side of
+/// this parse is written straight into a power scheme — "restore" must not be a
+/// way to arm a lid that shuts the machine down, or an index Windows has no
+/// meaning for at all.
+const MAX_LID_ACTION: u32 = 3;
+
+/// What closing the lid did before this app took the setting over: the scheme
+/// it was read from, and its action on mains and on battery.
 ///
 /// Two values because Windows keeps two, and restoring one of them would leave
 /// a laptop that never sleeps on the lid on battery — the exact machine this
 /// feature must not create.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+///
+/// The scheme is recorded with them because "the active scheme" is not stable
+/// for the life of a hold. Someone who switches power plan mid-session would
+/// otherwise have the prior value written back into whichever plan happened to
+/// be active at release — corrupting that one, and leaving the plan we actually
+/// changed stuck on `Do nothing` with nothing left saying so.
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct LidPrior {
+    /// The power scheme's GUID, in the 36-character hyphenated form.
+    pub scheme: String,
     pub ac: u32,
     pub dc: u32,
 }
@@ -61,8 +79,8 @@ pub struct LidPrior {
 impl LidPrior {
     /// Written before the setting is changed, so a process killed between the
     /// two still leaves behind what to put back.
-    pub fn render(self) -> String {
-        format!("ac={},dc={}\n", self.ac, self.dc)
+    pub fn render(&self) -> String {
+        format!("scheme={},ac={},dc={}\n", self.scheme, self.ac, self.dc)
     }
 
     /// `None` for anything unreadable, and deliberately not a guess: the whole
@@ -70,16 +88,25 @@ impl LidPrior {
     /// would hand the user a lid action they never chose. An unreadable file
     /// leaves the setting alone, which is recoverable; a wrong one is not.
     pub fn parse(raw: &str) -> Option<Self> {
+        let mut scheme = None;
         let mut ac = None;
         let mut dc = None;
         for field in raw.trim().split(',') {
             match field.trim().split_once('=') {
-                Some(("ac", value)) => ac = value.parse().ok(),
-                Some(("dc", value)) => dc = value.parse().ok(),
+                // Length-checked here rather than left to the GUID parser, so
+                // the refusal happens while there is still a caller holding the
+                // file and able to say why.
+                Some(("scheme", value)) if value.len() == 36 => scheme = Some(value.to_string()),
+                Some(("ac", value)) => ac = value.parse().ok().filter(|&n| n <= MAX_LID_ACTION),
+                Some(("dc", value)) => dc = value.parse().ok().filter(|&n| n <= MAX_LID_ACTION),
                 _ => return None,
             }
         }
-        Some(Self { ac: ac?, dc: dc? })
+        Some(Self {
+            scheme: scheme?,
+            ac: ac?,
+            dc: dc?,
+        })
     }
 }
 
@@ -316,7 +343,11 @@ mod imp {
                     // nothing and a file saying what it used to do; the reverse
                     // order leaves the same machine and no way back.
                     std::fs::write(&record, prior.render())?;
-                    lid::write(lid::DO_NOTHING, lid::DO_NOTHING)
+                    // Written to the scheme it was just read from, by name. Not
+                    // "the active scheme" a second time: the two are the same
+                    // right now, and the whole point of carrying the GUID is
+                    // that they will not be at release.
+                    lid::write(&prior.scheme, lid::DO_NOTHING, lid::DO_NOTHING)
                 }
                 (false, true) => restore_lid(&record),
             }
@@ -359,7 +390,7 @@ mod imp {
                 record.display()
             ));
         };
-        lid::write(prior.ac, prior.dc)?;
+        lid::write(&prior.scheme, prior.ac, prior.dc)?;
         std::fs::remove_file(record)?;
         Ok(())
     }
@@ -402,10 +433,11 @@ mod imp {
             }
         }
 
-        /// Read every time rather than cached: someone who switches to Battery
-        /// Saver mid-session has a different scheme, and writing the lid action
-        /// into the one they left would change a plan they are not using while
-        /// leaving the live one asleep on the lid.
+        /// Only ever asked at the moment a hold begins. From then on the scheme
+        /// travels in the record on disk, because the answer here changes the
+        /// instant someone picks a different power plan — and a release that
+        /// asked again would put the prior value into a plan it never came
+        /// from.
         fn active_scheme() -> Result<ActiveScheme> {
             let mut guid: *mut GUID = std::ptr::null_mut();
             // SAFETY: the call writes one pointer into a local this frame owns.
@@ -419,9 +451,13 @@ mod imp {
             Ok(ActiveScheme(guid))
         }
 
-        /// What closing the lid does right now, on mains and on battery.
+        /// What closing the lid does right now, on mains and on battery, and
+        /// which scheme said so.
         pub fn read() -> Result<super::LidPrior> {
             let scheme = active_scheme()?;
+            // SAFETY: the pointer is non-null and owned by `scheme`, which is
+            // alive for the rest of this function.
+            let name = format!("{:?}", unsafe { *scheme.0 });
             let (mut ac, mut dc) = (0u32, 0u32);
             // SAFETY: every pointer here borrows a local that outlives the
             // call, and the scheme GUID is alive until `scheme` drops.
@@ -430,15 +466,15 @@ mod imp {
                     PowerReadACValueIndex(
                         None,
                         Some(scheme.0 as *const GUID),
-                        Some(&SUB_BUTTONS),
-                        Some(&LID_ACTION),
+                        Some(&SUB_BUTTONS as *const GUID),
+                        Some(&LID_ACTION as *const GUID),
                         &mut ac,
                     ),
                     PowerReadDCValueIndex(
                         None,
                         Some(scheme.0 as *const GUID),
-                        Some(&SUB_BUTTONS),
-                        Some(&LID_ACTION),
+                        Some(&SUB_BUTTONS as *const GUID),
+                        Some(&LID_ACTION as *const GUID),
                         &mut dc,
                     ),
                 )
@@ -449,36 +485,47 @@ mod imp {
                     read_ac.0
                 ));
             }
-            Ok(super::LidPrior { ac, dc })
+            Ok(super::LidPrior {
+                scheme: name,
+                ac,
+                dc,
+            })
         }
 
-        /// Sets the lid action on mains and on battery, and makes it take
-        /// effect.
+        /// Sets the lid action on one named scheme, on mains and on battery,
+        /// and makes it take effect.
+        ///
+        /// The scheme is named by the caller rather than looked up, so a hold
+        /// and its release always land on the same plan however many times the
+        /// user changes plans in between.
         ///
         /// The `PowerSetActiveScheme` at the end is not redundant: a written
         /// value sits in the registry until the scheme is applied again, so
         /// without it the machine would go on doing exactly what it did before
-        /// while every reading said otherwise.
-        pub fn write(ac: u32, dc: u32) -> Result<()> {
-            let scheme = active_scheme()?;
-            // SAFETY: as above — the GUIDs outlive the calls.
+        /// while every reading said otherwise. It also means restoring a scheme
+        /// the user has since left makes it current again — which is the honest
+        /// outcome, since that is the plan this app changed.
+        pub fn write(scheme: &str, ac: u32, dc: u32) -> Result<()> {
+            let scheme = GUID::try_from(scheme)
+                .map_err(|error| anyhow!("{scheme} is not a power scheme id: {error}"))?;
+            // SAFETY: every pointer borrows a local that outlives the call.
             let (wrote_ac, wrote_dc, applied) = unsafe {
                 (
                     PowerWriteACValueIndex(
                         None,
-                        scheme.0 as *const GUID,
-                        Some(&SUB_BUTTONS),
-                        Some(&LID_ACTION),
+                        &scheme as *const GUID,
+                        Some(&SUB_BUTTONS as *const GUID),
+                        Some(&LID_ACTION as *const GUID),
                         ac,
                     ),
                     PowerWriteDCValueIndex(
                         None,
-                        scheme.0 as *const GUID,
-                        Some(&SUB_BUTTONS),
-                        Some(&LID_ACTION),
+                        &scheme as *const GUID,
+                        Some(&SUB_BUTTONS as *const GUID),
+                        Some(&LID_ACTION as *const GUID),
                         dc,
                     ),
-                    PowerSetActiveScheme(None, Some(scheme.0 as *const GUID)),
+                    PowerSetActiveScheme(None, Some(&scheme as *const GUID)),
                 )
             };
             if wrote_ac != ERROR_SUCCESS || wrote_dc != ERROR_SUCCESS.0 || applied != ERROR_SUCCESS
@@ -582,9 +629,18 @@ mod tests {
         assert_eq!(looked, r"C:\a, C:\b");
     }
 
+    /// Windows' own Balanced scheme, and the shape `PowerGetActiveScheme`
+    /// hands back through `GUID`'s `Debug`: 36 characters, hyphenated, no
+    /// braces.
+    const BALANCED: &str = "381B4222-F694-41F0-9685-FF5BB260DF2E";
+
     #[test]
     fn the_recorded_lid_action_survives_a_round_trip() {
-        let prior = LidPrior { ac: 1, dc: 2 };
+        let prior = LidPrior {
+            scheme: BALANCED.into(),
+            ac: 1,
+            dc: 2,
+        };
         assert_eq!(LidPrior::parse(&prior.render()), Some(prior));
     }
 
@@ -593,20 +649,49 @@ mod tests {
         // The pair this file exists to keep straight. Restored the wrong way
         // round, a laptop hibernates on the lid at the desk and stays awake in
         // the bag — both of them settings the user never chose.
-        let parsed = LidPrior::parse("ac=0,dc=3").unwrap();
+        let parsed = LidPrior::parse(&format!("scheme={BALANCED},ac=0,dc=3")).unwrap();
         assert_eq!(parsed.ac, 0);
         assert_eq!(parsed.dc, 3);
     }
 
     #[test]
-    fn a_record_that_does_not_say_both_values_is_refused_rather_than_guessed() {
+    fn the_scheme_travels_with_the_values() {
+        // Without it, a release lands on whichever plan is active at the time,
+        // which is not necessarily the plan the hold changed.
+        let parsed = LidPrior::parse(&format!("scheme={BALANCED},ac=1,dc=1")).unwrap();
+        assert_eq!(parsed.scheme, BALANCED);
+        assert_eq!(LidPrior::parse("ac=1,dc=1"), None);
+        assert_eq!(LidPrior::parse("scheme=381B4222,ac=1,dc=1"), None);
+    }
+
+    #[test]
+    fn a_record_that_does_not_say_every_value_is_refused_rather_than_guessed() {
         // A half-written file must not restore half a setting: the caller keeps
         // it and tries again instead, which is recoverable. Inventing the
         // missing half is not.
-        assert_eq!(LidPrior::parse("ac=1"), None);
+        assert_eq!(LidPrior::parse(&format!("scheme={BALANCED},ac=1")), None);
         assert_eq!(LidPrior::parse(""), None);
-        assert_eq!(LidPrior::parse("ac=1,dc=x"), None);
-        assert_eq!(LidPrior::parse("lid=1,dc=1"), None);
+        assert_eq!(
+            LidPrior::parse(&format!("scheme={BALANCED},ac=1,dc=x")),
+            None
+        );
+        assert_eq!(
+            LidPrior::parse(&format!("scheme={BALANCED},lid=1,dc=1")),
+            None
+        );
+    }
+
+    #[test]
+    fn a_hand_edited_record_cannot_arm_an_action_windows_does_not_define() {
+        // The file is in the user's own folder, and what comes out of it is
+        // written straight into a power scheme. 4 is not a lid action; 3 is
+        // "shut down", and reaching it has to mean the machine was already set
+        // that way, not that someone typed it here.
+        assert_eq!(
+            LidPrior::parse(&format!("scheme={BALANCED},ac=4,dc=0")),
+            None
+        );
+        assert!(LidPrior::parse(&format!("scheme={BALANCED},ac=3,dc=0")).is_some());
     }
 
     #[test]
