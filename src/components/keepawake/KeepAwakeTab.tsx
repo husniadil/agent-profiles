@@ -35,8 +35,11 @@ const LIMITS: {
   max: number;
 }[] = [
   {
+    // Not "idle window": that named the mechanism rather than the decision, and
+    // a reader who has to ask what a setting does has been failed by its label.
+    // This one says whose state it is, what state, and when.
     key: "idle_window_minutes",
-    label: "Idle window",
+    label: "Agent idle after",
     unit: "min",
     min: 1,
     max: 60,
@@ -189,13 +192,16 @@ export function KeepAwakeTab({ keepAwake }: { keepAwake: KeepAwake }) {
                   htmlFor="battery-floor"
                   className="text-callout text-ink"
                 >
-                  Pause below
+                  Pause on low battery
                 </label>
+                {/* "below 30%" rather than "30%": with the threshold no longer
+                    named in the label, a bare figure beside it could just as
+                    easily be read as the charge right now. */}
                 <output
                   htmlFor="battery-floor"
                   className="font-mono text-callout tabular-nums text-ink"
                 >
-                  {settings.battery_floor_percent}%
+                  below {settings.battery_floor_percent}%
                 </output>
               </div>
               <input
@@ -262,9 +268,14 @@ export function KeepAwakeTab({ keepAwake }: { keepAwake: KeepAwake }) {
                 />
               ))}
             </div>
+            {/* One sentence per field, in the order the fields appear. The
+                first exists because "idle" is a judgement this app makes on the
+                user's behalf, and a setting that decides when your work counts
+                as finished has to say so out loud. */}
             <p className="mt-1.5 text-sub text-ink-2">
-              With the lid shut nothing can be reported to you, so the time
-              limit runs out silently.
+              An agent counts as finished once its session has gone this long
+              without being written to. With the lid shut nothing can be
+              reported to you, so the time limit runs out silently.
             </p>
           </fieldset>
         </div>
