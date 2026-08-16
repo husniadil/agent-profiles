@@ -77,6 +77,21 @@ pub struct Freshness {
     pub seconds_ago: Option<u64>,
 }
 
+/// The directory slug, shortened from the left.
+///
+/// Only reached when no transcript in a project carries a `cwd` — an older
+/// Claude Code wrote some without one. The slug encodes an absolute path, so
+/// its tail identifies the project while its head is the same home directory on
+/// every row; cutting the head is the one shortening that loses nothing.
+fn shortened_slug(slug: &str) -> String {
+    const KEEP: usize = 26;
+    let count = slug.chars().count();
+    if count <= KEEP {
+        return slug.to_string();
+    }
+    format!("…{}", slug.chars().skip(count - KEEP).collect::<String>())
+}
+
 /// The directory a session runs in, taken from the head of its transcript.
 ///
 /// Claude Code records `cwd` on nearly every entry, and the folder is what a
@@ -155,7 +170,7 @@ fn claude_sessions(root: &Path, now: SystemTime) -> Vec<Root> {
                 .iter()
                 .take(LABEL_PROBE_FILES)
                 .find_map(|(_, path)| label_from_transcript(path))
-                .unwrap_or_else(|| entry.file_name().to_string_lossy().into_owned());
+                .unwrap_or_else(|| shortened_slug(&entry.file_name().to_string_lossy()));
 
             Some((
                 age,
@@ -515,5 +530,24 @@ mod tests {
             labels.contains(&"-Users-y-thing".to_string()),
             "got {labels:?}"
         );
+    }
+
+    #[test]
+    fn a_long_slug_fallback_is_cut_from_the_left_not_the_right() {
+        // The head of a slug is the same home directory on every row; the tail
+        // is what names the project. A real machine produced
+        // `-Users-yudha-Documents--develop-PMOP-net-Source`, which ran past its
+        // row and pushed the age out of the column.
+        let long = "-Users-yudha-Documents--develop-PMOP-net-Source";
+        let short = shortened_slug(long);
+        assert!(short.starts_with('…'), "got {short}");
+        assert!(
+            short.ends_with("PMOP-net-Source"),
+            "the tail must survive: {short}"
+        );
+        assert!(short.chars().count() < long.chars().count());
+
+        // Anything that already fits is left exactly as it is.
+        assert_eq!(shortened_slug("-Users-y-thing"), "-Users-y-thing");
     }
 }
