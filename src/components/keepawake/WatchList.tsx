@@ -19,7 +19,15 @@ export function WatchList({ roots, windowMinutes }: { roots: Freshness[]; window
 
   const window = windowMinutes * 60;
   return (
-    <ul className="flex flex-col gap-1">
+    // The one unbounded thing on this tab: two agent CLIs plus a row per Codex
+    // profile, so a user with several profiles can run past the panel. It scrolls
+    // inside its own box rather than pushing the trigger and the limits out of
+    // view — the controls stay put at every window size, and the diagnostic list
+    // is the part that gives.
+    // 72px leaves a row half-showing rather than cutting cleanly between two,
+    // which is the affordance that says there is more without spending a
+    // scrollbar's worth of chrome to say it.
+    <ul className="flex max-h-[72px] flex-col gap-1 overflow-y-auto">
       {roots.map((root) => {
         const active = root.seconds_ago !== null && root.seconds_ago <= window;
         return (
