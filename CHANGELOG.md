@@ -2,6 +2,28 @@
 
 Notable changes, newest first. This project follows [Semantic Versioning](https://semver.org).
 
+## [Unreleased]
+
+### Added
+
+- **Keep awake with the lid closed.** A long-running agent used to die the moment the lid shut: `caffeinate` and the `IOPMAssertion` APIs behind it prevent *idle* sleep only, and macOS forces sleep on lid close unless the machine has both external power and an external display. Agent Profiles now holds the one lever that does work — the system-wide `pmset disablesleep` flag — for as long as an agent is working, and gives it back when it stops. Off by default; it asks for nothing until you turn it on.
+- **A *Keep Awake* tab in the management window**, alongside the profile list, carrying the trigger, the limits, and an honest readout of what is being held and why it is not.
+- **Detection reads agent session transcripts rather than CPU.** Claude Code and Codex append to a session file on every message and every tool result, so a transcript that moved recently is proof an agent is working — including through a long network wait, which is exactly when the process looks idle and a CPU heuristic reports "finished". Measured against a live session: the transcript was two seconds stale mid-task. The tab lists the folders being watched and how fresh each one is, so a trigger that did not fire is something you can look at.
+- **Two guards, both configurable**: a battery floor, and a cap on how long a single hold may run. Either drops the hold even with an agent still working. The cap is what covers a closed laptop in a bag, where nothing can be reported to you and the battery number alone is not the problem.
+- **Recovery from a run that died holding the setting.** `disablesleep` survives a reboot, so a panic could otherwise leave a Mac that never sleeps again — and both of the obvious safeguards, writing only on a change and restoring only what you took, independently decide to leave it alone in exactly that case. The privileged helper now writes down who owned the setting *before* it can hold anything, and the next launch reclaims it and offers a one-click repair.
+
+### Changed
+
+- `AppSpec` gained `session_trace`, naming where an app's agent sessions land inside a profile directory. Only Codex has one, because only Codex has its state root relocated into the profile by `CODEX_HOME`.
+- `Platform` gained `can_hold_awake`, `power`, `start_awake_watchdog` and `restore_sleep`, all defaulted, so Windows and Linux inherit no-ops and `commands.rs` carries no new `cfg` branches.
+- The app now runs one background thread. It is the first timer in the codebase, and it is what makes the guards reachable: every other scan here is demand-driven, and the lid-closed case is precisely the case where nobody opens the tray and nobody renders the window.
+
+### Security
+
+- The elevated loop is passed inline to `osascript` and never written to disk. Anything under Application Support is user-writable, so an elevated script on disk would be a persistent root escalation for every process running as you rather than a power-management feature.
+- The loop tests the flag file for *existence* only and never reads it, and a data root containing a quote, a backslash or a newline is refused outright rather than escaped through three layers of quoting.
+- The helper identifies the app by pid *and* process start time. Pids are recycled, and a loop that outlived its app would otherwise keep sleep disabled on behalf of a stranger.
+
 ## [0.3.0] — 2026-08-15
 
 The management window rebuilt. Every existing behaviour is kept; only the presentation changes.
