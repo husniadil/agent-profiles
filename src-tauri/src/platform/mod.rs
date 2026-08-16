@@ -79,6 +79,14 @@ pub struct FocusHint<'a> {
 /// less work. Linux has no such judgement to borrow and only sysfs numbers, so
 /// `linux::classify_zones` does the banding there and this stays the shared
 /// vocabulary rather than becoming a degree count one platform cannot fill in.
+///
+/// On Windows nothing constructs anything but `Unknown`, and that is the
+/// designed state rather than a gap: there is no reading to borrow, which is
+/// exactly what `can_read_thermal` reports so the window leaves the guard out
+/// instead of offering one with nothing behind it. The variants stay in the
+/// shared vocabulary because `Status` serialises this on every platform, and a
+/// `cfg`-ed enum would make the window's payload differ by target.
+#[cfg_attr(target_os = "windows", allow(dead_code))]
 #[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize)]
 #[serde(rename_all = "kebab-case")]
 pub enum Thermal {
