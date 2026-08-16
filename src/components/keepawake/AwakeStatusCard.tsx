@@ -44,10 +44,9 @@ const PHASES: Record<
     dot: "bg-warning",
     tone: "text-ink",
   },
-  "paused-cap-reached": {
-    title: "Paused — time limit reached",
-    detail:
-      "This hold ran its full length. It resumes when the agent next starts.",
+  "paused-too-hot": {
+    title: "Paused — your Mac is too hot",
+    detail: "Holding it awake would make that worse. It resumes once it cools.",
     dot: "bg-warning",
     tone: "text-ink",
   },

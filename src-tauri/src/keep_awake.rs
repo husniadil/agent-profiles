@@ -1,7 +1,7 @@
 //! Holding the machine awake with the lid shut, and giving it back.
 
 use crate::agent_activity::Freshness;
-use crate::platform::Power;
+use crate::platform::{Power, Thermal};
 use anyhow::Result;
 use serde::{Deserialize, Serialize};
 use std::path::{Path, PathBuf};
@@ -33,7 +33,6 @@ pub enum Trigger {
 /// disabling a guard by making it unreachable.
 const IDLE_WINDOW_RANGE: std::ops::RangeInclusive<u32> = 1..=60;
 const BATTERY_FLOOR_RANGE: std::ops::RangeInclusive<u8> = 0..=95;
-const MAX_HOLD_RANGE: std::ops::RangeInclusive<u32> = 5..=1440;
 
 #[derive(Serialize, Deserialize, Clone, Copy, PartialEq, Eq, Debug)]
 pub struct Settings {
@@ -48,11 +47,6 @@ pub struct Settings {
     /// Below this charge, on battery, the hold is dropped even mid-task.
     #[serde(default = "default_battery_floor")]
     pub battery_floor_percent: u8,
-    /// The longest a single hold may run. With the lid shut nothing can be
-    /// reported to the user, so this is a silent protection and is deliberately
-    /// conservative rather than generous.
-    #[serde(default = "default_max_hold")]
-    pub max_hold_minutes: u32,
 }
 
 fn default_idle_window() -> u32 {
@@ -61,9 +55,6 @@ fn default_idle_window() -> u32 {
 fn default_battery_floor() -> u8 {
     30
 }
-fn default_max_hold() -> u32 {
-    240
-}
 
 impl Default for Settings {
     fn default() -> Self {
@@ -71,7 +62,6 @@ impl Default for Settings {
             trigger: Trigger::Off,
             idle_window_minutes: default_idle_window(),
             battery_floor_percent: default_battery_floor(),
-            max_hold_minutes: default_max_hold(),
         }
     }
 }
@@ -92,9 +82,6 @@ impl Settings {
             battery_floor_percent: self
                 .battery_floor_percent
                 .clamp(*BATTERY_FLOOR_RANGE.start(), *BATTERY_FLOOR_RANGE.end()),
-            max_hold_minutes: self
-                .max_hold_minutes
-                .clamp(*MAX_HOLD_RANGE.start(), *MAX_HOLD_RANGE.end()),
         }
     }
 
@@ -133,8 +120,8 @@ pub enum Phase {
     Holding,
     /// Something is asking, and the battery guard said no.
     PausedLowBattery,
-    /// Something is asking, and this hold has run its full duration.
-    PausedCapReached,
+    /// Something is asking, and the machine is too hot to make it worse.
+    PausedTooHot,
 }
 
 impl Phase {
@@ -150,19 +137,16 @@ impl Phase {
 pub struct Inputs {
     pub agent_active: bool,
     pub power: Power,
-    /// How long the current hold has run. Zero when not holding.
-    pub held_for: Duration,
-    /// Whether the cap has already fired for this hold. Latched by the caller
-    /// and cleared only when the trigger stops asking.
-    pub capped: bool,
+    /// How hot the machine is right now.
+    pub thermal: Thermal,
 }
 
 /// The whole policy, as a pure function.
 ///
 /// Pure on purpose: this is the code that decides whether a machine in someone's
-/// bag stays awake, and it must be exercisable at a flat battery, at a four-hour
-/// cap and on a desktop with no battery at all without any of those being true
-/// of the machine running the tests.
+/// bag stays awake, and it must be exercisable at a flat battery, on an
+/// overheating laptop and on a desktop with no battery at all without any of
+/// those being true of the machine running the tests.
 pub fn decide(settings: &Settings, inputs: &Inputs) -> Phase {
     let asking = match settings.trigger {
         Trigger::Off => return Phase::Off,
@@ -173,18 +157,17 @@ pub fn decide(settings: &Settings, inputs: &Inputs) -> Phase {
         return Phase::Idle;
     }
 
-    // The cap is checked before the battery because it is the guard that cannot
-    // be recovered from: plugging in lifts a battery pause, and nothing lifts a
-    // cap until the agent goes quiet. Reporting the recoverable one first would
-    // send the user to find a charger for no reason.
-    let cap = Duration::from_secs(u64::from(settings.max_hold_minutes) * 60);
-    if inputs.capped || inputs.held_for >= cap {
-        return Phase::PausedCapReached;
+    // Heat is checked first because it is the only guard where continuing does
+    // damage rather than merely running a battery down. It also replaced a
+    // duration cap that existed solely to stand in for this reading — a clock
+    // is a poor proxy for a temperature, and it stopped holds that were
+    // perfectly fine while missing a machine cooking in a bag after ten minutes.
+    if inputs.thermal.is_danger() {
+        return Phase::PausedTooHot;
     }
 
     // Fails open, and deliberately: `None` is a desktop or a reading that did
-    // not come back, neither of which is a flat battery. The cap above still
-    // bounds every hold, so there is no unbounded case here.
+    // not come back, neither of which is a flat battery.
     let flat = !inputs.power.external
         && inputs
             .power
@@ -222,36 +205,26 @@ pub fn apply(data_root: &Path, hold: bool) -> Result<()> {
     Ok(())
 }
 
-/// What one sweep has to remember from the last one.
+/// The one thing a sweep carries forward: how long this stretch of holding has
+/// run, which the window reports as "held 15m".
 ///
-/// Kept in the thread rather than in the [`Handle`]: nothing outside the loop
-/// has any business advancing the clock, and a shared copy would let a command
-/// that merely reads the state reset a running cap.
+/// It used to latch a duration cap as well. The cap is gone — a Keep Awake
+/// feature that stops on a clock is answering a question nobody asked, and the
+/// thermal reading now covers what it was standing in for.
 #[derive(Default)]
 pub struct Sweep {
     pub held_for: Duration,
-    pub capped: bool,
 }
 
 impl Sweep {
-    /// Folds one decision into the running state.
-    ///
-    /// The clock runs while anything is asking, not only while holding: the cap
-    /// bounds one stretch of keeping the machine from sleeping, and a pause for
-    /// low battery is an interruption of that stretch rather than the end of it.
-    /// Only the trigger going quiet — `Off` or `Idle` — starts a fresh one.
+    /// Only the trigger going quiet starts a fresh stretch. A pause for heat or
+    /// battery interrupts one rather than ending it, so plugging in or cooling
+    /// down resumes the same figure instead of restarting it.
     pub fn observe(&mut self, phase: Phase, elapsed: Duration) {
         match phase {
-            Phase::Off | Phase::Idle => {
-                self.held_for = Duration::ZERO;
-                self.capped = false;
-            }
-            Phase::PausedCapReached => {
-                self.capped = true;
-                self.held_for = self.held_for.saturating_add(elapsed);
-            }
-            Phase::Holding | Phase::PausedLowBattery => {
-                self.held_for = self.held_for.saturating_add(elapsed);
+            Phase::Off | Phase::Idle => self.held_for = Duration::ZERO,
+            Phase::Holding | Phase::PausedLowBattery | Phase::PausedTooHot => {
+                self.held_for = self.held_for.saturating_add(elapsed)
             }
         }
     }
@@ -320,6 +293,9 @@ pub struct Status {
     pub roots: Vec<Freshness>,
     pub battery_percent: Option<u8>,
     pub on_external_power: bool,
+    /// How hot the machine is, so the window can say which guard stopped a hold
+    /// rather than just that one did.
+    pub thermal: Thermal,
     pub held_for_secs: u64,
     /// Why the feature cannot be offered on this machine, if it cannot. Today
     /// only a data root that cannot be safely quoted.
@@ -362,6 +338,7 @@ impl Handle {
             roots: Vec::new(),
             battery_percent: None,
             on_external_power: false,
+            thermal: Thermal::Unknown,
             held_for_secs: 0,
             refusal,
             hold_error: None,
@@ -439,6 +416,7 @@ impl Handle {
         phase: Phase,
         roots: Vec<Freshness>,
         power: Power,
+        thermal: Thermal,
         held: Duration,
         hold_error: Option<String>,
     ) {
@@ -447,6 +425,7 @@ impl Handle {
             status.roots = roots;
             status.battery_percent = power.percent;
             status.on_external_power = power.external;
+            status.thermal = thermal;
             status.held_for_secs = held.as_secs();
             status.hold_error = hold_error;
             // The watchdog writes the breadcrumb at spawn and removes it on a
@@ -518,6 +497,7 @@ pub fn watch(app: tauri::AppHandle) {
                     percent: None,
                     external: false,
                 },
+                Thermal::Unknown,
                 Duration::ZERO,
                 released.err().map(|error| error.to_string()),
             );
@@ -535,14 +515,14 @@ pub fn watch(app: tauri::AppHandle) {
             percent: None,
             external: false,
         });
+        let thermal = state.platform.thermal();
 
         let phase = decide(
             &settings,
             &Inputs {
                 agent_active: crate::agent_activity::any_within(&roots, window),
                 power,
-                held_for: sweep.held_for,
-                capped: sweep.capped,
+                thermal,
             },
         );
         sweep.observe(phase, elapsed);
@@ -556,7 +536,7 @@ pub fn watch(app: tauri::AppHandle) {
             eprintln!("could not update the keep-awake flag: {error}");
             error.to_string()
         });
-        handle.publish(phase, roots, power, sweep.held_for, hold_error);
+        handle.publish(phase, roots, power, thermal, sweep.held_for, hold_error);
     }
 }
 
@@ -582,8 +562,7 @@ mod tests {
         Inputs {
             agent_active: true,
             power: on_battery(80),
-            held_for: Duration::ZERO,
-            capped: false,
+            thermal: Thermal::Nominal,
         }
     }
 
@@ -657,6 +636,73 @@ mod tests {
     }
 
     #[test]
+    fn a_machine_the_system_calls_too_hot_stops_holding() {
+        // The guard that replaced the duration cap. Continuing here is the one
+        // case where holding does damage rather than merely spending charge.
+        let s = settings(Trigger::AgentActive);
+        for hot in [Thermal::Serious, Thermal::Critical] {
+            assert_eq!(
+                decide(
+                    &s,
+                    &Inputs {
+                        thermal: hot,
+                        ..working()
+                    }
+                ),
+                Phase::PausedTooHot,
+                "{hot:?} must stop the hold"
+            );
+        }
+    }
+
+    #[test]
+    fn a_warm_machine_keeps_holding() {
+        // `Fair` is Apple's "slightly elevated, fans audible" — the ordinary
+        // state of a laptop doing work. Releasing there would mean a hold that
+        // never survives the build it was taken out for.
+        let s = settings(Trigger::AgentActive);
+        for fine in [Thermal::Nominal, Thermal::Fair, Thermal::Unknown] {
+            assert_eq!(
+                decide(
+                    &s,
+                    &Inputs {
+                        thermal: fine,
+                        ..working()
+                    }
+                ),
+                Phase::Holding,
+                "{fine:?} must not stop the hold"
+            );
+        }
+    }
+
+    #[test]
+    fn heat_is_reported_ahead_of_a_low_battery() {
+        // Both can be true at once and the window shows one. Heat wins: a user
+        // told to plug in would carry a hot machine to a charger and keep it
+        // working, which is the wrong instruction.
+        let s = settings(Trigger::AgentActive);
+        let both = Inputs {
+            thermal: Thermal::Critical,
+            power: on_battery(5),
+            ..working()
+        };
+        assert_eq!(decide(&s, &both), Phase::PausedTooHot);
+    }
+
+    #[test]
+    fn a_platform_that_cannot_read_heat_is_never_paused_for_it() {
+        // Windows and Linux report `Unknown`. A missing reading is not evidence
+        // of a hot machine, and treating it as one would make the feature
+        // useless everywhere it cannot measure.
+        assert!(!Thermal::Unknown.is_danger());
+        assert!(!Thermal::Nominal.is_danger());
+        assert!(!Thermal::Fair.is_danger());
+        assert!(Thermal::Serious.is_danger());
+        assert!(Thermal::Critical.is_danger());
+    }
+
+    #[test]
     fn a_machine_on_external_power_is_never_paused_for_its_battery() {
         // It cannot run flat. Pausing a plugged-in laptop at 5% while it charges
         // would be the guard defeating the feature for no benefit.
@@ -700,64 +746,6 @@ mod tests {
     }
 
     #[test]
-    fn a_hold_that_has_run_its_full_duration_stops() {
-        let s = settings(Trigger::AgentActive);
-        let cap = Duration::from_secs(u64::from(s.max_hold_minutes) * 60);
-        assert_eq!(
-            decide(
-                &s,
-                &Inputs {
-                    held_for: cap,
-                    ..working()
-                }
-            ),
-            Phase::PausedCapReached
-        );
-        assert_eq!(
-            decide(
-                &s,
-                &Inputs {
-                    held_for: cap - Duration::from_secs(1),
-                    ..working()
-                }
-            ),
-            Phase::Holding
-        );
-    }
-
-    #[test]
-    fn a_cap_that_has_fired_stays_fired_while_the_trigger_keeps_asking() {
-        // Without the latch the clock resets the moment the hold drops, and the
-        // cap becomes a stutter rather than a stop.
-        let s = settings(Trigger::AgentActive);
-        assert_eq!(
-            decide(
-                &s,
-                &Inputs {
-                    capped: true,
-                    held_for: Duration::ZERO,
-                    ..working()
-                }
-            ),
-            Phase::PausedCapReached
-        );
-    }
-
-    #[test]
-    fn the_cap_is_reported_ahead_of_a_low_battery() {
-        // Both can be true at once and the window shows one. Naming the battery
-        // would invite the user to plug in and expect it to resume, which the
-        // cap will not do.
-        let s = settings(Trigger::AgentActive);
-        let both = Inputs {
-            capped: true,
-            power: on_battery(5),
-            ..working()
-        };
-        assert_eq!(decide(&s, &both), Phase::PausedCapReached);
-    }
-
-    #[test]
     fn a_trigger_that_stops_asking_reports_idle_rather_than_a_guard() {
         // Honesty: "paused, low battery" while nothing wants a hold would have
         // the user plug in to fix a problem that does not exist.
@@ -765,7 +753,6 @@ mod tests {
         let quiet = Inputs {
             agent_active: false,
             power: on_battery(2),
-            capped: true,
             ..working()
         };
         assert_eq!(decide(&s, &quiet), Phase::Idle);
@@ -809,26 +796,15 @@ mod tests {
     }
 
     #[test]
-    fn a_hold_that_ends_forgets_its_clock_and_its_cap() {
-        // Otherwise the next agent inherits the last one's elapsed time and is
-        // capped early, or inherits its latch and never holds at all.
+    fn a_hold_that_ends_forgets_its_clock() {
+        // Otherwise the next agent inherits the last one's elapsed time and the
+        // window reports a stretch that never happened.
         let mut sweep = Sweep::default();
         sweep.observe(Phase::Holding, Duration::from_secs(60));
         assert!(sweep.held_for > Duration::ZERO);
 
         sweep.observe(Phase::Idle, Duration::from_secs(15));
         assert_eq!(sweep.held_for, Duration::ZERO);
-        assert!(!sweep.capped);
-    }
-
-    #[test]
-    fn a_hold_that_reaches_the_cap_latches_it() {
-        let mut sweep = Sweep::default();
-        sweep.observe(Phase::PausedCapReached, Duration::from_secs(15));
-        assert!(sweep.capped, "the latch is what stops the cap stuttering");
-        // Still asking, still capped: the clock must not restart.
-        sweep.observe(Phase::PausedCapReached, Duration::from_secs(15));
-        assert!(sweep.capped);
     }
 
     #[test]
@@ -843,6 +819,12 @@ mod tests {
         assert!(
             sweep.held_for >= before,
             "a battery pause must not reset the clock"
+        );
+        let before = sweep.held_for;
+        sweep.observe(Phase::PausedTooHot, Duration::from_secs(15));
+        assert!(
+            sweep.held_for >= before,
+            "a heat pause must not reset the clock either"
         );
     }
 
@@ -908,6 +890,7 @@ mod tests {
                 percent: Some(80),
                 external: false,
             },
+            Thermal::Nominal,
             Duration::ZERO,
             Some(error.clone()),
         );
@@ -934,12 +917,20 @@ mod tests {
             Phase::Holding,
             Vec::new(),
             power,
+            Thermal::Nominal,
             Duration::ZERO,
             Some("disk full".into()),
         );
         assert!(handle.status().hold_error.is_some());
 
-        handle.publish(Phase::Holding, Vec::new(), power, Duration::ZERO, None);
+        handle.publish(
+            Phase::Holding,
+            Vec::new(),
+            power,
+            Thermal::Nominal,
+            Duration::ZERO,
+            None,
+        );
         assert_eq!(handle.status().hold_error, None);
     }
 
@@ -1036,23 +1027,19 @@ mod tests {
             trigger: Trigger::Always,
             idle_window_minutes: 0,
             battery_floor_percent: 100,
-            max_hold_minutes: 0,
         };
         let sane = wild.clamped();
         assert_eq!(sane.idle_window_minutes, 1);
         assert_eq!(sane.battery_floor_percent, 95);
-        assert_eq!(sane.max_hold_minutes, 5);
 
         let huge = Settings {
             trigger: Trigger::Always,
             idle_window_minutes: 9999,
             battery_floor_percent: 200,
-            max_hold_minutes: 99999,
         };
         let sane = huge.clamped();
         assert_eq!(sane.idle_window_minutes, 60);
         assert_eq!(sane.battery_floor_percent, 95);
-        assert_eq!(sane.max_hold_minutes, 1440);
     }
 
     #[test]
@@ -1063,7 +1050,6 @@ mod tests {
             trigger: Trigger::AgentActive,
             idle_window_minutes: 7,
             battery_floor_percent: 40,
-            max_hold_minutes: 120,
         };
         written.save(&file).unwrap();
         assert_eq!(Settings::load(&file), written);
@@ -1094,9 +1080,5 @@ mod tests {
 
         let loaded = Settings::load(&partial);
         assert_eq!(loaded.trigger, Trigger::Always);
-        assert_eq!(
-            loaded.max_hold_minutes,
-            Settings::default().max_hold_minutes
-        );
     }
 }

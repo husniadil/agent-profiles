@@ -47,13 +47,16 @@ export const setAutostart = (enabled: boolean) => invoke("set_autostart", { enab
 
 export type Trigger = "off" | "agent-active" | "always";
 
-export type Phase = "off" | "idle" | "holding" | "paused-low-battery" | "paused-cap-reached";
+export type Phase = "off" | "idle" | "holding" | "paused-low-battery" | "paused-too-hot";
+
+/// The system's own four-level reading. "unknown" is every platform but macOS,
+/// and never counts as hot.
+export type Thermal = "unknown" | "nominal" | "fair" | "serious" | "critical";
 
 export type KeepAwakeSettings = {
   trigger: Trigger;
   idle_window_minutes: number;
   battery_floor_percent: number;
-  max_hold_minutes: number;
 };
 
 /// One watched session root and how long ago anything under it was written.
@@ -69,6 +72,7 @@ export type KeepAwakeStatus = {
   roots: Freshness[];
   battery_percent: number | null;
   on_external_power: boolean;
+  thermal: Thermal;
   held_for_secs: number;
   refusal: string | null;
   /// Why the last sweep could not make the flag match its decision. Non-null

@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 
 import { AwakeStatusCard } from "@/components/keepawake/AwakeStatusCard";
+import { BatteryGauge } from "@/components/keepawake/BatteryGauge";
 import { WatchList } from "@/components/keepawake/WatchList";
 import { Input, type InputClassNames } from "@/components/motion/input";
 import type { KeepAwake } from "@/hooks/useKeepAwake";
@@ -25,10 +26,13 @@ const TRIGGERS: { id: Trigger; label: string; detail?: string }[] = [
 
 type LimitKey = keyof Omit<KeepAwakeSettings, "trigger">;
 
-/// The three guards, side by side rather than stacked. They are one idea — the
-/// conditions that end a hold — and the window is short and wide. The bounds are
-/// restated here so the field cannot offer a number the backend will clamp
-/// underneath it.
+/// The one typed limit left. "Stop after" used to sit beside it, capping a hold
+/// on a clock — but that existed only to stand in for a temperature nobody could
+/// read, and the thermal guard measures the real thing now. A Keep Awake feature
+/// that stops because time passed is answering a question nobody asked.
+///
+/// The bounds are restated here so the field cannot offer a number the backend
+/// will clamp underneath it.
 const LIMITS: {
   key: LimitKey;
   label: string;
@@ -45,13 +49,6 @@ const LIMITS: {
     unit: "min",
     min: 1,
     max: 60,
-  },
-  {
-    key: "max_hold_minutes",
-    label: "Stop after",
-    unit: "min",
-    min: 5,
-    max: 1440,
   },
 ];
 
@@ -178,7 +175,10 @@ function LimitField({
         if (event.key === "Enter") event.currentTarget.blur();
       }}
       rightIcon={<span className="text-sub text-ink-3">{limit.unit}</span>}
-      className="min-w-[120px] flex-1"
+      // Sized to its content, not stretched. It shared a row with "Stop after"
+      // and split the width with it; alone, `flex-1` gave a two-digit number a
+      // field five hundred pixels wide.
+      className="w-40"
       classNames={FIELD}
     />
   );
@@ -297,8 +297,14 @@ function KeepAwakePanel({
               <div className="flex items-baseline justify-between gap-3">
                 <label
                   htmlFor="battery-floor"
-                  className="text-callout text-ink"
+                  className="flex items-center gap-1.5 text-callout text-ink"
                 >
+                  {/* The glyph tracks the threshold, not the charge: this row
+                      sets a level, and a picture that showed something else
+                      while sitting on the control would be answering a question
+                      nobody asked here. The current charge is in the band at the
+                      top of this card. */}
+                  <BatteryGauge percent={floor} className="h-3.5 w-[27px] shrink-0 text-ink-2" />
                   Pause on low battery
                 </label>
                 {/* "below 30%" rather than "30%": with the threshold no longer
@@ -363,8 +369,7 @@ function KeepAwakePanel({
                 as finished has to say so out loud. */}
             <p className="mt-1.5 text-sub text-ink-2">
               An agent counts as finished once its session has gone this long
-              without being written to. With the lid shut nothing can be
-              reported to you, so the time limit runs out silently.
+              without being written to.
             </p>
           </fieldset>
         </div>

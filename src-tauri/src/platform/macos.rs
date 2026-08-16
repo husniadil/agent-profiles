@@ -131,6 +131,23 @@ impl Platform for MacOs {
         Ok(parse_batt(&String::from_utf8_lossy(&out.stdout)))
     }
 
+    fn thermal(&self) -> crate::platform::Thermal {
+        use crate::platform::Thermal;
+        use objc2_foundation::{NSProcessInfo, NSProcessInfoThermalState};
+
+        match NSProcessInfo::processInfo().thermalState() {
+            NSProcessInfoThermalState::Nominal => Thermal::Nominal,
+            NSProcessInfoThermalState::Fair => Thermal::Fair,
+            NSProcessInfoThermalState::Serious => Thermal::Serious,
+            NSProcessInfoThermalState::Critical => Thermal::Critical,
+            // A level this build has never heard of. Reported as unknown rather
+            // than guessed at in either direction: a future macOS adding a step
+            // above `Critical` must not read as cool, and one added below
+            // `Nominal` must not read as hot.
+            _ => Thermal::Unknown,
+        }
+    }
+
     fn start_awake_watchdog(&self, watchdog: &crate::platform::Watchdog) -> Result<()> {
         run_osascript(&privileged_background(&watchdog_script(watchdog)))
     }

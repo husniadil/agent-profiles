@@ -70,6 +70,37 @@ pub struct FocusHint<'a> {
     pub wm_class: &'a str,
 }
 
+/// How hot the machine is, as the system itself reports it.
+///
+/// Deliberately not a temperature in degrees. Reading a sensor means SMC keys
+/// that differ across Intel and Apple Silicon and are undocumented on both,
+/// whereas this is the reading Apple publishes for exactly this purpose: an app
+/// being told to do less work. The thresholds are the system's, not ours.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize)]
+#[serde(rename_all = "kebab-case")]
+pub enum Thermal {
+    /// No reading available — every platform but macOS, and any failure to ask.
+    /// Never treated as hot: a missing reading is not evidence of a problem, and
+    /// guessing otherwise would drop every hold on a machine that cannot answer.
+    Unknown,
+    Nominal,
+    Fair,
+    Serious,
+    Critical,
+}
+
+impl Thermal {
+    /// Whether the machine is hot enough that keeping it awake makes it worse.
+    ///
+    /// `Fair` is deliberately not included. Apple describes it as slightly
+    /// elevated with fans audible — an ordinary state for a machine doing work,
+    /// and releasing there would mean a hold that never survives a busy build.
+    /// `Serious` is where the system has already begun throttling.
+    pub fn is_danger(self) -> bool {
+        matches!(self, Thermal::Serious | Thermal::Critical)
+    }
+}
+
 /// What the machine is running on right now.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize)]
 pub struct Power {
@@ -162,6 +193,12 @@ pub trait Platform: Send + Sync {
     /// is true, so a platform that cannot hold has nothing to answer.
     fn power(&self) -> Result<Power> {
         anyhow::bail!("this platform does not report power state")
+    }
+
+    /// How hot the machine is. `Unknown` where nobody has wired up a reading,
+    /// which never counts as hot — see [`Thermal::Unknown`].
+    fn thermal(&self) -> Thermal {
+        Thermal::Unknown
     }
 
     /// Start the privileged watchdog for this app run.
