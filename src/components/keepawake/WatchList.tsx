@@ -1,6 +1,18 @@
+import { useRef } from "react";
+
 import { formatDuration } from "@/components/keepawake/AwakeStatusCard";
 import { StateTag } from "@/components/StateTag";
 import type { Freshness } from "@/lib/api";
+
+/// How long a row keeps saying "working" after `mid_turn` goes false.
+///
+/// The backend re-reads the transcripts every fifteen seconds, and a turn that
+/// ends and restarts between two of those sweeps reads as finished for one of
+/// them. Without this the dot stops beating mid-run and starts again, which
+/// looks like the detector losing the session — the exact doubt the list exists
+/// to remove. Longer than one sweep, so a real gap has to outlast a whole cycle
+/// before the row goes quiet.
+const WORKING_HOLD_MS = 20_000;
 
 /// The roots being watched, and how long ago each was last written.
 ///
@@ -15,6 +27,11 @@ export function WatchList({
   roots: Freshness[];
   windowMinutes: number;
 }) {
+  // ponytail: a Map in a ref, decayed by the poll that already re-renders this.
+  // No timer, no state, no extra render. Entries for roots that disappear are
+  // left to sit — the key set is two CLIs plus a row per profile.
+  const lastWorking = useRef<Map<string, number>>(new Map());
+
   if (roots.length === 0) {
     return (
       <p className="text-sub text-ink-3">
@@ -25,6 +42,7 @@ export function WatchList({
   }
 
   const window = windowMinutes * 60;
+  const now = Date.now();
   return (
     // The one unbounded thing on this tab: two agent CLIs plus a row per Codex
     // profile, so a user with several profiles can run past the panel. It scrolls
@@ -42,6 +60,11 @@ export function WatchList({
         // as well as while it runs. A row that has gone quiet says so.
         const fresh = root.seconds_ago !== null && root.seconds_ago <= window;
         const active = root.mid_turn && fresh;
+        if (active) lastWorking.current.set(root.path, now);
+        // What the row shows: the claim, held briefly past the moment it drops.
+        // A session that has genuinely finished still goes quiet — twenty
+        // seconds later instead of instantly, which no one is timing.
+        const working = active || now - (lastWorking.current.get(root.path) ?? 0) < WORKING_HOLD_MS;
         // Mid-turn but past the window: something stopped between a tool call
         // and its result. Named rather than folded into "idle", because those
         // are different things and only one of them is a session that finished.
@@ -55,7 +78,7 @@ export function WatchList({
               {/* The only thing on this tab that moves on its own, and it earns
                   that by marking the one condition the whole feature turns on:
                   an agent working right now. Idle rows get a flat dot, so the
-                  beat is the signal rather than decoration.
+                  motion is the signal rather than decoration.
 
                   Stopped, not slowed, under reduced motion: the tag beside it
                   already says "working", so holding the dot still costs the
@@ -63,8 +86,8 @@ export function WatchList({
               <span
                 aria-hidden="true"
                 className={`size-1.5 shrink-0 rounded-full ${
-                  active
-                    ? "bg-live animate-live-heartbeat motion-reduce:animate-none"
+                  working
+                    ? "bg-live animate-live-pulse motion-reduce:animate-none"
                     : "bg-ink-4"
                 }`}
               />
@@ -73,7 +96,7 @@ export function WatchList({
                   "Running" and "Working" are the same kind of claim, and the
                   word is what a screen reader and a colour-blind reader get —
                   the dot and its ring are decoration on top of it. */}
-              {active ? (
+              {working ? (
                 <StateTag token="var(--live)" status="success">
                   Working
                 </StateTag>
@@ -82,7 +105,7 @@ export function WatchList({
             <span className="shrink-0 font-mono text-ink-3">
               {root.seconds_ago === null
                 ? "never"
-                : active
+                : working
                   ? `${formatDuration(root.seconds_ago)} ago`
                   : stalled
                     ? `stalled ${formatDuration(root.seconds_ago)}`

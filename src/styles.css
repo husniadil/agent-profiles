@@ -156,33 +156,29 @@
   /* Ease-out-quint. No bounce, no elastic — this is a tool, not a toy. */
   --ease-out-quint: cubic-bezier(0.22, 1, 0.36, 1);
 
-  /* A heartbeat on the dot that marks a working agent. Two beats and a long
-     rest, not a steady blink: the rest is what makes it read as alive rather
-     than as a warning light, and it is why the cycle is slow enough to sit in
-     the corner of the eye for the minutes an agent actually runs.
+  /* The breath on the dot that marks a working agent, matching the session
+     indicator in the Claude desktop app: one slow, even fade in and out, no
+     rest between beats.
+
+     A heartbeat sat still for most of its cycle, so a glance that landed in the
+     rest saw a flat dot and read the session as finished — the same doubt the
+     watch list exists to remove. Something always moving cannot be caught
+     standing.
 
      Opacity carries it, not scale. The dot is 6px, so a scale pulse large
-     enough to see would also be large enough to shift the row. */
-  --animate-live-heartbeat: live-heartbeat 2.4s ease-in-out infinite;
+     enough to see would also be large enough to shift the row. Bottoming out at
+     0.35 rather than 0 keeps the dot present at every point in the cycle: it is
+     breathing, not flashing. */
+  --animate-live-pulse: live-pulse 1.6s ease-in-out infinite;
 }
 
-@keyframes live-heartbeat {
-  /* lub */
+@keyframes live-pulse {
   0%,
-  20% {
-    opacity: 1;
-  }
-  10% {
-    opacity: 0.3;
-  }
-  /* dub, softer, the way the second sound of a heartbeat is */
-  30% {
-    opacity: 0.45;
-  }
-  /* and then the long rest, which is most of the cycle */
-  40%,
   100% {
     opacity: 1;
+  }
+  50% {
+    opacity: 0.35;
   }
 }
 
