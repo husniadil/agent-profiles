@@ -1,13 +1,13 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 
 import { AutostartRow } from "@/components/AutostartRow";
-import { ComposeCard } from "@/components/ComposeCard";
-import { EmptyState } from "@/components/EmptyState";
-import { ErrorBanner } from "@/components/ErrorBanner";
-import { ProfileList } from "@/components/ProfileList";
+import { ProfilesPanel } from "@/components/ProfilesPanel";
 import { StatusStrip } from "@/components/StatusStrip";
+import { Tabs, type TabId } from "@/components/Tabs";
+import { KeepAwakeTab } from "@/components/keepawake/KeepAwakeTab";
 import { useAppData } from "@/hooks/useAppData";
 import { useAutostart } from "@/hooks/useAutostart";
+import { useKeepAwake } from "@/hooks/useKeepAwake";
 import { useSizes } from "@/hooks/useSizes";
 import { useSocketBudget } from "@/hooks/useSocketBudget";
 import { PathNamesContext } from "@/lib/paths";
@@ -37,6 +37,12 @@ export default function App() {
 
   const clearError = useCallback(() => setError(null), [setError]);
   const autostart = useAutostart(visit, fail, clearError);
+  const keepAwake = useKeepAwake(visit, fail);
+
+  // Not reset on every visit: someone who left the window on Keep Awake was most
+  // likely reading it, and reopening onto the profile list would throw that away
+  // for no reason.
+  const [tab, setTab] = useState<TabId>("profiles");
 
   const counts = useMemo(
     () => ({
@@ -70,9 +76,9 @@ export default function App() {
     <PathNamesContext.Provider value={paths}>
       {/* The window itself, not a card floating on a canvas: the title bar above
           it already carries the name, so this begins at the status strip. */}
-      {/* Fixed height, three bands: a strip that does not move, a list that
-          takes whatever is left, and a chrome bar on the floor. The window is
-          resized by the user, not by how many profiles they happen to have. */}
+      {/* Fixed height, four bands: a strip that does not move, the tabs, a panel
+          that takes whatever is left, and a chrome bar on the floor. The window
+          is resized by the user, not by how many profiles they happen to have. */}
       <main className="flex h-screen flex-col overflow-hidden bg-bg font-sans text-ink">
         <StatusStrip
           profiles={counts.profiles}
@@ -81,38 +87,25 @@ export default function App() {
           onError={fail}
         />
 
-        {/* `min-h-0` is what lets this shrink at all: a flex item's default
-            `min-height: auto` refuses to go below its content, which would
-            push the bar below the bottom edge of a window this size. */}
-        <section className="flex min-h-0 flex-1 flex-col gap-2 p-2">
-          <ErrorBanner message={data.error} />
+        <Tabs value={tab} onChange={setTab} />
 
-          {available.length === 0 ? (
-            <EmptyState apps={apps} />
-          ) : (
-            <ProfileList
-              apps={available}
-              sizes={sizes}
-              reload={reload}
-              onError={fail}
-              clearError={clearError}
-            />
-          )}
-
-          {/* With nothing to add a profile to, the whole band goes: a label over
-              an empty space reads as something failing to load, and the form
-              beneath it is a control that could only fail. */}
-          {available.length > 0 ? (
-            <ComposeCard
-              apps={available}
-              appId={appId}
-              onAppId={setAppId}
-              budget={budget}
-              reload={reload}
-              visit={visit}
-            />
-          ) : null}
-        </section>
+        {tab === "profiles" ? (
+          <ProfilesPanel
+            apps={apps}
+            available={available}
+            error={data.error}
+            sizes={sizes}
+            appId={appId}
+            onAppId={setAppId}
+            budget={budget}
+            reload={reload}
+            visit={visit}
+            fail={fail}
+            clearError={clearError}
+          />
+        ) : (
+          <KeepAwakeTab keepAwake={keepAwake} />
+        )}
 
         <AutostartRow autostart={autostart} />
       </main>
