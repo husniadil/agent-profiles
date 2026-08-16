@@ -109,6 +109,52 @@ impl Paths {
     }
 }
 
+/// The keep-awake files, which belong to the machine rather than to any one
+/// app: there is one system sleep setting, not one per profile. They therefore
+/// sit at the data root itself rather than inside a [`Paths`], whose whole job
+/// is to keep two apps from sharing anything.
+pub fn keep_awake_settings(data_root: &std::path::Path) -> PathBuf {
+    data_root.join("keep-awake.json")
+}
+
+/// Existence means "hold the machine awake". Never read, only tested for — its
+/// contents would otherwise be interpolated into a root shell.
+pub fn keep_awake_flag(data_root: &std::path::Path) -> PathBuf {
+    data_root.join("keep-awake.hold")
+}
+
+/// Who owns `SleepDisabled`, written before anything can be held so the answer
+/// survives a process that dies without running its teardown.
+pub fn keep_awake_breadcrumb(data_root: &std::path::Path) -> PathBuf {
+    data_root.join("keep-awake.owned")
+}
+
+/// Why this data root cannot be spelled inside the privileged watchdog, if it
+/// cannot.
+///
+/// The path is the only variable part of a string that passes through an
+/// AppleScript literal and then a root shell. Escaping both layers correctly is
+/// possible and is exactly the kind of thing that is subtly wrong for years, so
+/// the four characters that would need it are refused instead. A home directory
+/// containing a quote, a backslash or a newline is vanishingly rare; spaces,
+/// which are not rare at all, are handled by single-quoting and are fine.
+///
+/// Fail-closed, the same choice [`socket_refusal`] makes for a path that is
+/// merely too long: the feature is withheld with a reason rather than shipped
+/// with a hole.
+pub fn unquotable_refusal(data_root: &std::path::Path) -> Option<String> {
+    let shown = data_root.display().to_string();
+    let found = shown
+        .chars()
+        .find(|c| matches!(c, '\'' | '"' | '\\' | '\n'))?;
+    Some(format!(
+        "keep awake is unavailable because this profile folder's path contains \
+         {found:?}: {shown:?}. The privileged helper spells the path into a shell \
+         command, and a path carrying a quote, a backslash or a newline cannot be \
+         spelled there safely."
+    ))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -283,5 +329,57 @@ mod tests {
             reason.contains(&cramped.display().to_string().len().to_string()),
             "got: {reason}"
         );
+    }
+
+    #[test]
+    fn the_keep_awake_files_sit_beside_the_per_app_directories() {
+        // App-wide, not per app: one machine has one sleep setting. They must
+        // also be unmistakable for an app id — every id today is a bare word,
+        // and none of these are.
+        let root = Path::new("/data");
+        assert_eq!(
+            keep_awake_settings(root),
+            PathBuf::from("/data/keep-awake.json")
+        );
+        assert_eq!(
+            keep_awake_flag(root),
+            PathBuf::from("/data/keep-awake.hold")
+        );
+        assert_eq!(
+            keep_awake_breadcrumb(root),
+            PathBuf::from("/data/keep-awake.owned")
+        );
+        for spec in crate::app_spec::all() {
+            assert_ne!(keep_awake_flag(root), root.join(spec.id));
+        }
+    }
+
+    #[test]
+    fn an_ordinary_data_root_is_accepted() {
+        // Spaces are the common case — `Application Support` has one — and must
+        // not be refused. Single-quoting in the shell handles them.
+        let ok =
+            PathBuf::from("/Users/christopher anderson/Library/Application Support/Agent Profiles");
+        assert!(unquotable_refusal(&ok).is_none());
+    }
+
+    #[test]
+    fn a_data_root_that_would_need_escaping_is_refused_by_name() {
+        // The one place a home directory reaches a root shell. Rather than
+        // escape three nested quoting layers correctly, refuse the four
+        // characters that would need it.
+        for bad in [
+            "/Users/o'brien/x",
+            "/Users/a\"b/x",
+            "/Users/a\\b/x",
+            "/Users/a\nb/x",
+        ] {
+            let reason = unquotable_refusal(Path::new(bad))
+                .unwrap_or_else(|| panic!("{bad:?} must be refused"));
+            assert!(
+                reason.contains("keep awake"),
+                "the refusal must name the feature it disables, got: {reason}"
+            );
+        }
     }
 }
