@@ -61,5 +61,10 @@ windows = { version = "0.62.2", features = [
   # `GetSystemPowerStatus` — charge and line status for the battery guard, the
   # same call every Windows battery indicator makes. No WMI, no elevation.
   "Win32_System_Power",
+  # Not for the registry. Every `Power*Scheme` / `Power*ValueIndex` binding is
+  # gated on this feature because each takes an `HKEY` first argument — the
+  # optional user power key, which this app always passes as `None`. Without it
+  # the whole `lid` module is six unresolved imports.
+  "Win32_System_Registry",
   "Win32_UI_WindowsAndMessaging",
 ] }

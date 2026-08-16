@@ -272,6 +272,14 @@ pub trait Platform: Send + Sync {
 
 /// Everything the privileged watchdog needs, gathered so the call site cannot
 /// get the argument order wrong between two paths and a pid.
+///
+/// Only macOS reads these — it is the one platform whose hold needs a root loop
+/// — so everywhere else the whole struct is built, passed to a defaulted no-op
+/// and dropped. That is dead code by any honest reading, and `-D warnings`
+/// says so. Allowed rather than `cfg`-ed away: `commands.rs` builds this on
+/// every platform precisely so the keep-awake path carries no `cfg` branches,
+/// and buying silence here with a conditional field would put one back.
+#[cfg_attr(not(target_os = "macos"), allow(dead_code))]
 pub struct Watchdog<'a> {
     /// Tested for existence only, never read. Its contents would otherwise
     /// reach a root shell.
