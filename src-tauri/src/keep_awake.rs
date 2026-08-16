@@ -47,6 +47,16 @@ pub struct Settings {
     /// Below this charge, on battery, the hold is dropped even mid-task.
     #[serde(default = "default_battery_floor")]
     pub battery_floor_percent: u8,
+    /// Whether an overheating machine releases the hold.
+    ///
+    /// On by default, and the default a settings file written before this
+    /// existed also gets: heat is the one guard where continuing does damage
+    /// rather than spending charge, so an upgrade must not silently arrive with
+    /// it off. Off is offered because the reading is the system's judgement, not
+    /// a temperature — someone running a deliberately hot machine on a bench may
+    /// disagree with it, and would otherwise have no way to say so.
+    #[serde(default = "default_thermal_guard")]
+    pub thermal_guard: bool,
 }
 
 fn default_idle_window() -> u32 {
@@ -55,6 +65,9 @@ fn default_idle_window() -> u32 {
 fn default_battery_floor() -> u8 {
     30
 }
+fn default_thermal_guard() -> bool {
+    true
+}
 
 impl Default for Settings {
     fn default() -> Self {
@@ -62,6 +75,7 @@ impl Default for Settings {
             trigger: Trigger::Off,
             idle_window_minutes: default_idle_window(),
             battery_floor_percent: default_battery_floor(),
+            thermal_guard: default_thermal_guard(),
         }
     }
 }
@@ -82,6 +96,10 @@ impl Settings {
             battery_floor_percent: self
                 .battery_floor_percent
                 .clamp(*BATTERY_FLOOR_RANGE.start(), *BATTERY_FLOOR_RANGE.end()),
+            // A bool has no range to be dragged into; it is carried through so
+            // that adding a field here stays a compile error rather than a
+            // setting that silently resets on every save.
+            thermal_guard: self.thermal_guard,
         }
     }
 
@@ -162,7 +180,7 @@ pub fn decide(settings: &Settings, inputs: &Inputs) -> Phase {
     // duration cap that existed solely to stand in for this reading — a clock
     // is a poor proxy for a temperature, and it stopped holds that were
     // perfectly fine while missing a machine cooking in a bag after ten minutes.
-    if inputs.thermal.is_danger() {
+    if settings.thermal_guard && inputs.thermal.is_danger() {
         return Phase::PausedTooHot;
     }
 
@@ -656,6 +674,69 @@ mod tests {
     }
 
     #[test]
+    fn a_thermal_guard_switched_off_keeps_holding_a_hot_machine() {
+        // The point of offering the switch: the reading is the system's
+        // judgement, and someone running a deliberately hot machine on a bench
+        // may disagree with it.
+        let s = Settings {
+            thermal_guard: false,
+            ..settings(Trigger::AgentActive)
+        };
+        assert_eq!(
+            decide(
+                &s,
+                &Inputs {
+                    thermal: Thermal::Critical,
+                    ..working()
+                }
+            ),
+            Phase::Holding
+        );
+    }
+
+    #[test]
+    fn switching_the_thermal_guard_off_leaves_the_battery_guard_alone() {
+        // Two independent guards. Turning one off must not quietly disarm the
+        // other — that is the shape a "just disable the annoying one" setting
+        // usually takes.
+        let s = Settings {
+            thermal_guard: false,
+            ..settings(Trigger::AgentActive)
+        };
+        assert_eq!(
+            decide(
+                &s,
+                &Inputs {
+                    thermal: Thermal::Critical,
+                    power: on_battery(5),
+                    ..working()
+                }
+            ),
+            Phase::PausedLowBattery
+        );
+    }
+
+    #[test]
+    fn the_thermal_guard_is_on_by_default_and_for_older_settings_files() {
+        // Heat is the one guard where continuing does damage rather than
+        // spending charge, so neither a fresh install nor an upgrade may arrive
+        // with it silently off.
+        assert!(Settings::default().thermal_guard);
+
+        let d = tempfile::tempdir().unwrap();
+        let before = d.path().join("older.json");
+        std::fs::write(
+            &before,
+            br#"{"trigger":"always","battery_floor_percent":30}"#,
+        )
+        .unwrap();
+        assert!(
+            Settings::load(&before).thermal_guard,
+            "a file written before this setting existed must read as on"
+        );
+    }
+
+    #[test]
     fn a_warm_machine_keeps_holding() {
         // `Fair` is Apple's "slightly elevated, fans audible" — the ordinary
         // state of a laptop doing work. Releasing there would mean a hold that
@@ -1027,6 +1108,7 @@ mod tests {
             trigger: Trigger::Always,
             idle_window_minutes: 0,
             battery_floor_percent: 100,
+            thermal_guard: true,
         };
         let sane = wild.clamped();
         assert_eq!(sane.idle_window_minutes, 1);
@@ -1036,6 +1118,7 @@ mod tests {
             trigger: Trigger::Always,
             idle_window_minutes: 9999,
             battery_floor_percent: 200,
+            thermal_guard: true,
         };
         let sane = huge.clamped();
         assert_eq!(sane.idle_window_minutes, 60);
@@ -1050,6 +1133,7 @@ mod tests {
             trigger: Trigger::AgentActive,
             idle_window_minutes: 7,
             battery_floor_percent: 40,
+            thermal_guard: false,
         };
         written.save(&file).unwrap();
         assert_eq!(Settings::load(&file), written);

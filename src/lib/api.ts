@@ -57,6 +57,9 @@ export type KeepAwakeSettings = {
   trigger: Trigger;
   idle_window_minutes: number;
   battery_floor_percent: number;
+  /// Whether an overheating machine releases the hold. On by default, and on
+  /// for a settings file written before this existed.
+  thermal_guard: boolean;
 };
 
 /// One watched session root and how long ago anything under it was written.

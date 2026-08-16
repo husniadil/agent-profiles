@@ -4,6 +4,9 @@ import { AwakeStatusCard } from "@/components/keepawake/AwakeStatusCard";
 import { BatteryGauge } from "@/components/keepawake/BatteryGauge";
 import { WatchList } from "@/components/keepawake/WatchList";
 import { Input, type InputClassNames } from "@/components/motion/input";
+import { RadioGroup, RadioGroupItem } from "@/components/motion/radio";
+import { RangeSlider } from "@/components/motion/range-slider";
+import { Switch } from "@/components/motion/switch";
 import type { KeepAwake } from "@/hooks/useKeepAwake";
 import type { KeepAwakeSettings, KeepAwakeStatus, Trigger } from "@/lib/api";
 
@@ -24,7 +27,12 @@ const TRIGGERS: { id: Trigger; label: string; detail?: string }[] = [
   },
 ];
 
-type LimitKey = keyof Omit<KeepAwakeSettings, "trigger">;
+/// Only the settings that are actually numbers. Derived rather than listed, so
+/// a new numeric setting joins automatically — and a new boolean one, like the
+/// thermal guard, cannot silently land in a row built to hold a figure.
+type LimitKey = {
+  [K in keyof KeepAwakeSettings]: KeepAwakeSettings[K] extends number ? K : never;
+}[keyof KeepAwakeSettings];
 
 /// The one typed limit left. "Stop after" used to sit beside it, capping a hold
 /// on a clock — but that existed only to stand in for a temperature nobody could
@@ -61,17 +69,21 @@ const LIMITS: {
 /// setting cannot be raised to a level that would drop every hold instantly.
 const FLOOR = { min: 0, max: 95, step: 5 };
 
-/// Native `input[type=range]`, styled rather than replaced: it arrives with
-/// keyboard stepping, page-up/down, home/end and a screen-reader value already
-/// working, and a hand-built track would have to earn all of that back.
-const SLIDER =
-  "h-1.5 w-full cursor-pointer appearance-none rounded-full outline-none " +
-  "focus-visible:ring-2 focus-visible:ring-accent/40 " +
-  "[&::-webkit-slider-thumb]:size-3.5 [&::-webkit-slider-thumb]:appearance-none " +
-  "[&::-webkit-slider-thumb]:rounded-full [&::-webkit-slider-thumb]:bg-accent " +
-  "[&::-webkit-slider-thumb]:border-2 [&::-webkit-slider-thumb]:border-surface " +
-  "[&::-webkit-slider-thumb]:shadow-sm " +
-  "disabled:cursor-not-allowed";
+/// beUI's track is a 40px block with a 20px handle, sized for a page. Every
+/// control in this window is 28px, so the track takes the field height and the
+/// handle is brought back into proportion with it. Nothing else is touched:
+/// the ticks are what make a stepped value legible without a scale under it,
+/// and the neutral fill is right — accent means "primary action or current
+/// selection" here, and a threshold is neither.
+const SLIDER = "h-7 [&_[role=slider]]:h-4";
+
+/// Same story as the slider: beUI's dot is a 20px circle with a 2px ring at
+/// 14px type, which is a page's radio. This window's is 14px at 12px type with
+/// a hairline ring, so the three overrides reach past the label the class lands
+/// on. Descendant selectors rather than a fork of the component — one class
+/// beats one, two beat one, and the vendored file stays re-syncable.
+const RADIO =
+  "gap-2 [&>button]:size-3.5 [&>button]:border [&>span]:text-callout";
 
 /// The compose row's field, at the same height and type size.
 ///
@@ -254,34 +266,29 @@ function KeepAwakePanel({
             <legend className={`${LEGEND} mb-1.5`}>
               Hold the machine awake
             </legend>
-            <div className="flex flex-col gap-1.5">
+            <RadioGroup
+              value={settings.trigger}
+              onValueChange={(next) => change({ trigger: next as Trigger })}
+              className="gap-1.5"
+            >
               {TRIGGERS.map((trigger) => (
-                <label
-                  key={trigger.id}
-                  className="flex cursor-pointer items-start gap-2"
-                >
-                  <input
-                    type="radio"
-                    name="keep-awake-trigger"
-                    // `mt-0.5` sits the control on the label's cap height rather
-                    // than its box top, which is where it looked pushed up.
-                    className="mt-0.5 size-3.5 shrink-0 accent-accent"
-                    checked={settings.trigger === trigger.id}
-                    onChange={() => change({ trigger: trigger.id })}
+                // The second line is not a label prop — beUI's item takes a
+                // string — so it sits beside the item and is indented past the
+                // control by hand, to the width of the dot plus its gap.
+                <div key={trigger.id} className="flex flex-col">
+                  <RadioGroupItem
+                    value={trigger.id}
+                    label={trigger.label}
+                    className={RADIO}
                   />
-                  <span className="min-w-0">
-                    <span className="text-callout text-ink">
-                      {trigger.label}
+                  {trigger.detail ? (
+                    <span className="pl-[22px] text-sub text-ink-2">
+                      {trigger.detail}
                     </span>
-                    {trigger.detail ? (
-                      <span className="block text-sub text-ink-2">
-                        {trigger.detail}
-                      </span>
-                    ) : null}
-                  </span>
-                </label>
+                  ) : null}
+                </div>
               ))}
-            </div>
+            </RadioGroup>
           </fieldset>
         </div>
 
@@ -294,11 +301,12 @@ function KeepAwakePanel({
               is meaningful against something the app already knows — the charge
               right now, named in the sentence under it. */}
             <div className="mb-2.5">
+              {/* A `<label for>` no longer: beUI's handle is a div carrying
+                  `role="slider"`, which nothing can be labelled for. The name
+                  is given to the control itself, and this line is the picture
+                  of it. */}
               <div className="flex items-baseline justify-between gap-3">
-                <label
-                  htmlFor="battery-floor"
-                  className="flex items-center gap-1.5 text-callout text-ink"
-                >
+                <span className="flex items-center gap-1.5 text-callout text-ink">
                   {/* The glyph tracks the threshold, not the charge: this row
                       sets a level, and a picture that showed something else
                       while sitting on the control would be answering a question
@@ -306,38 +314,30 @@ function KeepAwakePanel({
                       top of this card. */}
                   <BatteryGauge percent={floor} className="h-3.5 w-[27px] shrink-0 text-ink-2" />
                   Pause on low battery
-                </label>
+                </span>
                 {/* "below 30%" rather than "30%": with the threshold no longer
                     named in the label, a bare figure beside it could just as
-                    easily be read as the charge right now. */}
-                <output
-                  htmlFor="battery-floor"
-                  className="font-mono text-callout tabular-nums text-ink"
-                >
+                    easily be read as the charge right now. Said the same way to
+                    a screen reader, through the slider's `aria-valuetext`. */}
+                <output className="font-mono text-callout tabular-nums text-ink">
                   below {floor}%
                 </output>
               </div>
-              <input
-                id="battery-floor"
-                type="range"
+              <RangeSlider
+                aria-label="Pause on low battery"
+                formatValueText={(value) => `below ${value}%`}
                 min={FLOOR.min}
                 max={FLOOR.max}
                 step={FLOOR.step}
                 value={floor}
-                // React maps `onChange` to the `input` event, which a range
-                // fires on every step of a drag. Committing straight from here
-                // wrote the settings file and made an IPC round trip twenty
-                // times per sweep of the track; the draft moves the thumb at
-                // once and `useCommitted` saves when the hand stops.
-                onChange={(event) => setFloor(Number(event.target.value))}
-                // The filled half is painted as a gradient stop rather than with a
-                // second element: one box, no overlay to keep in sync with the
-                // thumb, and it survives the track being restyled.
-                style={{
-                  background: `linear-gradient(to right, var(--accent) ${
-                    (floor / FLOOR.max) * 100
-                  }%, var(--sunken) ${(floor / FLOOR.max) * 100}%)`,
-                }}
+                // A drag reports every step it crosses. Committing straight
+                // from here wrote the settings file and made an IPC round trip
+                // twenty times per sweep of the track; the draft moves the
+                // handle at once and `useCommitted` saves when the hand stops.
+                onValueChange={setFloor}
+                // The enclosing `fieldset[disabled]` cannot reach this one —
+                // the handle is a div, and only form controls inherit that.
+                disabled={!armed}
                 className={`mt-1.5 ${SLIDER}`}
               />
               {/* The charge right now is deliberately not repeated here — the
@@ -371,6 +371,31 @@ function KeepAwakePanel({
               An agent counts as finished once its session has gone this long
               without being written to.
             </p>
+
+            {/* Its own row rather than a third number beside the others: this
+                one is not a threshold anyone tunes, it is whether a guard is
+                armed at all. */}
+            <div className="mt-2.5 flex items-center justify-between gap-3">
+              <span className="min-w-0">
+                <span className="text-callout text-ink">Thermal guard</span>
+                <span className="block text-sub text-ink-2">
+                  {status.thermal === "unknown"
+                    ? "This Mac reports no thermal state, so this never applies."
+                    : "Release the hold when macOS reports the machine is overheating."}
+                </span>
+              </span>
+              {/* The same switch the window already uses for "Start at login",
+                  named here rather than by a `<label for>`: the sentence to the
+                  left runs to two lines and only the first of them is the
+                  control's name. */}
+              <Switch
+                className="shrink-0"
+                checked={settings.thermal_guard}
+                disabled={!armed}
+                onCheckedChange={(next) => change({ thermal_guard: next })}
+                ariaLabel="Thermal guard"
+              />
+            </div>
           </fieldset>
         </div>
       </div>
