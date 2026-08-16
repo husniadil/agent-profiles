@@ -58,5 +58,8 @@ objc2-foundation = { version = "0.3.2", features = [
 windows = { version = "0.62.2", features = [
   "Win32_Foundation",
   "Win32_Storage_FileSystem",
+  # `GetSystemPowerStatus` — charge and line status for the battery guard, the
+  # same call every Windows battery indicator makes. No WMI, no elevation.
+  "Win32_System_Power",
   "Win32_UI_WindowsAndMessaging",
 ] }

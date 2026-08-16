@@ -38,10 +38,19 @@ const BATTERY_FLOOR_RANGE: std::ops::RangeInclusive<u8> = 0..=95;
 pub struct Settings {
     #[serde(default)]
     pub trigger: Trigger,
-    /// How long a transcript may go untouched before its agent counts as idle.
-    /// Generous on purpose: a single long tool call writes nothing while it
-    /// runs, and the cost of guessing "idle" too early is the machine sleeping
-    /// mid-task, which is the whole bug.
+    /// How long an agent that is part-way through a turn may write nothing
+    /// before it is assumed dead.
+    ///
+    /// This no longer decides idleness — the transcript does, by saying whether
+    /// the turn ended — so a finished agent releases the machine at once rather
+    /// than after this many minutes. What is left is the bound on the other
+    /// case: a session killed between a tool call and its result stays mid-turn
+    /// on disk forever, and without this would hold the machine forever with it.
+    ///
+    /// The cost of setting it short is the one failure this feature exists to
+    /// prevent: a single tool call that runs longer than this — a full test
+    /// suite, a long build — writes nothing while it runs, so its agent is
+    /// declared dead and the Mac sleeps mid-task.
     #[serde(default = "default_idle_window")]
     pub idle_window_minutes: u32,
     /// Below this charge, on battery, the hold is dropped even mid-task.
@@ -60,7 +69,7 @@ pub struct Settings {
 }
 
 fn default_idle_window() -> u32 {
-    5
+    2
 }
 fn default_battery_floor() -> u8 {
     30
@@ -143,7 +152,8 @@ pub enum Phase {
 }
 
 impl Phase {
-    /// Whether this phase wants the flag file to exist.
+    /// Whether this phase wants the machine held. What that costs is the
+    /// platform's business — a flag file, an inhibitor lock, a power scheme.
     pub fn holds(self) -> bool {
         matches!(self, Phase::Holding)
     }
@@ -210,6 +220,10 @@ const SWEEP: Duration = Duration::from_secs(15);
 ///
 /// Empty on purpose. The loop tests only for existence, and a flag with contents
 /// is an invitation for some later change to read them in a root shell.
+///
+/// This is `Platform::hold`'s default, not the mechanism everywhere: a flag is
+/// how an unprivileged process asks a privileged one for something. Linux needs
+/// no privileged one and overrides it.
 pub fn apply(data_root: &Path, hold: bool) -> Result<()> {
     let flag = crate::paths::keep_awake_flag(data_root);
     if hold {
@@ -297,12 +311,38 @@ pub fn recover_at_startup(data_root: &Path) -> Recovery {
     }
 }
 
+/// What this machine can actually do, asked of the platform once at startup.
+///
+/// A struct rather than two bools in a row, for the reason every pair of
+/// adjacent booleans is one: swapped, they compile.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct Capabilities {
+    /// Whether the machine can be held awake with the lid shut.
+    pub hold: bool,
+    /// Whether it can report how hot it is. False on Windows, and on a Linux
+    /// box with no thermal zones — see `Platform::can_read_thermal`.
+    pub thermal: bool,
+    /// Whether holding costs the user an administrator prompt. True only on
+    /// macOS; elsewhere the app is already allowed to do this, and the window
+    /// skips the whole ask-first band.
+    pub needs_authorization: bool,
+}
+
 /// Everything the window asks for in one call.
 #[derive(Serialize, Clone)]
 pub struct Status {
     /// Whether this platform can hold the machine awake at all.
     pub supported: bool,
-    /// Whether the privileged watchdog is running for this app run.
+    /// Whether the thermal guard has a reading to act on here. False means the
+    /// window leaves the switch out entirely: a guard that cannot fire is worse
+    /// than an absent one, because it looks like protection.
+    pub thermal_supported: bool,
+    /// Whether this machine asks for an administrator password before it can
+    /// hold. False means the window shows no authorization step at all, rather
+    /// than a button that grants something already granted.
+    pub needs_authorization: bool,
+    /// Whether the privileged watchdog is running for this app run. Always true
+    /// where nothing needed authorizing in the first place.
     pub authorized: bool,
     /// Whether a previous run may have left the machine unable to sleep.
     pub stranded: bool,
@@ -341,15 +381,26 @@ pub struct Handle {
 }
 
 impl Handle {
-    pub fn new(data_root: PathBuf, home: PathBuf, supported: bool, recovery: Recovery) -> Self {
+    pub fn new(
+        data_root: PathBuf,
+        home: PathBuf,
+        capabilities: Capabilities,
+        recovery: Recovery,
+    ) -> Self {
         let settings = Settings::load(&crate::paths::keep_awake_settings(&data_root));
         let refusal = crate::paths::unquotable_refusal(&data_root);
         let status = Status {
             // A root that cannot be quoted is as unsupported as a platform that
             // cannot hold: in both cases the honest answer to "can this machine
             // do it?" is no, and the tab says which.
-            supported: supported && refusal.is_none(),
-            authorized: false,
+            supported: capabilities.hold && refusal.is_none(),
+            thermal_supported: capabilities.thermal,
+            needs_authorization: capabilities.needs_authorization,
+            // Authorized from the start wherever there was nothing to
+            // authorize. Linux takes a logind inhibitor as the user and Windows
+            // writes a power scheme the user owns; only macOS has a root loop
+            // that has to be started before anything can be held.
+            authorized: !capabilities.needs_authorization,
             stranded: recovery.stranded,
             phase: Phase::Off,
             settings,
@@ -448,8 +499,10 @@ impl Handle {
             status.hold_error = hold_error;
             // The watchdog writes the breadcrumb at spawn and removes it on a
             // clean exit, so its presence is a free liveness check — no `pgrep`,
-            // no second channel that can disagree with the first.
-            if status.authorized {
+            // no second channel that can disagree with the first. Only where
+            // there is a watchdog: elsewhere no breadcrumb is ever written, and
+            // this would report a working hold as dead on its first sweep.
+            if status.needs_authorization && status.authorized {
                 status.authorized = crate::paths::keep_awake_breadcrumb(&self.data_root).exists();
             }
         }
@@ -471,6 +524,9 @@ fn roots_for(state: &crate::runtime::AppState, home: &Path) -> Vec<crate::agent_
             roots.push(crate::agent_activity::Root {
                 label: format!("{} · {}", runtime.spec.label, profile.label),
                 path: profile.path.join(trace),
+                // A profile's session trace is a directory this app does not
+                // read the contents of. Freshness is all there is.
+                reading: crate::agent_activity::Reading::Mtime,
             });
         }
     }
@@ -507,7 +563,7 @@ pub fn watch(app: tauri::AppHandle) {
         // no filesystem walk. The default has to be free.
         if settings.trigger == Trigger::Off {
             sweep = Sweep::default();
-            let released = apply(&handle.data_root, false);
+            let released = state.platform.hold(&handle.data_root, false);
             handle.publish(
                 Phase::Off,
                 Vec::new(),
@@ -538,22 +594,33 @@ pub fn watch(app: tauri::AppHandle) {
         let phase = decide(
             &settings,
             &Inputs {
-                agent_active: crate::agent_activity::any_within(&roots, window),
+                agent_active: crate::agent_activity::any_working(&roots, window),
                 power,
                 thermal,
             },
         );
         sweep.observe(phase, elapsed);
 
-        // Carried into the status rather than only logged. The flag is the only
-        // channel to the privileged loop, so a write that failed means the
-        // machine is not being held no matter what the phase says — and a
-        // window that goes on claiming otherwise is the one failure this
-        // feature cannot afford.
-        let hold_error = apply(&handle.data_root, phase.holds()).err().map(|error| {
-            eprintln!("could not update the keep-awake flag: {error}");
-            error.to_string()
-        });
+        // Carried into the status rather than only logged. Whatever the
+        // platform's channel is — a flag file the root loop watches, an
+        // inhibitor lock, a power scheme — a failure here means the machine is
+        // not being held no matter what the phase says, and a window that goes
+        // on claiming otherwise is the one failure this feature cannot afford.
+        let hold_error = state
+            .platform
+            .hold(&handle.data_root, phase.holds())
+            .err()
+            .map(|error| {
+                eprintln!(
+                    "could not {}: {error}",
+                    if phase.holds() {
+                        "hold the machine awake"
+                    } else {
+                        "release the machine"
+                    }
+                );
+                error.to_string()
+            });
         handle.publish(phase, roots, power, thermal, sweep.held_for, hold_error);
     }
 }
@@ -910,7 +977,16 @@ mod tests {
     }
 
     fn handle_with(recovery: Recovery, root: &Path) -> Handle {
-        Handle::new(root.to_path_buf(), root.join("home"), true, recovery)
+        Handle::new(
+            root.to_path_buf(),
+            root.join("home"),
+            Capabilities {
+                hold: true,
+                thermal: true,
+                needs_authorization: true,
+            },
+            recovery,
+        )
     }
 
     #[test]

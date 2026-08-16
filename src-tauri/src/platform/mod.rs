@@ -72,16 +72,20 @@ pub struct FocusHint<'a> {
 
 /// How hot the machine is, as the system itself reports it.
 ///
-/// Deliberately not a temperature in degrees. Reading a sensor means SMC keys
-/// that differ across Intel and Apple Silicon and are undocumented on both,
-/// whereas this is the reading Apple publishes for exactly this purpose: an app
-/// being told to do less work. The thresholds are the system's, not ours.
+/// Deliberately not a temperature in degrees, because on macOS it never was
+/// one: reading a sensor there means SMC keys that differ across Intel and
+/// Apple Silicon and are undocumented on both, whereas `thermalState` is the
+/// reading Apple publishes for exactly this purpose — an app being told to do
+/// less work. Linux has no such judgement to borrow and only sysfs numbers, so
+/// `linux::classify_zones` does the banding there and this stays the shared
+/// vocabulary rather than becoming a degree count one platform cannot fill in.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize)]
 #[serde(rename_all = "kebab-case")]
 pub enum Thermal {
-    /// No reading available — every platform but macOS, and any failure to ask.
-    /// Never treated as hot: a missing reading is not evidence of a problem, and
-    /// guessing otherwise would drop every hold on a machine that cannot answer.
+    /// No reading available — Windows, a Linux box with no thermal zones, and
+    /// any failure to ask. Never treated as hot: a missing reading is not
+    /// evidence of a problem, and guessing otherwise would drop every hold on a
+    /// machine that cannot answer.
     Unknown,
     Nominal,
     Fair,
@@ -181,16 +185,48 @@ pub trait Platform: Send + Sync {
 
     /// Whether this platform can hold the machine awake with the lid shut.
     ///
-    /// `false` everywhere but macOS, and the honest answer rather than a
-    /// pessimistic one: Windows makes lid-close a power-plan action with no
-    /// user-space override, and Linux varies by logind configuration. Neither
-    /// has been built, so neither claims it.
+    /// Answered per machine, not per operating system: Linux can only do it
+    /// where logind is the one handling the lid, and a build of this app is
+    /// perfectly capable of running somewhere it is not.
     fn can_hold_awake(&self) -> bool {
         false
     }
 
-    /// What the machine is running on. Only ever asked where `can_hold_awake`
-    /// is true, so a platform that cannot hold has nothing to answer.
+    /// Whether holding costs the user an administrator prompt.
+    ///
+    /// True only on macOS, where the setting is `pmset disablesleep` and root
+    /// owns it. Linux takes a logind inhibitor as the user, and Windows edits
+    /// the power scheme the user already owns — on both, a button promising a
+    /// password prompt would be asking permission for something nothing is
+    /// going to ask about.
+    fn needs_authorization(&self) -> bool {
+        false
+    }
+
+    /// Arm or release the hold.
+    ///
+    /// The default is the flag file the macOS root loop watches, which is also
+    /// what Windows uses to record that it owns the lid setting. Linux
+    /// overrides it: an inhibitor lock is a live process, not a file, and
+    /// nothing privileged is watching for one to appear.
+    fn hold(&self, data_root: &Path, on: bool) -> Result<()> {
+        crate::keep_awake::apply(data_root, on)
+    }
+
+    /// Put back anything a previous run died holding, at startup, silently.
+    ///
+    /// A no-op where the setting needs privileges this process does not have:
+    /// macOS cannot undo `disablesleep` without root, so it reports the machine
+    /// as stranded and offers the user a button instead of failing quietly here.
+    fn recover_hold(&self, _data_root: &Path) -> Result<()> {
+        Ok(())
+    }
+
+    /// What the machine is running on. Implemented on all three platforms, and
+    /// deliberately not gated on `can_hold_awake`: the battery guard is a fact
+    /// about the machine, not about the hold, and wiring it up per platform
+    /// separately from the escalation each one needs is what lets the guards
+    /// be right before the hold behind them exists.
     fn power(&self) -> Result<Power> {
         anyhow::bail!("this platform does not report power state")
     }
@@ -199,6 +235,20 @@ pub trait Platform: Send + Sync {
     /// which never counts as hot — see [`Thermal::Unknown`].
     fn thermal(&self) -> Thermal {
         Thermal::Unknown
+    }
+
+    /// Whether this machine can report a thermal state at all.
+    ///
+    /// Asked once, at startup, rather than read off the live `thermal()` in the
+    /// status: `Unknown` is also what every platform publishes while the trigger
+    /// is `Off`, so a switch driven by that would come and go with the trigger.
+    /// The window uses this to leave out a guard that nothing on this machine
+    /// could ever trip, instead of offering one with nothing behind it.
+    ///
+    /// The default answer is the honest one everywhere — a platform that cannot
+    /// read a temperature is exactly a platform whose `thermal()` is `Unknown`.
+    fn can_read_thermal(&self) -> bool {
+        self.thermal() != Thermal::Unknown
     }
 
     /// Start the privileged watchdog for this app run.
@@ -271,7 +321,7 @@ pub fn current() -> Box<dyn Platform> {
     #[cfg(target_os = "macos")]
     return Box::new(macos::MacOs);
     #[cfg(target_os = "linux")]
-    return Box::new(linux::Linux);
+    return Box::new(linux::Linux::new());
     #[cfg(target_os = "windows")]
     return Box::new(windows::Windows);
 }

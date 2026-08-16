@@ -124,6 +124,13 @@ impl Platform for MacOs {
         true
     }
 
+    fn needs_authorization(&self) -> bool {
+        // `pmset -a disablesleep` is root's, and nothing short of root can set
+        // it. The hold is a flag file precisely so the password is asked once
+        // rather than on every sweep — see `start_awake_watchdog`.
+        true
+    }
+
     fn power(&self) -> Result<Power> {
         let out = std::process::Command::new("pmset")
             .args(["-g", "batt"])

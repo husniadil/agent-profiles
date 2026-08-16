@@ -143,7 +143,11 @@ mod tests {
             keep_awake: crate::keep_awake::Handle::new(
                 root.join("data"),
                 root.join("home"),
-                false,
+                crate::keep_awake::Capabilities {
+                    hold: false,
+                    thermal: false,
+                    needs_authorization: true,
+                },
                 crate::keep_awake::Recovery {
                     reclaimed_prior: None,
                     stranded: false,

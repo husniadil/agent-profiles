@@ -2,7 +2,7 @@
 //! calls these helpers is the Linux `Platform` impl, which exists only there.
 #![cfg_attr(not(target_os = "linux"), allow(dead_code))]
 
-use crate::platform::DATA_DIR_SLUG;
+use crate::platform::{Power, Thermal, DATA_DIR_SLUG};
 use std::path::{Path, PathBuf};
 
 pub fn desktop_file_path(applications_dir: &Path, wm_class: &str) -> PathBuf {
@@ -34,6 +34,83 @@ pub fn is_wayland(session_type: Option<&str>) -> bool {
     matches!(session_type, Some(session) if session.eq_ignore_ascii_case("wayland"))
 }
 
+/// One entry under `/sys/class/power_supply`, as the kernel writes it.
+#[derive(Debug, Default, Clone, PartialEq, Eq)]
+pub struct Supply {
+    /// `type`: `Battery`, `Mains`, `USB`, `UPS`, …
+    pub kind: String,
+    /// `status`, on a battery: `Charging`, `Discharging`, `Full`, `Not charging`.
+    pub status: String,
+    /// `online`, on everything that is not a battery.
+    pub online: bool,
+    /// `capacity`, in percent, on a battery.
+    pub capacity: Option<u8>,
+}
+
+/// Folds every supply the kernel lists into the one reading the guard wants.
+///
+/// External power is any non-battery supply reporting online, not `Mains`
+/// alone: a laptop charging over USB-C is listed as `USB` or `USB_PD`, and
+/// insisting on `Mains` would pause a machine that is plugged in and charging.
+///
+/// The battery's own `status` is the fallback for the machines — mostly ARM
+/// laptops and tablets — that list a battery and no charger at all. Without it
+/// those read as unplugged for as long as they are charging, which is the one
+/// mistake the battery guard must not make.
+pub fn fold_supplies(supplies: &[Supply]) -> Power {
+    let battery = supplies.iter().find(|supply| supply.kind == "Battery");
+    // `Not charging` is a battery held at a charge limit, which means the
+    // charger is very much attached.
+    let charging = battery.is_some_and(|battery| {
+        matches!(
+            battery.status.as_str(),
+            "Charging" | "Full" | "Not charging"
+        )
+    });
+    Power {
+        // The first battery, not an average across two: a machine with more
+        // than one is rare enough that picking one beats a figure that
+        // describes neither.
+        percent: battery.and_then(|battery| battery.capacity),
+        external: supplies
+            .iter()
+            .any(|supply| supply.kind != "Battery" && supply.online)
+            || charging,
+    }
+}
+
+/// The hottest of the kernel's thermal zones, as one of the four levels.
+///
+/// macOS hands over the system's own judgement; Linux hands over numbers, so
+/// these bands are ours. They sit against the trip points laptops actually
+/// ship with: passive throttling starts in the eighties and the critical
+/// shutdown trip is near 100 °C on both Intel and AMD parts.
+///
+/// Hottest rather than an average, and every zone rather than the CPU's: the
+/// question is whether any part of the machine is too hot to make worse, and a
+/// battery or chassis zone in the nineties is exactly the case a lid-closed
+/// hold must not ignore.
+///
+/// ponytail: fixed bands. If a machine turns out to need its own, read each
+/// zone's `trip_point_*_temp` and band against those instead of these numbers.
+pub fn classify_zones(millicelsius: &[i64]) -> Thermal {
+    // Below 1 °C or above 125 °C is not a machine, it is a sensor that is not
+    // reading — both ends turn up on real hardware, from zones that report 0
+    // when unpopulated to ones that report nonsense when a driver is missing.
+    let hottest = millicelsius
+        .iter()
+        .copied()
+        .filter(|temp| (1_000..=125_000).contains(temp))
+        .max();
+    match hottest {
+        None => Thermal::Unknown,
+        Some(temp) if temp >= 95_000 => Thermal::Critical,
+        Some(temp) if temp >= 85_000 => Thermal::Serious,
+        Some(temp) if temp >= 70_000 => Thermal::Fair,
+        Some(_) => Thermal::Nominal,
+    }
+}
+
 pub fn data_root_from(xdg_config_home: Option<&str>, home: &str) -> PathBuf {
     match xdg_config_home {
         Some(path) if !path.is_empty() => PathBuf::from(path).join(DATA_DIR_SLUG),
@@ -51,7 +128,30 @@ mod imp {
 
     const ICON_NAME: &str = "com.husniadil.agent-profiles";
 
-    pub struct Linux;
+    /// The lid-closed hold, as one live child process.
+    ///
+    /// Nothing privileged and nothing persistent, which is the whole reason
+    /// Linux needs neither the password prompt macOS asks for nor the crash
+    /// recovery Windows needs: logind drops an inhibitor the moment the process
+    /// holding it goes, so a kill -9 of this app releases the machine by
+    /// itself. The `Mutex` is what lets `&self` own a child at all.
+    pub struct Linux {
+        inhibitor: std::sync::Mutex<Option<std::process::Child>>,
+    }
+
+    impl Linux {
+        pub fn new() -> Self {
+            Self {
+                inhibitor: std::sync::Mutex::new(None),
+            }
+        }
+    }
+
+    impl Default for Linux {
+        fn default() -> Self {
+            Self::new()
+        }
+    }
 
     fn home() -> Result<PathBuf> {
         std::env::var_os("HOME")
@@ -186,6 +286,137 @@ mod imp {
                 Err(error) => Err(error.into()),
             }
         }
+
+        fn power(&self) -> Result<Power> {
+            let supplies = read_supplies();
+            if supplies.is_empty() {
+                return Err(anyhow!("{POWER_SUPPLY_DIR} lists no power supply"));
+            }
+            Ok(fold_supplies(&supplies))
+        }
+
+        fn thermal(&self) -> Thermal {
+            classify_zones(&read_zone_temps())
+        }
+
+        /// Asked per machine rather than answered for the platform: a Linux box
+        /// without logind — a runit or OpenRC install, a container — has
+        /// nothing to inhibit, and claiming otherwise would put a switch in the
+        /// window that silently did nothing every time it was armed.
+        fn can_hold_awake(&self) -> bool {
+            which("systemd-inhibit")
+        }
+
+        fn hold(&self, _data_root: &Path, on: bool) -> Result<()> {
+            let mut held = self
+                .inhibitor
+                .lock()
+                .map_err(|_| anyhow!("the inhibitor lock was poisoned"))?;
+
+            if !on {
+                if let Some(mut child) = held.take() {
+                    let _ = child.kill();
+                    // Reaped, not abandoned: an unwaited child is a zombie for
+                    // the life of the app, and this one is created and killed
+                    // every time an agent starts and stops.
+                    let _ = child.wait();
+                }
+                return Ok(());
+            }
+
+            // Already holding, and the lock is still alive. `try_wait` is the
+            // whole check — if `systemd-inhibit` died on us the hold is gone
+            // with it, and the machine would sleep while the window went on
+            // saying it was held.
+            if let Some(child) = held.as_mut() {
+                match child.try_wait() {
+                    Ok(None) => return Ok(()),
+                    _ => {
+                        let _ = child.wait();
+                        *held = None;
+                    }
+                }
+            }
+
+            *held = Some(inhibit()?);
+            Ok(())
+        }
+    }
+
+    /// Takes the lid-switch and idle locks, as the user, for as long as the
+    /// child lives.
+    ///
+    /// Deliberately not `--what=sleep`: that would also block a suspend the
+    /// user asked for from their own menu, which is not what "keep the machine
+    /// awake while an agent works" means. The lid and the idle timer are the
+    /// two things that put a machine to sleep without being told to, and they
+    /// are exactly the two this holds.
+    ///
+    /// `--mode=block` rather than `delay`: a delay inhibitor buys a few seconds
+    /// and then the machine suspends anyway, which for a hold is no hold at all.
+    fn inhibit() -> Result<std::process::Child> {
+        Command::new("systemd-inhibit")
+            .args([
+                "--what=handle-lid-switch:idle",
+                "--who=Agent Profiles",
+                "--why=An agent session is working",
+                "--mode=block",
+                // The process whose lifetime *is* the lock. `sleep infinity`
+                // over anything cleverer because the parent kills it directly;
+                // it never has to notice anything itself.
+                "sleep",
+                "infinity",
+            ])
+            .stdin(std::process::Stdio::null())
+            .stdout(std::process::Stdio::null())
+            .stderr(std::process::Stdio::null())
+            .spawn()
+            .map_err(|error| anyhow!("could not take a logind inhibitor lock: {error}"))
+    }
+
+    /// Every battery and charger the kernel knows about. Plain files, read once
+    /// per sweep — no dependency, no daemon, and nothing that needs a session
+    /// bus to be up, which matters because the sweep also has to work with the
+    /// lid shut and the desktop gone quiet.
+    const POWER_SUPPLY_DIR: &str = "/sys/class/power_supply";
+    const THERMAL_DIR: &str = "/sys/class/thermal";
+
+    /// A sysfs attribute, trimmed. Missing is `None` and not an error: which
+    /// attributes exist varies by driver, and a battery with no `capacity` is a
+    /// battery this guard cannot read rather than a failure to report.
+    fn attribute(dir: &Path, name: &str) -> Option<String> {
+        std::fs::read_to_string(dir.join(name))
+            .ok()
+            .map(|raw| raw.trim().to_string())
+    }
+
+    fn read_supplies() -> Vec<Supply> {
+        let Ok(entries) = std::fs::read_dir(POWER_SUPPLY_DIR) else {
+            return Vec::new();
+        };
+        entries
+            .flatten()
+            .map(|entry| {
+                let dir = entry.path();
+                Supply {
+                    kind: attribute(&dir, "type").unwrap_or_default(),
+                    status: attribute(&dir, "status").unwrap_or_default(),
+                    online: attribute(&dir, "online").as_deref() == Some("1"),
+                    capacity: attribute(&dir, "capacity").and_then(|percent| percent.parse().ok()),
+                }
+            })
+            .collect()
+    }
+
+    fn read_zone_temps() -> Vec<i64> {
+        let Ok(entries) = std::fs::read_dir(THERMAL_DIR) else {
+            return Vec::new();
+        };
+        entries
+            .flatten()
+            .filter_map(|entry| attribute(&entry.path(), "temp"))
+            .filter_map(|temp| temp.parse().ok())
+            .collect()
     }
 }
 
@@ -267,5 +498,83 @@ mod tests {
             data_root_from(None, "/home/h"),
             PathBuf::from("/home/h/.config/agent-profiles")
         );
+    }
+
+    fn battery(status: &str, capacity: u8) -> Supply {
+        Supply {
+            kind: "Battery".into(),
+            status: status.into(),
+            online: false,
+            capacity: Some(capacity),
+        }
+    }
+
+    fn charger(kind: &str, online: bool) -> Supply {
+        Supply {
+            kind: kind.into(),
+            status: String::new(),
+            online,
+            capacity: None,
+        }
+    }
+
+    #[test]
+    fn a_laptop_on_battery_reports_its_charge_and_no_external_power() {
+        let power = fold_supplies(&[charger("Mains", false), battery("Discharging", 42)]);
+        assert_eq!(power.percent, Some(42));
+        assert!(!power.external);
+    }
+
+    #[test]
+    fn charging_over_usb_c_still_counts_as_external_power() {
+        // The mistake this catches is matching on `Mains` alone: a machine on a
+        // USB-C charger would read as unplugged and be paused at the floor
+        // while its battery was going up.
+        let power = fold_supplies(&[charger("USB_PD", true), battery("Charging", 25)]);
+        assert!(power.external, "a live USB charger is external power");
+    }
+
+    #[test]
+    fn a_battery_that_says_it_is_charging_covers_a_machine_with_no_charger_listed() {
+        // ARM laptops and tablets often list a battery and nothing else at all.
+        let power = fold_supplies(&[battery("Charging", 10)]);
+        assert!(power.external);
+        assert!(!fold_supplies(&[battery("Discharging", 10)]).external);
+    }
+
+    #[test]
+    fn a_desktop_with_no_battery_reports_no_charge_rather_than_a_flat_one() {
+        // The whole point of `Option`: zero here would pause a machine that
+        // cannot run out of power for as long as it was switched on.
+        let power = fold_supplies(&[charger("Mains", true)]);
+        assert_eq!(power.percent, None);
+        assert!(power.external);
+    }
+
+    #[test]
+    fn the_hottest_zone_decides_the_level() {
+        assert_eq!(classify_zones(&[45_000, 88_000, 51_000]), Thermal::Serious);
+        assert_eq!(classify_zones(&[45_000, 51_000]), Thermal::Nominal);
+        assert_eq!(classify_zones(&[72_000]), Thermal::Fair);
+        assert_eq!(classify_zones(&[99_000]), Thermal::Critical);
+    }
+
+    #[test]
+    fn only_serious_and_above_release_a_hold() {
+        // The band boundaries matter more than the names: `Fair` is an ordinary
+        // busy laptop, and releasing there would mean a hold that never
+        // survives a build.
+        assert!(!classify_zones(&[84_999]).is_danger());
+        assert!(classify_zones(&[85_000]).is_danger());
+    }
+
+    #[test]
+    fn a_machine_with_no_readable_zone_is_unknown_rather_than_cool() {
+        assert_eq!(classify_zones(&[]), Thermal::Unknown);
+        // Zones that report nothing real are ignored, not banded: a driverless
+        // zone reading 0 would otherwise pin every machine to `Nominal` and a
+        // broken one reading millions would pin it to `Critical` forever.
+        assert_eq!(classify_zones(&[0, 250_000]), Thermal::Unknown);
+        assert_eq!(classify_zones(&[0, 88_000]), Thermal::Serious);
     }
 }

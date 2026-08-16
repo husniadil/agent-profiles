@@ -193,13 +193,27 @@ pub fn run() {
             // must not inherit a hold that nothing has checked a battery against.
             let data_root = platform.data_root()?;
             let recovery = keep_awake::recover_at_startup(&data_root);
+            // Whatever this platform can put back by itself, put back now.
+            // Only macOS cannot — `disablesleep` is root's — and it reports the
+            // machine as stranded through `recovery` instead.
+            if let Err(error) = platform.recover_hold(&data_root) {
+                eprintln!("could not restore the lid setting from a previous run: {error}");
+            }
             let home = std::path::PathBuf::from(
                 std::env::var("HOME")
                     .or_else(|_| std::env::var("USERPROFILE"))
                     .unwrap_or_default(),
             );
-            let keep_awake =
-                keep_awake::Handle::new(data_root, home, platform.can_hold_awake(), recovery);
+            let keep_awake = keep_awake::Handle::new(
+                data_root,
+                home,
+                keep_awake::Capabilities {
+                    hold: platform.can_hold_awake(),
+                    thermal: platform.can_read_thermal(),
+                    needs_authorization: platform.needs_authorization(),
+                },
+                recovery,
+            );
 
             app.manage(AppState {
                 platform,

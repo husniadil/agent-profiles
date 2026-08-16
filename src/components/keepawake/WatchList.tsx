@@ -5,7 +5,7 @@ import type { Freshness } from "@/lib/api";
 /// The roots being watched, and how long ago each was last written.
 ///
 /// Shown rather than hidden because the trigger is otherwise unfalsifiable: a
-/// user whose agent is plainly working, and whose Mac slept anyway, has no way to
+/// user whose agent is plainly working, and whose machine slept anyway, has no way to
 /// tell whether the detector was wrong or whether they were watching the wrong
 /// folder. This turns that into something they can look at.
 export function WatchList({
@@ -36,7 +36,16 @@ export function WatchList({
     // scrollbar's worth of chrome to say it.
     <ul className="flex max-h-[88px] flex-col gap-1 overflow-y-auto">
       {roots.map((root) => {
-        const active = root.seconds_ago !== null && root.seconds_ago <= window;
+        // Three states, not two. "Working" is now a claim the transcript makes
+        // — the agent's turn is open — rather than one inferred from a file
+        // having been touched, because a transcript is written when a turn ends
+        // as well as while it runs. A row that has gone quiet says so.
+        const fresh = root.seconds_ago !== null && root.seconds_ago <= window;
+        const active = root.mid_turn && fresh;
+        // Mid-turn but past the window: something stopped between a tool call
+        // and its result. Named rather than folded into "idle", because those
+        // are different things and only one of them is a session that finished.
+        const stalled = root.mid_turn && root.seconds_ago !== null && !fresh;
         return (
           <li
             key={root.path}
@@ -75,7 +84,9 @@ export function WatchList({
                 ? "never"
                 : active
                   ? `${formatDuration(root.seconds_ago)} ago`
-                  : `idle ${formatDuration(root.seconds_ago)}`}
+                  : stalled
+                    ? `stalled ${formatDuration(root.seconds_ago)}`
+                    : `idle ${formatDuration(root.seconds_ago)}`}
             </span>
           </li>
         );

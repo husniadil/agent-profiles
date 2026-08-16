@@ -49,7 +49,8 @@ export type Trigger = "off" | "agent-active" | "always";
 
 export type Phase = "off" | "idle" | "holding" | "paused-low-battery" | "paused-too-hot";
 
-/// The system's own four-level reading. "unknown" is every platform but macOS,
+/// The system's own four-level reading, or Linux's sysfs zones banded to match.
+/// "unknown" is Windows, a machine with no readable sensor,
 /// and never counts as hot.
 export type Thermal = "unknown" | "nominal" | "fair" | "serious" | "critical";
 
@@ -62,12 +63,27 @@ export type KeepAwakeSettings = {
   thermal_guard: boolean;
 };
 
-/// One watched session root and how long ago anything under it was written.
+/// One watched session root, how long ago anything under it was written, and
+/// whether the agent there is part-way through a turn.
+///
 /// `seconds_ago` is null when nothing ever has — never confused with zero.
-export type Freshness = { label: string; path: string; seconds_ago: number | null };
+/// `mid_turn` is false only when a transcript positively says the turn ended; a
+/// root read by freshness alone is always true.
+export type Freshness = {
+  label: string;
+  path: string;
+  seconds_ago: number | null;
+  mid_turn: boolean;
+};
 
 export type KeepAwakeStatus = {
   supported: boolean;
+  /// Whether this machine can report how hot it is. False means the thermal
+  /// guard is left out of the window rather than shown unable to fire.
+  thermal_supported: boolean;
+  /// Whether holding costs an administrator password. True only on macOS —
+  /// elsewhere the window shows no authorization step at all.
+  needs_authorization: boolean;
   authorized: boolean;
   stranded: boolean;
   phase: Phase;

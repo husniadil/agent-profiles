@@ -129,6 +129,22 @@ pub fn keep_awake_breadcrumb(data_root: &std::path::Path) -> PathBuf {
     data_root.join("keep-awake.owned")
 }
 
+/// What closing the lid did before Windows took the setting over.
+///
+/// Its own file rather than the breadcrumb above, which records a single
+/// `SleepDisabled` bit and is consumed by `recover_at_startup` before anything
+/// platform-specific gets a look at it. This one holds two values — mains and
+/// battery — and is read back by the Windows backend itself, at the next
+/// startup if a run died owning it.
+///
+/// The one keep-awake path only one platform reads, hence the allow: elsewhere
+/// there is no lid setting to own, and going unused there is correct rather
+/// than a mistake worth hearing about.
+#[cfg_attr(not(target_os = "windows"), allow(dead_code))]
+pub fn keep_awake_lid_prior(data_root: &std::path::Path) -> PathBuf {
+    data_root.join("keep-awake.lid")
+}
+
 /// Why this data root cannot be spelled inside the privileged watchdog, if it
 /// cannot.
 ///
@@ -352,6 +368,10 @@ mod tests {
         assert_eq!(
             keep_awake_breadcrumb(root),
             PathBuf::from("/data/keep-awake.owned")
+        );
+        assert_eq!(
+            keep_awake_lid_prior(root),
+            PathBuf::from("/data/keep-awake.lid")
         );
         for spec in crate::app_spec::all() {
             assert_ne!(keep_awake_flag(root), root.join(spec.id));

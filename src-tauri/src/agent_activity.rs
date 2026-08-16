@@ -49,6 +49,26 @@ const LABEL_PROBE_BYTES: usize = 8192;
 /// all, which is how two real projects ended up labelled with their raw slug.
 const LABEL_PROBE_FILES: usize = 3;
 
+/// How much of a transcript's tail is read to find the last conversation
+/// record.
+///
+/// Measured against every transcript on a real machine, from 100KB to 6.7MB:
+/// 8KB already reached the last conversation record in all of them, and 64KB
+/// gave the identical verdict. The margin is for the metadata records that can
+/// carry payloads — `file-history-snapshot` holds file contents — and can pile
+/// up at the end of a file after the agent has stopped.
+const TURN_PROBE_BYTES: u64 = 65_536;
+
+/// The one `stop_reason` that means the agent handed control back.
+///
+/// Recognising the end rather than the middle is deliberate: 2714 of the 3088
+/// assistant records on a real machine carry `tool_use`, and a `stop_reason`
+/// nobody has seen yet must not be mistaken for "finished". Anything
+/// unrecognised leaves the agent mid-turn, which errs toward holding the
+/// machine awake — the direction where being wrong costs power rather than
+/// somebody's work.
+const END_TURN: &str = "end_turn";
+
 /// How deep a session root is walked.
 ///
 /// Both known layouts are `<root>/<project>/<session file>`, so two levels
@@ -62,12 +82,34 @@ const LABEL_PROBE_FILES: usize = 3;
 /// If this ever shows up in a profile, watch the roots with FSEvents instead.
 const MAX_DEPTH: u32 = 2;
 
+/// How a root's state can be read.
+///
+/// Freshness alone cannot answer "is an agent working". A transcript is written
+/// when a turn *ends* as well as while it runs, so the moment an agent hands
+/// control back its file is zero seconds old — the signal peaks exactly when the
+/// work stops. Merely resuming a session touches it too: measured on this
+/// machine, a session whose last message ended 83 minutes earlier was stamped
+/// one second after its process started, and read as working for the next five
+/// minutes with no work behind it.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub enum Reading {
+    /// A Claude Code project directory. The transcript carries the agent's own
+    /// verdict — the last conversation record says whether the turn is over —
+    /// so that is read and freshness only bounds it.
+    Transcript,
+    /// Anything whose layout has not been verified against a real installation.
+    /// Freshness is all there is, exactly as before.
+    Mtime,
+}
+
 pub struct Root {
     pub label: String,
     pub path: PathBuf,
+    pub reading: Reading,
 }
 
-/// One root and how long ago anything under it was last written.
+/// One root, how long ago anything under it was last written, and whether the
+/// agent there is part-way through a turn.
 #[derive(Serialize, Clone, PartialEq, Eq, Debug)]
 pub struct Freshness {
     pub label: String,
@@ -75,6 +117,10 @@ pub struct Freshness {
     /// `None` means nothing has ever been written under this root, or it does
     /// not exist. Never confused with zero.
     pub seconds_ago: Option<u64>,
+    /// `false` only when the transcript positively says the turn ended. A root
+    /// read by mtime alone, or one whose transcript could not be understood, is
+    /// `true` — which leaves it behaving exactly as it did before this existed.
+    pub mid_turn: bool,
 }
 
 /// The directory slug, shortened from the left.
@@ -131,6 +177,71 @@ fn label_from_transcript(transcript: &Path) -> Option<String> {
     }
 }
 
+/// The newest transcript in a Claude Code project directory.
+///
+/// Only the files directly inside it, matching `claude_sessions`: the
+/// `subagents` folder below belongs to a session already counted by its parent.
+fn newest_transcript(project: &Path) -> Option<PathBuf> {
+    std::fs::read_dir(project)
+        .ok()?
+        .flatten()
+        .filter(|file| file.path().extension().is_some_and(|ext| ext == "jsonl"))
+        .filter_map(|file| Some((file.path().metadata().ok()?.modified().ok()?, file.path())))
+        .max_by_key(|(at, _)| *at)
+        .map(|(_, path)| path)
+}
+
+/// Whether the agent in this transcript is part-way through a turn.
+///
+/// `None` when the file says nothing either way — unreadable, or holding no
+/// conversation record in its tail — so the caller can fall back rather than
+/// invent an answer.
+///
+/// The *last conversation record* decides, not the last record. A transcript
+/// ends with metadata far more often than with a turn: fourteen record types
+/// were seen on a real machine and most are sidecars written at times unrelated
+/// to the work — `custom-title`, `mode`, `pr-link`, `queue-operation`,
+/// `last-prompt`, `file-history-snapshot`. A live session mid-task ended with
+/// `custom-title`; classifying that would have read the busiest agent on the
+/// machine as neither working nor idle.
+///
+/// A trailing `user` record counts as mid-turn whether it is a person's prompt
+/// or a tool result being handed back: both mean the agent's next move is owed.
+fn mid_turn(transcript: &Path) -> Option<bool> {
+    use std::io::{Read, Seek, SeekFrom};
+
+    let mut file = std::fs::File::open(transcript).ok()?;
+    let len = file.metadata().ok()?.len();
+    let mut tail = Vec::new();
+    // Read from the end, not the start: these files reach several megabytes,
+    // and the answer is always in the last few lines.
+    file.seek(SeekFrom::Start(len.saturating_sub(TURN_PROBE_BYTES)))
+        .ok()?;
+    file.read_to_end(&mut tail).ok()?;
+    // Lossy rather than a `str` parse: a seek into the middle of a file lands
+    // mid-character as often as not, and one mangled byte at the front must not
+    // cost the whole read.
+    let text = String::from_utf8_lossy(&tail);
+
+    // Backwards, so the first conversation record found is the last one written.
+    // The leading partial line simply fails to parse and is skipped, and it is
+    // reached last anyway.
+    text.lines()
+        .rev()
+        .filter_map(|line| serde_json::from_str::<serde_json::Value>(line).ok())
+        .find_map(|record| match record.get("type")?.as_str()? {
+            "assistant" => Some(
+                record
+                    .get("message")
+                    .and_then(|message| message.get("stop_reason"))
+                    .and_then(|reason| reason.as_str())
+                    != Some(END_TURN),
+            ),
+            "user" => Some(true),
+            _ => None,
+        })
+}
+
 /// One row per Claude Code project, newest first.
 ///
 /// Replaces a single "Claude Code" row that aggregated every session on the
@@ -177,6 +288,7 @@ fn claude_sessions(root: &Path, now: SystemTime) -> Vec<Root> {
                 Root {
                     label,
                     path: project,
+                    reading: Reading::Transcript,
                 },
             ))
         })
@@ -198,6 +310,7 @@ pub fn cli_roots(home: &Path) -> Vec<Root> {
             .map(|(label, rest)| Root {
                 label: (*label).to_string(),
                 path: home.join(rest),
+                reading: Reading::Mtime,
             }),
     );
     roots
@@ -239,15 +352,28 @@ pub fn scan(roots: &[Root], now: SystemTime) -> Vec<Freshness> {
             label: root.label.clone(),
             path: root.path.display().to_string(),
             seconds_ago: newest_age(&root.path, now).map(|age| age.as_secs()),
+            mid_turn: match root.reading {
+                Reading::Mtime => true,
+                Reading::Transcript => newest_transcript(&root.path)
+                    .and_then(|transcript| mid_turn(&transcript))
+                    .unwrap_or(true),
+            },
         })
         .collect()
 }
 
-/// Whether any watched root has been written inside `window`.
-pub fn any_within(freshness: &[Freshness], window: Duration) -> bool {
+/// Whether any watched root holds an agent that is part-way through a turn and
+/// still writing.
+///
+/// Both halves are needed. Without `mid_turn` every finished session held the
+/// machine for the whole window, because a transcript is written when a turn
+/// ends. Without the window a session abandoned mid-tool-call holds it forever:
+/// one on this machine had been sitting in that state for three and a half
+/// hours.
+pub fn any_working(freshness: &[Freshness], window: Duration) -> bool {
     freshness
         .iter()
-        .any(|root| root.seconds_ago.is_some_and(|ago| ago <= window.as_secs()))
+        .any(|root| root.mid_turn && root.seconds_ago.is_some_and(|ago| ago <= window.as_secs()))
 }
 
 #[cfg(test)]
@@ -314,27 +440,52 @@ mod tests {
         assert!(newest_age(&d.path().join("empty"), SystemTime::now()).is_none());
     }
 
-    #[test]
-    fn an_agent_counts_as_working_only_inside_the_window() {
-        let fresh = vec![Freshness {
+    /// A root as `scan` would report it, so the decision can be tested without
+    /// a filesystem behind it.
+    fn seen(seconds_ago: Option<u64>, mid_turn: bool) -> Vec<Freshness> {
+        vec![Freshness {
             label: "Claude Code".into(),
             path: "/x".into(),
-            seconds_ago: Some(30),
-        }];
-        assert!(any_within(&fresh, Duration::from_secs(300)));
-        assert!(!any_within(&fresh, Duration::from_secs(10)));
+            seconds_ago,
+            mid_turn,
+        }]
+    }
+
+    #[test]
+    fn an_agent_counts_as_working_only_inside_the_window() {
+        assert!(any_working(&seen(Some(30), true), Duration::from_secs(300)));
+        assert!(!any_working(&seen(Some(30), true), Duration::from_secs(10)));
+    }
+
+    #[test]
+    fn a_finished_turn_releases_the_machine_at_once() {
+        // The defect this replaces, measured on a real machine: a session whose
+        // last message ended 83 minutes earlier was stamped one second ago —
+        // resuming it rewrote the transcript — and held the Mac awake for the
+        // whole window with no work behind it. Freshness peaks exactly when the
+        // work stops, so freshness alone can never see the end of a turn.
+        assert!(!any_working(
+            &seen(Some(1), false),
+            Duration::from_secs(300)
+        ));
+    }
+
+    #[test]
+    fn a_session_abandoned_mid_turn_is_still_bounded_by_the_window() {
+        // One on this machine had been sitting mid-tool-call for three and a
+        // half hours. `mid_turn` alone would hold the Mac awake for as long as
+        // the file sits there.
+        assert!(!any_working(
+            &seen(Some(12_993), true),
+            Duration::from_secs(120)
+        ));
     }
 
     #[test]
     fn a_root_with_no_activity_at_all_never_arms_the_trigger() {
         // `None` is "nothing has ever been written here", which must not be
         // mistaken for "written just now".
-        let quiet = vec![Freshness {
-            label: "Codex".into(),
-            path: "/x".into(),
-            seconds_ago: None,
-        }];
-        assert!(!any_within(&quiet, Duration::from_secs(86_400)));
+        assert!(!any_working(&seen(None, true), Duration::from_secs(86_400)));
     }
 
     #[test]
@@ -346,10 +497,12 @@ mod tests {
             Root {
                 label: "Present".into(),
                 path: d.path().to_path_buf(),
+                reading: Reading::Mtime,
             },
             Root {
                 label: "Absent".into(),
                 path: d.path().join("nope"),
+                reading: Reading::Mtime,
             },
         ];
         let seen = scan(&roots, SystemTime::now());
@@ -530,6 +683,122 @@ mod tests {
             labels.contains(&"-Users-y-thing".to_string()),
             "got {labels:?}"
         );
+    }
+
+    /// Writes one transcript holding exactly these JSONL records, and returns
+    /// the project directory it lives in.
+    fn transcript(records: &[&str]) -> tempfile::TempDir {
+        let d = tempfile::tempdir().unwrap();
+        std::fs::write(
+            d.path().join("s.jsonl"),
+            format!("{}\n", records.join("\n")),
+        )
+        .unwrap();
+        d
+    }
+
+    const ENDED: &str =
+        r#"{"type":"assistant","message":{"role":"assistant","stop_reason":"end_turn"}}"#;
+    const CALLING: &str =
+        r#"{"type":"assistant","message":{"role":"assistant","stop_reason":"tool_use"}}"#;
+    const ASKED: &str = r#"{"type":"user","message":{"role":"user"}}"#;
+
+    #[test]
+    fn a_finished_turn_reads_as_finished() {
+        let d = transcript(&[CALLING, ENDED]);
+        assert_eq!(mid_turn(&d.path().join("s.jsonl")), Some(false));
+    }
+
+    #[test]
+    fn an_agent_waiting_on_a_tool_is_still_working() {
+        // The property freshness cannot have. A tool call that runs for minutes
+        // writes nothing while it runs and its process sits idle — measured on
+        // this machine, a working session and an idle one both read 1.4% CPU —
+        // but the transcript still says the agent's next move is owed.
+        let d = transcript(&[ENDED, ASKED, CALLING]);
+        assert_eq!(mid_turn(&d.path().join("s.jsonl")), Some(true));
+    }
+
+    #[test]
+    fn a_prompt_with_no_answer_yet_is_working() {
+        let d = transcript(&[ENDED, ASKED]);
+        assert_eq!(mid_turn(&d.path().join("s.jsonl")), Some(true));
+    }
+
+    #[test]
+    fn metadata_written_after_the_turn_ended_does_not_hide_it() {
+        // The first version of this read the *last* record and got the busiest
+        // agent on the machine wrong: a live session mid-task ended with
+        // `custom-title`. Fourteen record types were seen on a real machine and
+        // most are sidecars written at times unrelated to the work.
+        let d = transcript(&[
+            ENDED,
+            r#"{"type":"custom-title","title":"x"}"#,
+            r#"{"type":"last-prompt"}"#,
+            r#"{"type":"queue-operation"}"#,
+        ]);
+        assert_eq!(mid_turn(&d.path().join("s.jsonl")), Some(false));
+    }
+
+    #[test]
+    fn a_transcript_with_no_conversation_in_it_says_nothing_either_way() {
+        // `None`, not `false`. The caller falls back to freshness alone, which
+        // is how this degrades to its old behaviour rather than to "idle".
+        let d = transcript(&[r#"{"type":"summary"}"#]);
+        assert_eq!(mid_turn(&d.path().join("s.jsonl")), None);
+    }
+
+    #[test]
+    fn the_verdict_is_found_in_the_tail_of_a_file_far_bigger_than_the_probe() {
+        // Real transcripts reach 6.7MB. Reading them whole on a fifteen-second
+        // sweep is not an option, and seeking into the middle of one lands
+        // mid-character.
+        let d = tempfile::tempdir().unwrap();
+        let filler = format!(
+            "{}\n",
+            r#"{"type":"user","message":{"role":"user","text":"— padding ——"}}"#
+        );
+        let mut body = filler.repeat(4000);
+        assert!(body.len() as u64 > TURN_PROBE_BYTES * 2, "{}", body.len());
+        body.push_str(&format!("{ENDED}\n"));
+        std::fs::write(d.path().join("s.jsonl"), &body).unwrap();
+
+        assert_eq!(mid_turn(&d.path().join("s.jsonl")), Some(false));
+    }
+
+    #[test]
+    fn a_claude_project_is_scanned_by_its_transcript_and_a_codex_root_is_not() {
+        // Same directory, same freshness, opposite verdicts — the whole point.
+        let ended = transcript(&[ENDED]);
+        let working = transcript(&[CALLING]);
+        let roots = vec![
+            Root {
+                label: "ended".into(),
+                path: ended.path().to_path_buf(),
+                reading: Reading::Transcript,
+            },
+            Root {
+                label: "working".into(),
+                path: working.path().to_path_buf(),
+                reading: Reading::Transcript,
+            },
+            Root {
+                // An unverified layout keeps behaving exactly as it did.
+                label: "codex".into(),
+                path: ended.path().to_path_buf(),
+                reading: Reading::Mtime,
+            },
+        ];
+
+        let seen = scan(&roots, SystemTime::now());
+        assert!(!seen[0].mid_turn, "a finished turn must read as finished");
+        assert!(seen[1].mid_turn);
+        assert!(
+            seen[2].mid_turn,
+            "mtime-only roots are never called finished"
+        );
+        assert!(any_working(&seen, Duration::from_secs(120)));
+        assert!(!any_working(&seen[..1], Duration::from_secs(120)));
     }
 
     #[test]

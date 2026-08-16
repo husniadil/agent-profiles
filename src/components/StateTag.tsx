@@ -1,11 +1,18 @@
 import { AnimatedBadge } from "@/components/motion/animated-badge";
 import { edge, readable, wash } from "@/lib/color";
 
-// beUI's badge is a 24px pill at 11px; the rows this sits in are dense and want
-// the smaller, upper-case chip the window already reads in. The status colours
-// it ships are Tailwind's emerald and amber — this palette has its own, and they
-// are set as styles so the same token drives the tag, the dot and the meter.
-const TAG = "h-auto rounded-full px-1.5 py-px text-caption tracking-[0.04em] uppercase";
+// beUI's badge is a 24px pill at 11px; the rows this sits in are dense, so this
+// takes the caption size — already the smallest step on the window's scale. The
+// status colours it ships are Tailwind's emerald and amber; this palette has its
+// own, set as styles so one token drives the tag, the dot and the meter.
+//
+// Sentence case, and that is the whole fix for a chip that read as oversized
+// while measuring 10px against 11px neighbours. It was the only upper-case text
+// in the entire window: capitals put every letter at cap height, so the word
+// became a solid block heavier than the 11px sentence beside it, and the
+// tracking that capitals need widened it further. Nothing else here shouts —
+// section labels included, which carry weight instead — so this no longer does.
+const TAG = "h-auto rounded-full px-1.5 py-px text-caption";
 
 /// A fact about state, never about identity.
 ///
