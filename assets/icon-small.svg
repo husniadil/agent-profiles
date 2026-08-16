@@ -1,7 +1,18 @@
 <svg xmlns="http://www.w3.org/2000/svg" width="1024" height="1024" viewBox="0 0 1024 1024" role="img" aria-label="Agent Profiles">
-  <!-- The 16px and 32px variant. The stacked card behind the tile carries no
-       information at this size — it survives as three grey pixels that read as
-       a rendering artefact — so it is dropped and the letters take the space. -->
-  <rect x="32" y="32" width="960" height="960" rx="200" fill="#dd6b32"/>
-  <text x="512" y="700" font-family="Georgia, 'Times New Roman', serif" font-size="580" font-weight="700" fill="#fffaf2" text-anchor="middle">ap</text>
+  <!-- The 16px and 32px variant of the same mark: two profile cards and the
+       sparkle, nothing dropped. Only the drawing is retuned for the pixel
+       grid — the cards are larger against the tile, the stroke is heavier,
+       and the gap between the two cards is widened past half a stroke so it
+       still survives as an actual gap once a 1024px design lands on 16
+       pixels. Scaling the large icon down instead turns all of it to mush. -->
+  <rect x="24" y="24" width="976" height="976" rx="210" fill="#dd6b32"/>
+  <mask id="behind">
+    <rect width="1024" height="1024" fill="#fff"/>
+    <rect x="153" y="329" width="542" height="542" rx="173" fill="#000"/>
+  </mask>
+  <g fill="none" stroke="#fffaf2" stroke-width="78">
+    <rect x="390" y="214" width="420" height="420" rx="112" mask="url(#behind)"/>
+    <rect x="214" y="390" width="420" height="420" rx="112"/>
+  </g>
+  <path d="M 424 482 Q 459 565 542 600 Q 459 635 424 718 Q 389 635 306 600 Q 389 565 424 482 Z" fill="#fffaf2"/>
 </svg>

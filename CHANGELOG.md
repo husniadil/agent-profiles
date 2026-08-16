@@ -2,6 +2,15 @@
 
 Notable changes, newest first. This project follows [Semantic Versioning](https://semver.org).
 
+## [0.3.1] — 2026-08-16
+
+The app icon redrawn. Artwork only; no behaviour changes.
+
+### Changed
+
+- **The app icon is the mark the menu bar already draws** — two stacked profile cards carrying the AI sparkle — in place of the `ap` lettermark. The dock, the taskbar and the menu bar showed two different marks for the same app, and the letters were initials of a name the product no longer leads with. The cards are outlines rather than solids, since a solid card on a solid card is one orange blob with a seam, and the seam is the first thing to go when the icon is scaled down. It reaches every surface the old mark did: the app icons on macOS, Windows, Linux, iOS and Android, the web favicons, the window icon and the README banner.
+- **The 16 and 32 pixel renderings are drawn rather than downscaled.** At that size the full icon's stroke lands on eight tenths of a pixel and the two cards blur toward one shape, so those sizes come from a second source that redraws the same mark for the pixel grid — heavier stroke, larger cards, and the gap between them widened past half a stroke so it survives as a gap. Nothing is dropped from the mark. Every consumer of the small sizes is fed from it, including the `16`, `24` and `32` entries inside the Windows `.ico` and the 16 pixel entries in the macOS `.icns`, which the icon generator would otherwise fill from the full drawing.
+
 ## [0.3.0] — 2026-08-15
 
 The management window rebuilt. Every existing behaviour is kept; only the presentation changes.

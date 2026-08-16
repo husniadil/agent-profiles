@@ -1,11 +1,28 @@
 <svg xmlns="http://www.w3.org/2000/svg" width="1024" height="1024" viewBox="0 0 1024 1024" role="img" aria-label="Agent Profiles">
-  <!-- The same stacked, slightly askew cards as the banner mark: one profile
-       tucked behind another. The front tile stays square to the canvas so the
-       icon reads upright in a dock or task switcher, and only the card behind
-       is rotated — a tilted foreground looks like a rendering mistake at 32px. -->
-  <g transform="translate(-18 16)">
-    <rect x="184" y="114" width="740" height="740" rx="150" fill="#f4f0e8" opacity="0.92" transform="rotate(-7 554 484)"/>
-    <rect x="100" y="170" width="740" height="740" rx="150" fill="#dd6b32"/>
-    <text x="470" y="645" font-family="Georgia, 'Times New Roman', serif" font-size="400" font-weight="700" fill="#fffaf2" text-anchor="middle">ap</text>
+  <!-- The same mark as the menu bar tray icon, filled in: two stacked profile
+       cards drawn as outlines, with the concave four-point sparkle that reads
+       as AI across the field sitting on the front card. The cards say
+       profiles, the sparkle says agent — and the dock and the menu bar now
+       show the same thing rather than a lettermark and a drawing.
+
+       Outlines rather than solid cards: a solid card behind a solid card at
+       this scale is one orange blob with a seam, and the seam is the first
+       thing to vanish when the icon is scaled down.
+
+       The card behind is cut away around the front one instead of simply
+       overlapping it — two touching outlines merge into a single shape at
+       small sizes, and the gap is what keeps them reading as two.
+
+       Cards plus stroke span 215–809 on both axes, so the mark is centred on
+       the canvas, same as the small variant. -->
+  <rect x="32" y="32" width="960" height="960" rx="220" fill="#dd6b32"/>
+  <mask id="behind">
+    <rect width="1024" height="1024" fill="#fff"/>
+    <rect x="215" y="391" width="472" height="472" rx="132" fill="#000"/>
+  </mask>
+  <g fill="none" stroke="#fffaf2" stroke-width="52">
+    <rect x="391" y="215" width="392" height="392" rx="104" mask="url(#behind)"/>
+    <rect x="241" y="417" width="392" height="392" rx="104"/>
   </g>
+  <path d="M 437 499 Q 471 584 557 619 Q 471 653 437 739 Q 403 653 317 619 Q 403 584 437 499 Z" fill="#fffaf2"/>
 </svg>
