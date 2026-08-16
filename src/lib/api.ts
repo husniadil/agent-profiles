@@ -45,6 +45,40 @@ export const socketBudget = (appId: string) => invoke<SocketBudget>("socket_budg
 export const autostartState = () => invoke<AutostartState>("autostart_state");
 export const setAutostart = (enabled: boolean) => invoke("set_autostart", { enabled });
 
+export type Trigger = "off" | "agent-active" | "always";
+
+export type Phase = "off" | "idle" | "holding" | "paused-low-battery" | "paused-cap-reached";
+
+export type KeepAwakeSettings = {
+  trigger: Trigger;
+  idle_window_minutes: number;
+  battery_floor_percent: number;
+  max_hold_minutes: number;
+};
+
+/// One watched session root and how long ago anything under it was written.
+/// `seconds_ago` is null when nothing ever has — never confused with zero.
+export type Freshness = { label: string; path: string; seconds_ago: number | null };
+
+export type KeepAwakeStatus = {
+  supported: boolean;
+  authorized: boolean;
+  stranded: boolean;
+  phase: Phase;
+  settings: KeepAwakeSettings;
+  roots: Freshness[];
+  battery_percent: number | null;
+  on_external_power: boolean;
+  held_for_secs: number;
+  refusal: string | null;
+};
+
+export const keepAwakeStatus = () => invoke<KeepAwakeStatus>("keep_awake_status");
+export const setKeepAwake = (settings: KeepAwakeSettings) =>
+  invoke<KeepAwakeStatus>("set_keep_awake", { settings });
+export const authorizeKeepAwake = () => invoke<KeepAwakeStatus>("authorize_keep_awake");
+export const restoreSleep = () => invoke<KeepAwakeStatus>("restore_sleep");
+
 export function errorMessage(error: unknown): string {
   return error instanceof Error ? error.message : String(error);
 }
