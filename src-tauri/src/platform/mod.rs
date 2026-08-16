@@ -70,6 +70,18 @@ pub struct FocusHint<'a> {
     pub wm_class: &'a str,
 }
 
+/// What the machine is running on right now.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize)]
+pub struct Power {
+    /// `None` when there is no battery — a desktop — or when the charge could
+    /// not be read. Deliberately not zero: a missing reading must never be
+    /// mistaken for a flat battery, or a Mac mini would be paused forever.
+    pub percent: Option<u8>,
+    /// Whether the machine is on external power. A plugged-in machine cannot
+    /// run flat, so the battery guard never fires while this is true.
+    pub external: bool,
+}
+
 pub trait Platform: Send + Sync {
     /// Whether this app has been declared for the platform we are running on.
     ///
