@@ -62,12 +62,7 @@ export function KeepAwakeTab({ keepAwake }: { keepAwake: KeepAwake }) {
     // Blank rather than a spinner: the first read lands in a few milliseconds,
     // and a spinner that flashes for one frame is noise, not feedback.
     return (
-      <section
-        id="panel-keep-awake"
-        role="tabpanel"
-        aria-labelledby="tab-keep-awake"
-        className="flex min-h-0 flex-1 flex-col p-3"
-      />
+      <section id="panel-keep-awake" role="tabpanel" className="flex min-h-0 flex-1 flex-col p-3" />
     );
   }
 
@@ -79,7 +74,6 @@ export function KeepAwakeTab({ keepAwake }: { keepAwake: KeepAwake }) {
     <section
       id="panel-keep-awake"
       role="tabpanel"
-      aria-labelledby="tab-keep-awake"
       className="flex min-h-0 flex-1 flex-col gap-3 overflow-y-auto p-3"
     >
       <AwakeStatusCard status={status} keepAwake={keepAwake} />

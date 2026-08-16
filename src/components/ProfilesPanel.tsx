@@ -37,12 +37,11 @@ export function ProfilesPanel({
     // `min-h-0` is what lets this shrink at all: a flex item's default
     // `min-height: auto` refuses to go below its content, which would push the
     // bar below the bottom edge of a window this size.
-    <section
-      id="panel-profiles"
-      role="tabpanel"
-      aria-labelledby="tab-profiles"
-      className="flex min-h-0 flex-1 flex-col gap-2 p-2"
-    >
+    // No `aria-labelledby`: beUI's `TabsTrigger` renders its own button and
+    // takes no `id`, so pointing at one would dangle. The tablist, the tabs and
+    // `aria-selected` all still come from the component; only the panel-to-tab
+    // back-reference is missing.
+    <section id="panel-profiles" role="tabpanel" className="flex min-h-0 flex-1 flex-col gap-2 p-2">
       <ErrorBanner message={error} />
 
       {available.length === 0 ? (
