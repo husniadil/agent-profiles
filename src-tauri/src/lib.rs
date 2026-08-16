@@ -2,6 +2,7 @@ mod account;
 mod app_spec;
 mod commands;
 mod instance_manager;
+mod keep_awake;
 mod paths;
 mod platform;
 #[cfg(test)]
