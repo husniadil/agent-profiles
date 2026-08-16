@@ -1,4 +1,5 @@
 mod account;
+mod agent_activity;
 mod app_spec;
 mod commands;
 mod instance_manager;

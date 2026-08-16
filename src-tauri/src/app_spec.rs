@@ -38,6 +38,16 @@ pub struct AppSpec {
     /// How to tell which account a profile is signed into. `None` means we
     /// cannot tell, and the "same account" warning is simply never shown.
     pub identity: Option<Identity>,
+    /// Where this app's agent sessions leave a trace inside a profile
+    /// directory, relative to it. `None` means this app writes no observable
+    /// session trace and the keep-awake trigger simply never fires for it.
+    ///
+    /// Only Codex qualifies today, and only because this app already points
+    /// `CODEX_HOME` at the profile directory — so a profile-launched Codex
+    /// writes its sessions inside the profile rather than under the home
+    /// directory. The Electron apps write continuously whether or not anyone is
+    /// working, which is a signal that is always on and therefore no signal.
+    pub session_trace: Option<&'static str>,
     pub capabilities: Capabilities,
 }
 
@@ -240,6 +250,11 @@ pub static CLAUDE: AppSpec = AppSpec {
         file: "config.json",
         pointer: &["lastKnownAccountUuid"],
     }),
+    // Claude Desktop keeps its conversations in Chromium storage it rewrites
+    // whether or not anyone is typing, so there is nothing here to observe.
+    // Claude *Code* is a separate CLI and is watched through the home
+    // directory instead — see `agent_activity::CLI_ROOTS`.
+    session_trace: None,
     capabilities: Capabilities {
         focus: true,
         desktop_identity: true,
@@ -298,6 +313,11 @@ pub static CODEX: AppSpec = AppSpec {
         file: "auth.json",
         pointer: &["tokens", "account_id"],
     }),
+    // The one app whose sessions land inside the profile, because `CODEX_HOME`
+    // above moves its whole state root there. A profile-launched Codex is
+    // therefore observable per profile rather than only through the home
+    // directory.
+    session_trace: Some("sessions"),
     capabilities: Capabilities {
         focus: true,
         desktop_identity: true,
@@ -331,6 +351,7 @@ pub static CURSOR: AppSpec = AppSpec {
     },
     shared_config: None,
     identity: None,
+    session_trace: None,
     capabilities: Capabilities {
         focus: true,
         desktop_identity: true,
@@ -358,6 +379,7 @@ pub static DEVIN: AppSpec = AppSpec {
     },
     shared_config: None,
     identity: None,
+    session_trace: None,
     capabilities: Capabilities {
         focus: true,
         desktop_identity: true,
@@ -397,6 +419,7 @@ pub static WINDSURF: AppSpec = AppSpec {
     },
     shared_config: None,
     identity: None,
+    session_trace: None,
     capabilities: Capabilities {
         focus: true,
         desktop_identity: true,
@@ -423,6 +446,7 @@ pub static T3_CODE: AppSpec = AppSpec {
     },
     shared_config: None,
     identity: None,
+    session_trace: None,
     capabilities: Capabilities {
         focus: true,
         desktop_identity: true,
@@ -450,6 +474,7 @@ pub static VS_CODE: AppSpec = AppSpec {
     },
     shared_config: None,
     identity: None,
+    session_trace: None,
     capabilities: Capabilities {
         focus: true,
         desktop_identity: true,
