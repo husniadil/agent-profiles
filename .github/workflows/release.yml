@@ -3,7 +3,10 @@ name: Release
 on:
   push:
     tags: ["v*"]
-  # Lets you rehearse the whole matrix without publishing anything.
+  # Rehearses the whole matrix without publishing anything: the release inputs
+  # below are supplied only on a tag push, and with none of them set the action
+  # builds every bundle and then skips all uploads. The bundles come back as
+  # workflow artifacts, which expire on their own.
   workflow_dispatch:
 
 jobs:
@@ -32,7 +35,7 @@ jobs:
             rust-targets: ""
 
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
       - name: Install Linux system dependencies
         if: matrix.os == 'ubuntu-22.04'
@@ -59,22 +62,28 @@ jobs:
         with:
           workspaces: src-tauri
 
-      - uses: pnpm/action-setup@v4
-        with:
-          version: 9
+      # No version pinned here: the action reads `packageManager` from
+      # package.json, so CI installs the pnpm the repo declares rather than a
+      # number that has to be remembered in two places.
+      - uses: pnpm/action-setup@v6
 
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@v7
         with:
-          node-version: 20
+          node-version: 26
           cache: pnpm
 
       - run: pnpm install --frozen-lockfile
 
-      - uses: tauri-apps/tauri-action@v0
+      - uses: tauri-apps/tauri-action@v1
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         with:
-          tagName: ${{ github.ref_name }}
+          # This is the switch between publishing and rehearsing. On a tag push
+          # it is the tag; on `workflow_dispatch` it is empty, and the action
+          # builds everything and then skips all uploads instead of opening a
+          # draft release named after the branch it was dispatched from. Every
+          # release input below is inert without it.
+          tagName: ${{ github.event_name == 'push' && github.ref_name || '' }}
           releaseName: Agent Profiles ${{ github.ref_name }}
           # Every artifact here is unsigned, so say so where people download it
           # rather than letting the OS tell them the app is "damaged".
@@ -90,3 +99,6 @@ jobs:
           releaseDraft: true
           prerelease: false
           args: ${{ matrix.args }}
+          # Only on a rehearsal, where there is no release to hold the bundles.
+          # A tag push has one, and uploading twice would just cost bandwidth.
+          uploadWorkflowArtifacts: ${{ github.event_name != 'push' }}
