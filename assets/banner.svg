@@ -17,11 +17,19 @@
   <rect width="1280" height="400" fill="url(#bg)"/>
   <circle cx="1120" cy="90" r="380" fill="url(#glow)"/>
 
-  <!-- Brand mark: the stacked, slightly askew squares from the app header. -->
-  <g transform="translate(96 132)">
-    <rect x="10" y="14" width="112" height="112" rx="6" fill="#f4f0e8" opacity="0.92" transform="rotate(-5 66 70)"/>
-    <rect x="0" y="0" width="112" height="112" rx="6" fill="#dd6b32" transform="rotate(3 56 56)"/>
-    <text x="56" y="74" font-family="Georgia, 'Times New Roman', serif" font-size="58" font-weight="700" fill="#fffaf2" text-anchor="middle">ap</text>
+  <!-- Brand mark: the app and tray icon, unchanged — two stacked profile
+       cards carrying the AI sparkle, on the orange tile. -->
+  <g transform="translate(96 126) scale(0.146)">
+    <rect x="32" y="32" width="960" height="960" rx="220" fill="#dd6b32"/>
+    <mask id="behind">
+      <rect width="1024" height="1024" fill="#fff"/>
+      <rect x="215" y="391" width="472" height="472" rx="132" fill="#000"/>
+    </mask>
+    <g fill="none" stroke="#fffaf2" stroke-width="52">
+      <rect x="391" y="215" width="392" height="392" rx="104" mask="url(#behind)"/>
+      <rect x="241" y="417" width="392" height="392" rx="104"/>
+    </g>
+    <path d="M 437 499 Q 471 584 557 619 Q 471 653 437 739 Q 403 653 317 619 Q 403 584 437 499 Z" fill="#fffaf2"/>
   </g>
 
   <text x="266" y="150" font-family="Georgia, 'Times New Roman', serif" font-size="78" font-weight="700" fill="#f4f0e8" letter-spacing="-2">Agent Profiles</text>
