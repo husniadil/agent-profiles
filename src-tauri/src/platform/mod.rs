@@ -444,3 +444,55 @@ mod tests {
         assert_eq!(wm_class("claude", "abc"), "agent-profiles-claude-abc");
     }
 }
+
+/// Reading the machine's real thermal state, which no unit test can reach.
+///
+/// [`Thermal::is_danger`] is pure and covered, but the binding under it is not:
+/// a mistake there — asking the wrong object, mapping the levels the wrong way
+/// round — would compile, pass every test, and silently never fire. This is the
+/// only thing that catches that, and it needs real hardware.
+///
+/// Run it as it stands to see what the machine reports now:
+///
+/// ```text
+/// cargo test -- --ignored thermal --nocapture
+/// ```
+///
+/// macOS ships `/usr/bin/thermal`, which can push the system into a state a
+/// laptop on a desk will not reach on its own. It needs `sudo`, so it is not run
+/// from here; the levels map onto Apple's four as nominal → `Nominal`,
+/// moderate → `Fair`, heavy → `Serious`, trapping/sleeping → `Critical`.
+///
+/// ```text
+/// sudo thermal simulate cpu heavy      # expect Serious, is_danger() == true
+/// cargo test -- --ignored thermal --nocapture
+/// sudo thermal simulate cpu nominal    # put it back
+/// ```
+#[cfg(all(test, target_os = "macos"))]
+mod thermal_probe {
+    #[test]
+    #[ignore = "reads the live system thermal state; see the module docs"]
+    fn what_the_system_reports_right_now() {
+        let state = super::current().thermal();
+        println!("  thermal()   = {state:?}");
+        println!("  is_danger() = {}", state.is_danger());
+        println!(
+            "  a hold would be {}",
+            if state.is_danger() {
+                "RELEASED"
+            } else {
+                "allowed"
+            }
+        );
+
+        // The one thing worth failing on: a build that cannot read the state at
+        // all. That is the shape the mistake takes — the guard compiles, reports
+        // `Unknown` forever, and never fires.
+        assert_ne!(
+            state,
+            super::Thermal::Unknown,
+            "macOS must report a real thermal state; `Unknown` here means the \
+             NSProcessInfo binding is not working and the guard can never fire"
+        );
+    }
+}
