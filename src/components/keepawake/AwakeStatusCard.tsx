@@ -1,5 +1,4 @@
 import { AlertTriangle, Moon, ShieldCheck } from "lucide-react";
-import type { ReactNode } from "react";
 
 import { Button } from "@/components/motion/button/base";
 import type { KeepAwake } from "@/hooks/useKeepAwake";
@@ -59,6 +58,13 @@ export function formatDuration(seconds: number): string {
   return `${Math.floor(minutes / 60)}h ${minutes % 60}m`;
 }
 
+/// The first band of the settings card: what is true right now, and the one
+/// action that changes it when there is one.
+///
+/// A band rather than a card of its own. The panel already sits inside the same
+/// bordered shell the compose card uses on the other tab, and a second box
+/// inside it would be a card in a card — which is why this returns bare rows
+/// and lets the parent own the border.
 export function AwakeStatusCard({
   status,
   keepAwake,
@@ -71,25 +77,27 @@ export function AwakeStatusCard({
   // feature the user has not turned on yet.
   if (!status.supported) {
     return (
-      <Notice icon={<Moon size={14} aria-hidden="true" />} tone="text-ink-2" title="Not available here">
+      <Band
+        icon={<Moon size={13} aria-hidden="true" className="mt-0.5 shrink-0" />}
+        tone="text-ink-2"
+        title="Not available here"
+      >
         {status.refusal ??
           "Holding the lid closed needs macOS. On Windows and Linux the lid action belongs to the system power plan, with no way for an app to override it."}
-      </Notice>
+      </Band>
     );
   }
 
   if (status.stranded) {
     return (
-      <Notice
-        icon={<AlertTriangle size={14} aria-hidden="true" />}
+      <Band
+        icon={<AlertTriangle size={13} aria-hidden="true" className="mt-0.5 shrink-0" />}
         tone="text-warning"
         title="Your Mac may not be able to sleep"
       >
-        <p>
-          Agent Profiles ended unexpectedly while holding the lid-closed state, and that setting
-          survives a restart.
-        </p>
-        <div className="mt-1.5 flex flex-wrap items-center gap-2.5">
+        Agent Profiles ended unexpectedly while holding the lid-closed state, and that setting
+        survives a restart.
+        <span className="mt-1.5 flex flex-wrap items-center gap-2.5">
           <Button
             size="sm"
             className={CONTROL}
@@ -102,80 +110,73 @@ export function AwakeStatusCard({
               rather not hand this app a password should still leave knowing
               exactly how to fix their machine. */}
           <code className="font-mono text-sub text-ink-3">sudo pmset -a disablesleep 0</code>
-        </div>
-      </Notice>
+        </span>
+      </Band>
     );
   }
 
   if (!status.authorized) {
     return (
-      <Notice
-        icon={<ShieldCheck size={14} aria-hidden="true" />}
+      <Band
+        icon={<ShieldCheck size={13} aria-hidden="true" className="mt-0.5 shrink-0" />}
         tone="text-ink-2"
         title="Not yet authorized"
       >
-        <p>
-          Needs an administrator password once per run. A helper turns the setting on while an agent
-          works, off when it stops, and shuts down with Agent Profiles.
-        </p>
-        <Button
-          size="sm"
-          className={`${CONTROL} mt-1.5`}
-          disabled={keepAwake.busy}
-          onClick={() => void keepAwake.authorize()}
-        >
-          Authorize…
-        </Button>
-      </Notice>
+        Needs an administrator password once per run. A helper turns the setting on while an agent
+        works, off when it stops, and shuts down with Agent Profiles.
+        <span className="mt-1.5 flex">
+          <Button
+            size="sm"
+            className={CONTROL}
+            disabled={keepAwake.busy}
+            onClick={() => void keepAwake.authorize()}
+          >
+            Authorize…
+          </Button>
+        </span>
+      </Band>
     );
   }
 
-  // Nothing to act on, so nothing that looks like it. A bordered, shadowed card
-  // here would outrank the trigger below it — and the trigger is the control,
-  // while this is only the readout. The box is reserved for the three states
-  // above, which do want something from the reader.
   const phase = PHASES[status.phase];
   return (
-    <div className="flex flex-col gap-0.5">
-      <p className={`flex items-center gap-1.5 text-callout ${phase.tone}`}>
-        <span aria-hidden="true" className={`size-1.5 shrink-0 rounded-full ${phase.dot}`} />
-        {phase.title}
-      </p>
-      <p className="text-sub text-ink-2">
-        {phase.detail}{" "}
-        <span className="text-ink-3">
-          {status.battery_percent === null
-            ? "No battery"
-            : `Battery ${status.battery_percent}%${status.on_external_power ? ", plugged in" : ""}`}
-          {status.held_for_secs > 0 ? ` · held ${formatDuration(status.held_for_secs)}` : ""}
-        </span>
-      </p>
-    </div>
+    <Band
+      icon={<span aria-hidden="true" className={`mt-1.5 size-1.5 shrink-0 rounded-full ${phase.dot}`} />}
+      tone={phase.tone}
+      title={phase.title}
+    >
+      {phase.detail}{" "}
+      <span className="text-ink-3">
+        {status.battery_percent === null
+          ? "No battery"
+          : `Battery ${status.battery_percent}%${status.on_external_power ? ", plugged in" : ""}`}
+        {status.held_for_secs > 0 ? ` · held ${formatDuration(status.held_for_secs)}` : ""}
+      </span>
+    </Band>
   );
 }
 
-/// The boxed form, for the states that want something from the reader.
-/// Same shell as the compose card on the other tab — same radius, same padding,
-/// same hairline, same shadow — so a panel that asks for something looks the
-/// same in both places.
-function Notice({
+/// Title over detail, with the marker in a fixed 14px gutter so every state
+/// lines its text up at the same left edge — a dot and an icon are different
+/// widths, and without the gutter the sentence shifts when the state changes.
+function Band({
   icon,
   tone,
   title,
   children,
 }: {
-  icon: ReactNode;
+  icon: React.ReactNode;
   tone: string;
   title: string;
-  children: ReactNode;
+  children: React.ReactNode;
 }) {
   return (
-    <section className="rounded-xl border border-hairline bg-surface p-2.5 shadow-card">
-      <p className={`flex items-center gap-1.5 text-callout font-medium ${tone}`}>
-        {icon}
-        {title}
-      </p>
-      <div className="mt-1 text-sub text-ink-2">{children}</div>
-    </section>
+    <div className="flex gap-1.5">
+      <span className={`flex w-3.5 shrink-0 justify-center ${tone}`}>{icon}</span>
+      <div className="min-w-0 flex-1">
+        <p className={`text-callout font-medium ${tone}`}>{title}</p>
+        <p className="mt-0.5 text-sub text-ink-2">{children}</p>
+      </div>
+    </div>
   );
 }
