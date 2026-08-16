@@ -43,25 +43,22 @@ export function WatchList({
             className="flex items-center justify-between gap-3 text-sub"
           >
             <span className="flex min-w-0 items-center gap-1.5">
-              {/* The ring is the only thing on this tab that moves on its own,
-                  and it earns that by marking the one condition the whole
-                  feature turns on: an agent working right now. Idle rows get a
-                  flat dot, so the motion is the signal rather than decoration. */}
-              <span className="relative flex size-1.5 shrink-0 items-center justify-center">
-                {active ? (
-                  <span
-                    aria-hidden="true"
-                    // Hidden outright under reduced motion rather than slowed:
-                    // the tag beside it already says "working", so removing the
-                    // ring costs the reader nothing.
-                    className="absolute inset-0 rounded-full bg-live animate-live-ping motion-reduce:hidden"
-                  />
-                ) : null}
-                <span
-                  aria-hidden="true"
-                  className={`relative size-1.5 rounded-full ${active ? "bg-live" : "bg-ink-4"}`}
-                />
-              </span>
+              {/* The only thing on this tab that moves on its own, and it earns
+                  that by marking the one condition the whole feature turns on:
+                  an agent working right now. Idle rows get a flat dot, so the
+                  beat is the signal rather than decoration.
+
+                  Stopped, not slowed, under reduced motion: the tag beside it
+                  already says "working", so holding the dot still costs the
+                  reader nothing. */}
+              <span
+                aria-hidden="true"
+                className={`size-1.5 shrink-0 rounded-full ${
+                  active
+                    ? "bg-live animate-live-heartbeat motion-reduce:animate-none"
+                    : "bg-ink-4"
+                }`}
+              />
               <span className="truncate text-ink-2">{root.label}</span>
               {/* The same chip a running profile carries on the other tab.
                   "Running" and "Working" are the same kind of claim, and the

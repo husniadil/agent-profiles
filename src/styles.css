@@ -156,25 +156,33 @@
   /* Ease-out-quint. No bounce, no elastic — this is a tool, not a toy. */
   --ease-out-quint: cubic-bezier(0.22, 1, 0.36, 1);
 
-  /* A ring leaving a live dot, once every two seconds. Slow on purpose: this
-     marks an agent that is working, which is a condition lasting minutes, so
-     the motion has to read as a heartbeat rather than as something demanding
-     attention. Tailwind's own `animate-ping` is twice as fast and goes to
-     scale 2 with a hard stop; this eases out and rests. */
-  --animate-live-ping: live-ping 2s cubic-bezier(0.22, 1, 0.36, 1) infinite;
+  /* A heartbeat on the dot that marks a working agent. Two beats and a long
+     rest, not a steady blink: the rest is what makes it read as alive rather
+     than as a warning light, and it is why the cycle is slow enough to sit in
+     the corner of the eye for the minutes an agent actually runs.
+
+     Opacity carries it, not scale. The dot is 6px, so a scale pulse large
+     enough to see would also be large enough to shift the row. */
+  --animate-live-heartbeat: live-heartbeat 2.4s ease-in-out infinite;
 }
 
-@keyframes live-ping {
-  0% {
-    transform: scale(1);
-    opacity: 0.5;
+@keyframes live-heartbeat {
+  /* lub */
+  0%,
+  20% {
+    opacity: 1;
   }
-  /* Faded well before the cycle ends, so the ring is a pulse with a pause
-     rather than a continuously throbbing dot. */
-  70%,
+  10% {
+    opacity: 0.3;
+  }
+  /* dub, softer, the way the second sound of a heartbeat is */
+  30% {
+    opacity: 0.45;
+  }
+  /* and then the long rest, which is most of the cycle */
+  40%,
   100% {
-    transform: scale(2.6);
-    opacity: 0;
+    opacity: 1;
   }
 }
 
