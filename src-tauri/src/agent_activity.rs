@@ -17,6 +17,38 @@ const CLI_ROOTS: &[(&str, &str)] = &[
     ("Codex CLI", ".codex/sessions"),
 ];
 
+/// Claude Code keeps one directory per project under its root, so its sessions
+/// can be listed individually. Verified against a real installation; Codex's
+/// layout has not been, so it stays a single row rather than a guessed one —
+/// the same rule `Locations` follows for a platform nobody has checked.
+const CLAUDE_PROJECTS: &str = ".claude/projects";
+
+/// How far back a session is still worth listing.
+///
+/// The list answers "is the agent I care about seen, and is it seen as
+/// working". A session nobody has touched in a week answers neither, and on a
+/// real machine eleven of them buried the two that did.
+const RECENT: Duration = Duration::from_secs(7 * 24 * 60 * 60);
+
+/// The most sessions shown at once, newest first.
+///
+/// Capping the display cannot hide a working session from the decision: the
+/// newest N always contains every session fresh enough to count as working.
+const MAX_SESSIONS: usize = 6;
+
+/// How much of a transcript is read to find the directory it runs in.
+///
+/// `cwd` sits in the first record or two — measured at byte 704 on a real
+/// session — so this is one small read, not a parse of a file that reaches
+/// megabytes.
+const LABEL_PROBE_BYTES: usize = 8192;
+
+/// How many transcripts in a project are tried before giving up on a label.
+///
+/// The newest file in a project is sometimes a short one carrying no `cwd` at
+/// all, which is how two real projects ended up labelled with their raw slug.
+const LABEL_PROBE_FILES: usize = 3;
+
 /// How deep a session root is walked.
 ///
 /// Both known layouts are `<root>/<project>/<session file>`, so two levels
@@ -45,14 +77,115 @@ pub struct Freshness {
     pub seconds_ago: Option<u64>,
 }
 
-pub fn cli_roots(home: &Path) -> Vec<Root> {
-    CLI_ROOTS
-        .iter()
-        .map(|(label, rest)| Root {
-            label: (*label).to_string(),
-            path: home.join(rest),
+/// The directory a session runs in, taken from the head of its transcript.
+///
+/// Claude Code records `cwd` on nearly every entry, and the folder is what a
+/// person actually calls the thing they are working on. The alternative is the
+/// directory slug — `-Users-yudha-Documents--develop-Personal-AMBBU-AMS` —
+/// which cannot be reversed, because `-` there stands for both a path separator
+/// and a literal hyphen in a name.
+///
+/// Two segments, not one. A real machine listed `Source` twice, from
+/// `VMMP2025/Source` and `PMOP.net/Source`, which is exactly the ambiguity this
+/// list exists to remove.
+fn label_from_transcript(transcript: &Path) -> Option<String> {
+    use std::io::Read;
+
+    let mut head = vec![0u8; LABEL_PROBE_BYTES];
+    let read = std::fs::File::open(transcript).ok()?.read(&mut head).ok()?;
+    let text = String::from_utf8_lossy(&head[..read]);
+
+    // A capped read almost always cuts its last line in half, so a line that
+    // will not parse is skipped rather than ending the search.
+    let cwd = text
+        .lines()
+        .filter_map(|line| serde_json::from_str::<serde_json::Value>(line).ok())
+        .find_map(|record| Some(record.get("cwd")?.as_str()?.to_string()))?;
+
+    let parts: Vec<_> = Path::new(&cwd)
+        .components()
+        .filter_map(|c| match c {
+            std::path::Component::Normal(name) => Some(name.to_string_lossy().into_owned()),
+            _ => None,
         })
-        .collect()
+        .collect();
+    match parts.len() {
+        0 => None,
+        1 => Some(parts[0].clone()),
+        n => Some(format!("{}/{}", parts[n - 2], parts[n - 1])),
+    }
+}
+
+/// One row per Claude Code project, newest first.
+///
+/// Replaces a single "Claude Code" row that aggregated every session on the
+/// machine while being drawn as though it described one. Stopping the session
+/// you were watching left it green, on behalf of a session in another project
+/// that the row had no way to name.
+fn claude_sessions(root: &Path, now: SystemTime) -> Vec<Root> {
+    let Ok(entries) = std::fs::read_dir(root) else {
+        return Vec::new();
+    };
+
+    let mut found: Vec<(Duration, Root)> = entries
+        .flatten()
+        .filter(|entry| entry.path().is_dir())
+        .filter_map(|entry| {
+            let project = entry.path();
+            // Only the transcripts directly inside the project directory. The
+            // `subagents` folder beneath it belongs to a session already counted
+            // by its parent, and would otherwise list the same work twice.
+            let mut transcripts: Vec<(SystemTime, PathBuf)> = std::fs::read_dir(&project)
+                .ok()?
+                .flatten()
+                .filter(|file| file.path().extension().is_some_and(|ext| ext == "jsonl"))
+                .filter_map(|file| {
+                    Some((file.path().metadata().ok()?.modified().ok()?, file.path()))
+                })
+                .collect();
+            transcripts.sort_by_key(|(at, _)| std::cmp::Reverse(*at));
+
+            let (newest, _) = transcripts.first()?;
+            let age = now.duration_since(*newest).unwrap_or_default();
+            if age > RECENT {
+                return None;
+            }
+
+            let label = transcripts
+                .iter()
+                .take(LABEL_PROBE_FILES)
+                .find_map(|(_, path)| label_from_transcript(path))
+                .unwrap_or_else(|| entry.file_name().to_string_lossy().into_owned());
+
+            Some((
+                age,
+                Root {
+                    label,
+                    path: project,
+                },
+            ))
+        })
+        .collect();
+
+    found.sort_by_key(|(age, _)| *age);
+    found.truncate(MAX_SESSIONS);
+    found.into_iter().map(|(_, root)| root).collect()
+}
+
+pub fn cli_roots(home: &Path) -> Vec<Root> {
+    let mut roots = claude_sessions(&home.join(CLAUDE_PROJECTS), SystemTime::now());
+    // Everything else stays one row. Listing a layout nobody has verified would
+    // be inventing it, and one honest row beats several wrong ones.
+    roots.extend(
+        CLI_ROOTS
+            .iter()
+            .filter(|(_, rest)| *rest != CLAUDE_PROJECTS)
+            .map(|(label, rest)| Root {
+                label: (*label).to_string(),
+                path: home.join(rest),
+            }),
+    );
+    roots
 }
 
 /// How long ago the newest file anywhere under `root` was modified.
@@ -211,10 +344,176 @@ mod tests {
     }
 
     #[test]
-    fn the_cli_roots_are_the_two_agents_that_write_transcripts() {
+    fn a_home_with_no_claude_sessions_still_watches_the_other_agent() {
         let roots = cli_roots(Path::new("/Users/h"));
         let paths: Vec<_> = roots.iter().map(|r| r.path.clone()).collect();
-        assert!(paths.contains(&PathBuf::from("/Users/h/.claude/projects")));
         assert!(paths.contains(&PathBuf::from("/Users/h/.codex/sessions")));
+    }
+
+    /// Writes one Claude Code project directory holding one transcript.
+    fn project(home: &Path, slug: &str, cwd: Option<&str>, now: SystemTime, ago: Duration) {
+        let dir = home.join(".claude/projects").join(slug);
+        std::fs::create_dir_all(&dir).unwrap();
+        let file = dir.join("11111111-2222-3333-4444-555555555555.jsonl");
+        let body = match cwd {
+            Some(cwd) => format!("{{\"type\":\"user\",\"cwd\":\"{cwd}\"}}\n"),
+            None => "{\"type\":\"summary\"}\n".to_string(),
+        };
+        std::fs::write(&file, body).unwrap();
+        let when = std::fs::FileTimes::new().set_modified(now - ago);
+        std::fs::File::options()
+            .write(true)
+            .open(&file)
+            .unwrap()
+            .set_times(when)
+            .unwrap();
+    }
+
+    #[test]
+    fn each_claude_project_is_its_own_row() {
+        // The defect this replaces: one "Claude Code" row aggregated every
+        // session on the machine, so stopping the one you were watching left it
+        // green on behalf of a session in another project.
+        let d = tempfile::tempdir().unwrap();
+        let now = SystemTime::now();
+        project(
+            d.path(),
+            "-a",
+            Some("/Users/y/work/alpha"),
+            now,
+            Duration::from_secs(2),
+        );
+        project(
+            d.path(),
+            "-b",
+            Some("/Users/y/work/beta"),
+            now,
+            Duration::from_secs(90),
+        );
+
+        let labels: Vec<_> = cli_roots(d.path())
+            .iter()
+            .map(|r| r.label.clone())
+            .collect();
+        assert!(labels.contains(&"work/alpha".to_string()), "got {labels:?}");
+        assert!(labels.contains(&"work/beta".to_string()), "got {labels:?}");
+    }
+
+    #[test]
+    fn two_projects_ending_in_the_same_folder_stay_distinguishable() {
+        // Seen on a real machine: `VMMP2025/Source` and `PMOP.net/Source` both
+        // reduced to "Source", which is the exact ambiguity this list exists to
+        // remove.
+        let d = tempfile::tempdir().unwrap();
+        let now = SystemTime::now();
+        project(
+            d.path(),
+            "-v",
+            Some("/Users/y/VMMP2025/Source"),
+            now,
+            Duration::from_secs(5),
+        );
+        project(
+            d.path(),
+            "-p",
+            Some("/Users/y/PMOP.net/Source"),
+            now,
+            Duration::from_secs(6),
+        );
+
+        let labels: Vec<_> = cli_roots(d.path())
+            .iter()
+            .map(|r| r.label.clone())
+            .collect();
+        assert!(
+            labels.contains(&"VMMP2025/Source".to_string()),
+            "got {labels:?}"
+        );
+        assert!(
+            labels.contains(&"PMOP.net/Source".to_string()),
+            "got {labels:?}"
+        );
+    }
+
+    #[test]
+    fn the_newest_session_is_listed_first() {
+        let d = tempfile::tempdir().unwrap();
+        let now = SystemTime::now();
+        project(
+            d.path(),
+            "-a",
+            Some("/Users/y/w/older"),
+            now,
+            Duration::from_secs(3600),
+        );
+        project(
+            d.path(),
+            "-b",
+            Some("/Users/y/w/newer"),
+            now,
+            Duration::from_secs(5),
+        );
+
+        assert_eq!(cli_roots(d.path())[0].label, "w/newer");
+    }
+
+    #[test]
+    fn a_session_nobody_has_touched_in_a_week_is_not_listed() {
+        let d = tempfile::tempdir().unwrap();
+        let now = SystemTime::now();
+        project(
+            d.path(),
+            "-old",
+            Some("/Users/y/w/ancient"),
+            now,
+            RECENT + Duration::from_secs(60),
+        );
+
+        let labels: Vec<_> = cli_roots(d.path())
+            .iter()
+            .map(|r| r.label.clone())
+            .collect();
+        assert!(!labels.contains(&"w/ancient".to_string()), "got {labels:?}");
+    }
+
+    #[test]
+    fn no_more_than_a_screenful_of_sessions_is_listed() {
+        let d = tempfile::tempdir().unwrap();
+        let now = SystemTime::now();
+        for i in 0..12 {
+            project(
+                d.path(),
+                &format!("-p{i}"),
+                Some(&format!("/Users/y/w/p{i}")),
+                now,
+                Duration::from_secs(i + 1),
+            );
+        }
+        // Capping the display cannot hide a working session: the newest N always
+        // contains every session fresh enough to count.
+        assert_eq!(cli_roots(d.path()).len() - 1, MAX_SESSIONS);
+    }
+
+    #[test]
+    fn a_transcript_with_no_cwd_falls_back_to_its_directory_name() {
+        // The slug cannot be reversed — `-` is both a separator and a literal —
+        // so it is shown as-is rather than mangled into a wrong guess.
+        let d = tempfile::tempdir().unwrap();
+        project(
+            d.path(),
+            "-Users-y-thing",
+            None,
+            SystemTime::now(),
+            Duration::from_secs(5),
+        );
+
+        let labels: Vec<_> = cli_roots(d.path())
+            .iter()
+            .map(|r| r.label.clone())
+            .collect();
+        assert!(
+            labels.contains(&"-Users-y-thing".to_string()),
+            "got {labels:?}"
+        );
     }
 }
