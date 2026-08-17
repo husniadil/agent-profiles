@@ -179,7 +179,6 @@ export const id: Strings = {
   "general.update.idle": "Belum diperiksa.",
   "general.update.checking": "Memeriksa pembaruan…",
   "general.update.current": "Sudah versi terbaru.",
-  "general.update.found": "Versi {{version}} tersedia.",
   "general.update.downloading": "Mengunduh… {{percent}}%",
   "general.update.installing": "Memasang, lalu memulai ulang…",
   "general.update.failed": "Tidak dapat memperbarui: {{reason}}",

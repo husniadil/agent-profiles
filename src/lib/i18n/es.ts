@@ -177,7 +177,6 @@ export const es: Strings = {
   "general.update.idle": "Aún no se ha comprobado.",
   "general.update.checking": "Buscando actualizaciones…",
   "general.update.current": "Actualizado.",
-  "general.update.found": "La versión {{version}} está disponible.",
   "general.update.downloading": "Descargando… {{percent}}%",
   "general.update.installing": "Instalando y reiniciando…",
   "general.update.failed": "No se pudo actualizar: {{reason}}",

@@ -177,7 +177,6 @@ export const pt: Strings = {
   "general.update.idle": "Ainda não verificado.",
   "general.update.checking": "Verificando atualizações…",
   "general.update.current": "Atualizado.",
-  "general.update.found": "A versão {{version}} está disponível.",
   "general.update.downloading": "Baixando… {{percent}}%",
   "general.update.installing": "Instalando, depois reiniciando…",
   "general.update.failed": "Não foi possível atualizar: {{reason}}",

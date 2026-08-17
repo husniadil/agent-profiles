@@ -179,7 +179,6 @@ export const ja: Strings = {
   "general.update.idle": "まだ確認していません。",
   "general.update.checking": "更新を確認中…",
   "general.update.current": "最新の状態です。",
-  "general.update.found": "バージョン {{version}} が利用可能です。",
   "general.update.downloading": "ダウンロード中… {{percent}}%",
   "general.update.installing": "インストール中、その後再起動します…",
   "general.update.failed": "更新できませんでした: {{reason}}",

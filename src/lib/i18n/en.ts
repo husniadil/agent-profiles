@@ -187,7 +187,6 @@ export const en = {
   "general.update.idle": "Not checked yet.",
   "general.update.checking": "Checking for updates…",
   "general.update.current": "Up to date.",
-  "general.update.found": "Version {{version}} is available.",
   "general.update.downloading": "Downloading… {{percent}}%",
   "general.update.installing": "Installing, then restarting…",
   "general.update.failed": "Could not update: {{reason}}",

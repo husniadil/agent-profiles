@@ -1,3 +1,4 @@
+import { UpdateCard } from "@/components/general/UpdateCard";
 import {
   Select,
   SelectContent,
@@ -8,6 +9,7 @@ import {
 import { Switch } from "@/components/motion/switch";
 import type { Autostart } from "@/hooks/useAutostart";
 import type { General } from "@/hooks/useGeneral";
+import { useUpdater } from "@/hooks/useUpdater";
 import type { Locale } from "@/lib/api";
 import { SWITCH } from "@/lib/controls";
 import { LOCALE_NAMES, useT } from "@/lib/i18n";
@@ -32,6 +34,7 @@ export function GeneralTab({
   autostart: Autostart;
 }) {
   const t = useT();
+  const updater = useUpdater(general.settings?.autoUpdate);
 
   if (!general.settings) {
     // Blank rather than a spinner, matching `KeepAwakeTab`: the first read lands
@@ -50,7 +53,12 @@ export function GeneralTab({
       className="flex min-h-0 flex-1 flex-col gap-2 overflow-y-auto p-2"
     >
       <div className={CARD}>
-        <div className={BAND}>
+        {/* Updating is the setting someone opens this tab for; the language
+            picker is the one they set once. */}
+        <div className="grid grid-cols-[1fr_auto] items-center gap-x-4 gap-y-2.5 p-2.5">
+          <UpdateCard general={general} updater={updater} />
+        </div>
+        <div className={`${BAND} ${DIVIDED}`}>
           <div>
             <p className="text-callout text-ink">{t("general.language.label")}</p>
             <p className="text-sub text-ink-2">{t("general.language.detail")}</p>
@@ -101,9 +109,6 @@ export function GeneralTab({
             ariaLabel={t("autostart.aria")}
           />
         </div>
-        {/* The update band lands here in Task 12. The divider class is defined
-            now so that task is one insertion rather than a restructure. */}
-        <div className={`${BAND} ${DIVIDED} hidden`} />
       </div>
     </section>
   );
