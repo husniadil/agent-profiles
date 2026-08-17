@@ -2,6 +2,20 @@
 
 Notable changes, newest first. This project follows [Semantic Versioning](https://semver.org).
 
+## [Unreleased]
+
+A General tab, carrying a silent updater and six languages for the window and the tray.
+
+### Added
+
+- **Silent auto-update from this project's own GitHub releases.** Once per launch, and on demand from a **Check now** button, the app checks, downloads, installs and relaunches with no dialog in between — the setting this project needs, since a tray app nobody opens is exactly the app that stops getting fixes. Off is a real off: no request to GitHub is made at any point, not a check whose result is ignored. The update manifest is verified against a minisign signature carried alongside it, entirely separate from OS code signing — the release bundles stay unsigned, and installing one still needs the same right-click-Open or SmartScreen bypass described under **Installing a release build**.
+- **A six-language interface** — English, Bahasa Indonesia, 日本語, Deutsch, Español and Português — covering the window and the tray menu together, since a picker that only translates one of them would leave the other looking like it forgot. The default follows the operating system's own language and falls back to English for anything else; an explicit choice overrides it and is remembered across restarts. Switching takes effect immediately, with no restart, in both surfaces at once.
+
+### Changed
+
+- **Start at login moved into the General tab**, alongside the new update and language rows, rather than sitting on its own beside the profile list. All three are settings about how the app itself behaves rather than about a profile, and now live together.
+- Every visible string in the window now comes from a typed dictionary rather than being written inline in JSX; a locale file missing a key fails `pnpm build`, so a translation cannot ship incomplete.
+
 ## [0.4.0] — 2026-08-17
 
 An agent can now finish its work with the lid shut. Off by default, and it asks for nothing until you turn it on.
