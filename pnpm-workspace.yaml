@@ -1,0 +1,6 @@
+# esbuild ships prebuilt platform binaries and its install script is what puts
+# the right one in place. Vite cannot bundle without it, so this is a build
+# dependency doing exactly what a build dependency does — not a package taking
+# liberties at install time.
+allowBuilds:
+  esbuild: true

@@ -45,6 +45,66 @@ export const socketBudget = (appId: string) => invoke<SocketBudget>("socket_budg
 export const autostartState = () => invoke<AutostartState>("autostart_state");
 export const setAutostart = (enabled: boolean) => invoke("set_autostart", { enabled });
 
+export type Trigger = "off" | "agent-active" | "always";
+
+export type Phase = "off" | "idle" | "holding" | "paused-low-battery" | "paused-too-hot";
+
+/// The system's own four-level reading, or Linux's sysfs zones banded to match.
+/// "unknown" is Windows, a machine with no readable sensor,
+/// and never counts as hot.
+export type Thermal = "unknown" | "nominal" | "fair" | "serious" | "critical";
+
+export type KeepAwakeSettings = {
+  trigger: Trigger;
+  idle_window_minutes: number;
+  battery_floor_percent: number;
+  /// Whether an overheating machine releases the hold. On by default, and on
+  /// for a settings file written before this existed.
+  thermal_guard: boolean;
+};
+
+/// One watched session root, how long ago anything under it was written, and
+/// whether the agent there is part-way through a turn.
+///
+/// `seconds_ago` is null when nothing ever has — never confused with zero.
+/// `mid_turn` is false only when a transcript positively says the turn ended; a
+/// root read by freshness alone is always true.
+export type Freshness = {
+  label: string;
+  path: string;
+  seconds_ago: number | null;
+  mid_turn: boolean;
+};
+
+export type KeepAwakeStatus = {
+  supported: boolean;
+  /// Whether this machine can report how hot it is. False means the thermal
+  /// guard is left out of the window rather than shown unable to fire.
+  thermal_supported: boolean;
+  /// Whether holding costs an administrator password. True only on macOS —
+  /// elsewhere the window shows no authorization step at all.
+  needs_authorization: boolean;
+  authorized: boolean;
+  stranded: boolean;
+  phase: Phase;
+  settings: KeepAwakeSettings;
+  roots: Freshness[];
+  battery_percent: number | null;
+  on_external_power: boolean;
+  thermal: Thermal;
+  held_for_secs: number;
+  refusal: string | null;
+  /// Why the last sweep could not make the flag match its decision. Non-null
+  /// means the machine is not being held whatever `phase` says.
+  hold_error: string | null;
+};
+
+export const keepAwakeStatus = () => invoke<KeepAwakeStatus>("keep_awake_status");
+export const setKeepAwake = (settings: KeepAwakeSettings) =>
+  invoke<KeepAwakeStatus>("set_keep_awake", { settings });
+export const authorizeKeepAwake = () => invoke<KeepAwakeStatus>("authorize_keep_awake");
+export const restoreSleep = () => invoke<KeepAwakeStatus>("restore_sleep");
+
 export function errorMessage(error: unknown): string {
   return error instanceof Error ? error.message : String(error);
 }

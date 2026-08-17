@@ -119,6 +119,24 @@ The operating system owns this setting — a login item on macOS, a registry ent
 
 The toggle is hidden in development builds. A login item registered from `pnpm tauri dev` would point at a `target/debug` binary that moves, gets rebuilt, and disappears on `cargo clean`, leaving an entry that fails silently at every boot.
 
+## Keep awake with the lid closed
+
+A long-running agent dies when you close the lid: macOS forces sleep on lid close unless the machine has both external power and an external display, and `caffeinate` cannot override that — it prevents *idle* sleep only. The one lever that works is the system-wide `pmset disablesleep` flag, which needs root.
+
+Agent Profiles holds that flag while an agent is working and gives it back when it stops. It is **off by default** and asks for nothing until you turn it on, in the management window's **Keep Awake** tab.
+
+**How it works.** When you click Authorize, the app runs a small shell loop as root — once per run of the app, one password prompt, never again. The loop watches two things: a flag file, and this app's process. Flag there, sleep is disabled; flag gone, sleep is restored. The loop exits when Agent Profiles does, so a crash or a force-quit cannot leave your Mac permanently unable to sleep. The loop is passed inline to `osascript` and never written to disk, because a script on disk that gets run as root is a way in for anything running as you.
+
+**What arms it.** Either *when an agent is working* — Claude Code and Codex append to a session transcript on every message and every tool result, so a transcript that moved recently means an agent is working, even while it sits at zero CPU waiting on the network — or *always while Agent Profiles runs*, which is the option for agents inside a desktop app, where there is nothing to observe. The tab lists the session folders being watched and how fresh each one is, so a trigger that did not fire is something you can look at rather than guess about.
+
+**What releases it.** The agent finishing, the battery falling below your threshold, the hold running past your time limit, or the app quitting. With the lid shut nothing can be reported to you, so the time limit is deliberately conservative rather than generous.
+
+**If a run ends badly.** `disablesleep` is persistent and survives a reboot, so a kernel panic or a power cut could otherwise leave a Mac that never sleeps again. The helper writes down who owned the setting before it can hold anything, and the next launch reads that note, reclaims the setting and offers a one-click **Restore sleep**. If you would rather not hand the app a password for it, the tab also prints the command: `sudo pmset -a disablesleep 0`.
+
+**What it does not do.** It disables *all* sleep while held, not only lid-close sleep — the Sleep menu item and low-power auto-sleep are blocked too. It does nothing on Windows or Linux, where the lid action is a system power-plan setting with no user-space override.
+
+**One thing worth knowing.** The flag file lives in your own Application Support folder and is writable by anything running as you, so any process of yours could pin the machine awake. This is not a privilege boundary — Agent Profiles runs as you — and the worst it costs is a flat battery, not root.
+
 ## Platform status
 
 CI compiles and tests all three platforms on their own runners, but the Windows and Linux tests only exercise parsing and path logic against fixtures — no one has ever launched this app on either. **Compiling is not running, and a passing unit test is not acceptance.** An unchecked box means the behavior has never been observed on real hardware, not that it is known to be broken.

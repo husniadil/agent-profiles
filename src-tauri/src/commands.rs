@@ -443,6 +443,96 @@ pub fn open_profile(
     Ok(())
 }
 
+#[tauri::command]
+pub fn keep_awake_status(
+    state: tauri::State<AppState>,
+) -> Result<crate::keep_awake::Status, String> {
+    Ok(state.keep_awake.status())
+}
+
+#[tauri::command]
+pub fn set_keep_awake(
+    state: tauri::State<AppState>,
+    settings: crate::keep_awake::Settings,
+) -> Result<crate::keep_awake::Status, String> {
+    state
+        .keep_awake
+        .set_settings(settings)
+        .map_err(|e| e.to_string())?;
+    Ok(state.keep_awake.status())
+}
+
+/// Asks for the administrator password, once, and starts the watchdog.
+///
+/// Explicitly a command rather than something `setup` does when the trigger is
+/// on: an unsigned app that users already have to right-click past a "damaged"
+/// warning to open, and which then asks for an admin password unprompted, is
+/// shaped exactly like a malware install. The prompt has to follow a click on a
+/// button that has already explained what it is for.
+#[tauri::command]
+pub fn authorize_keep_awake(
+    state: tauri::State<AppState>,
+) -> Result<crate::keep_awake::Status, String> {
+    let handle = &state.keep_awake;
+    if let Some(refusal) = crate::paths::unquotable_refusal(&handle.data_root) {
+        return Err(refusal);
+    }
+    let flag = crate::paths::keep_awake_flag(&handle.data_root);
+    let breadcrumb = crate::paths::keep_awake_breadcrumb(&handle.data_root);
+    // Read, not taken. The spawn below asks for a password and the user can
+    // cancel it; discarding the reclaim value before knowing whether a watchdog
+    // actually took it on would leave a stranded machine with nothing to put
+    // the setting back — and the retry would then adopt the stuck value as the
+    // user's own. It is forgotten only once a loop is running with it.
+    let reclaimed_prior = handle.reclaimed_prior();
+
+    state
+        .platform
+        .start_awake_watchdog(&crate::platform::Watchdog {
+            flag: &flag,
+            breadcrumb: &breadcrumb,
+            reclaimed_prior,
+            app_pid: std::process::id(),
+        })
+        .map_err(|e| e.to_string())?;
+
+    handle.clear_reclaimed_prior();
+    handle.mark_authorized();
+    Ok(handle.status())
+}
+
+/// Puts sleep back after a run that died holding it, without starting a
+/// watchdog. The way out for someone who does not want the feature on.
+///
+/// Disarms the trigger and drops the flag before restoring anything, because
+/// the way out has to stay out. It is tempting to argue that neither is needed
+/// — `stranded` and `authorized` cannot both be true inside one `Handle`, so
+/// this app's own sweep is writing a flag nothing is watching. That argument is
+/// about a process, and `disablesleep` is a machine. Nothing stops a second
+/// copy of the app running — `cargo tauri dev` beside the installed build is
+/// the likeliest way, and both derive the same data root from `$HOME`. The
+/// second copy's startup deletes the flag and the breadcrumb, so it reports a
+/// stranded machine while the first copy's root loop is still alive and still
+/// polling that same flag every three seconds. Pressing this button there put
+/// sleep back and the older loop took it away again within one poll, with the
+/// banner cleared and nothing on screen saying so.
+///
+/// So the order matters and each step earns its place: the trigger goes first
+/// or this app's own sweep rewrites the flag fifteen seconds later; the flag
+/// goes next because it is the only channel to a loop this process did not
+/// start and cannot see — removing it is what makes a *foreign* watchdog let
+/// go, since the loop is edge-triggered on the flag existing; and only then is
+/// the setting put back, so nothing can re-take it between those two lines.
+/// The body is in `keep_awake::restore`, where a test can reach it without a
+/// `tauri::State`. That is not tidiness: the invariant this used to lean on was
+/// asserted by a test that could not have observed it failing.
+#[tauri::command]
+pub fn restore_sleep(state: tauri::State<AppState>) -> Result<crate::keep_awake::Status, String> {
+    crate::keep_awake::restore(&state.keep_awake, state.platform.as_ref())
+        .map_err(|e| e.to_string())?;
+    Ok(state.keep_awake.status())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

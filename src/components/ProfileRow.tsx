@@ -3,52 +3,15 @@ import { ExternalLink, Pencil, Trash2 } from "lucide-react";
 
 import { ByteCount, PendingSize } from "@/components/Counters";
 import { IdentityChip } from "@/components/IdentityChip";
-import { AnimatedBadge } from "@/components/motion/animated-badge";
 import { Button } from "@/components/motion/button/base";
 import { PathText } from "@/components/PathText";
+import { StateTag } from "@/components/StateTag";
 import { DeletePanel, RenamePanel } from "@/components/RowPanel";
 import * as api from "@/lib/api";
 import type { ProfileView } from "@/lib/api";
-import { edge, readable, wash } from "@/lib/color";
 import { cn } from "@/lib/utils";
 
 type Panel = { kind: "none" } | { kind: "rename" } | { kind: "delete"; bytes: number };
-
-// beUI's badge is a 24px pill at 11px; a row this dense wants the smaller,
-// upper-case chip the window already reads in. The status colours it ships are
-// Tailwind's emerald and amber — this palette has its own, and they are set as
-// styles so the same token drives the tag, the dot and the meter.
-const TAG =
-  "h-auto rounded-full px-1.5 py-px text-caption tracking-[0.04em] uppercase";
-
-/// A fact about state, never about identity.
-///
-/// State is kept apart from the profile's own hue so a colour never has to mean
-/// two things at once: running is always the live green, a shared sign-in is
-/// always the warning amber, and neither one ever tints the identity chip.
-/// Colour is not the message either — the word is right there beside it, which
-/// is also the only thing beUI's icon would repeat, so it is turned off.
-function Tag({
-  token,
-  status,
-  children,
-}: {
-  token: string;
-  status: "success" | "warning";
-  children: string;
-}) {
-  return (
-    <AnimatedBadge
-      status={status}
-      size="sm"
-      showIcon={false}
-      className={TAG}
-      style={{ color: readable(token), background: wash(token), borderColor: edge(token) }}
-    >
-      {children}
-    </AnimatedBadge>
-  );
-}
 
 // A control whose whole face is a picture, so its name has to reach a screen
 // reader some other way. `title` covers the pointer; `aria-label` covers
@@ -120,14 +83,14 @@ export function ProfileRow({
             {/* Colour is never the whole message: the badge on the chip and this
                 word say the same thing twice on purpose. */}
             {profile.running ? (
-              <Tag token="var(--live)" status="success">
+              <StateTag token="var(--live)" status="success">
                 Running
-              </Tag>
+              </StateTag>
             ) : null}
             {profile.shares_account ? (
-              <Tag token="var(--warning)" status="warning">
+              <StateTag token="var(--warning)" status="warning">
                 Shared sign-in
-              </Tag>
+              </StateTag>
             ) : null}
           </div>
           <PathText path={profile.path} className="mt-0.5" />

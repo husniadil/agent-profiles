@@ -1,7 +1,9 @@
 mod account;
+mod agent_activity;
 mod app_spec;
 mod commands;
 mod instance_manager;
+mod keep_awake;
 mod paths;
 mod platform;
 #[cfg(test)]
@@ -137,6 +139,10 @@ pub fn run() {
             commands::data_root,
             commands::socket_budget,
             commands::open_profile,
+            commands::keep_awake_status,
+            commands::set_keep_awake,
+            commands::authorize_keep_awake,
+            commands::restore_sleep,
         ])
         .on_menu_event(|app, event| {
             let id = event.id().as_ref();
@@ -181,11 +187,47 @@ pub fn run() {
 
             let platform = platform::current();
             let apps = runtime::build(&*platform)?;
+
+            // Before anything else touches the flag: a run that crashed while
+            // holding leaves both a flag and a breadcrumb, and the first sweep
+            // must not inherit a hold that nothing has checked a battery against.
+            let data_root = platform.data_root()?;
+            let recovery = keep_awake::recover_at_startup(&data_root);
+            // Whatever this platform can put back by itself, put back now.
+            // Only macOS cannot — `disablesleep` is root's — and it reports the
+            // machine as stranded through `recovery` instead.
+            if let Err(error) = platform.recover_hold(&data_root) {
+                eprintln!("could not restore the lid setting from a previous run: {error}");
+            }
+            let home = std::path::PathBuf::from(
+                std::env::var("HOME")
+                    .or_else(|_| std::env::var("USERPROFILE"))
+                    .unwrap_or_default(),
+            );
+            let keep_awake = keep_awake::Handle::new(
+                data_root,
+                home,
+                keep_awake::Capabilities {
+                    hold: platform.can_hold_awake(),
+                    thermal: platform.can_read_thermal(),
+                    needs_authorization: platform.needs_authorization(),
+                },
+                recovery,
+            );
+
             app.manage(AppState {
                 platform,
                 apps,
                 last_menu: std::sync::Mutex::new(None),
+                keep_awake,
             });
+
+            // The sweep the guards depend on. Nothing else in this app runs on a
+            // timer, and the lid-closed case is precisely the case where nobody
+            // opens the tray and nobody renders the window — so a demand-driven
+            // scan could never drop the flag when the agent stopped.
+            let sweeper = app.handle().clone();
+            std::thread::spawn(move || keep_awake::watch(sweeper));
 
             if let Some(state) = app.try_state::<AppState>() {
                 tray::sync_identities(&state);

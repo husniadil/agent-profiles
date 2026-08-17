@@ -1,5 +1,6 @@
 import { Switch } from "@/components/motion/switch";
 import type { Autostart } from "@/hooks/useAutostart";
+import { SWITCH } from "@/lib/controls";
 
 /// The one setting the window carries, and the one control that does not own its
 /// own state: the operating system does.
@@ -34,7 +35,7 @@ export function AutostartRow({ autostart }: { autostart: Autostart }) {
           rather than by a `<label for>`, because the sentence to its left is
           two lines and only the first of them is the control's name. */}
       <Switch
-        className="shrink-0"
+        className={`shrink-0 ${SWITCH}`}
         checked={enabled}
         disabled={!offered}
         onCheckedChange={(next) => void autostart.toggle(next)}

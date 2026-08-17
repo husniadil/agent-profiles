@@ -2,6 +2,35 @@
 
 Notable changes, newest first. This project follows [Semantic Versioning](https://semver.org).
 
+## [0.4.0] — 2026-08-17
+
+An agent can now finish its work with the lid shut. Off by default, and it asks for nothing until you turn it on.
+
+### Added
+
+- **Keep awake with the lid closed, on all three platforms.** A long-running agent used to die the moment the lid shut. Each system hides the lever somewhere different, and none of the portable ones work: `caffeinate` and the `IOPMAssertion` APIs behind it prevent *idle* sleep only, and `SetThreadExecutionState` is the same story on Windows. Agent Profiles now holds the lever that does work on each — the system-wide `pmset disablesleep` flag on macOS, a logind inhibitor on Linux, the power scheme's lid-close action on Windows — for as long as an agent is working, and gives it back when it stops. Off by default; it asks for nothing until you turn it on.
+- **A *Keep Awake* tab in the management window**, alongside the profile list, carrying the trigger, the limits, and an honest readout of what is being held and why it is not.
+- **Detection reads agent session transcripts rather than CPU.** Claude Code and Codex append to a session file on every message and every tool result, so a transcript that moved recently is proof an agent is working — including through a long network wait, which is exactly when the process looks idle and a CPU heuristic reports "finished". Measured against a live session: the transcript was two seconds stale mid-task. The tab lists the folders being watched and how fresh each one is, so a trigger that did not fire is something you can look at.
+- **Two guards.** A battery floor, configurable, that drops the hold even with an agent still working. And a thermal guard, on by default, that releases while the machine reports itself overheating — the case a closed laptop in a bag actually runs into, where nothing can be reported to you and the charge level is not the problem. The battery reading comes from `pmset`, `/sys/class/power_supply` and `GetSystemPowerStatus`; the thermal reading is Apple's own four-level `thermalState` on macOS and the kernel's thermal zones, banded to match, on Linux.
+- **Recovery from a run that died holding the setting.** `disablesleep` survives a reboot, so a panic could otherwise leave a Mac that never sleeps again — and both of the obvious safeguards, writing only on a change and restoring only what you took, independently decide to leave it alone in exactly that case. The privileged helper now writes down who owned the setting *before* it can hold anything, and the next launch reclaims it and offers a one-click repair. Windows records the lid action the same way and puts it back by itself at the next launch; Linux needs neither, because logind drops an inhibitor when the process holding it goes.
+
+### Changed
+
+- `AppSpec` gained `session_trace`, naming where an app's agent sessions land inside a profile directory. Only Codex has one, because only Codex has its state root relocated into the profile by `CODEX_HOME`.
+- `Platform` gained `can_hold_awake`, `needs_authorization`, `can_read_thermal`, `power`, `thermal`, `hold`, `recover_hold`, `start_awake_watchdog` and `restore_sleep`, all defaulted, so `commands.rs` carries no new `cfg` branches. Every one of them is answered per machine rather than per operating system: a Linux box with no logind cannot hold, and one with no thermal zones cannot read a temperature, and the window is told which rather than being told about the platform.
+- **Only macOS asks for a password.** Linux takes its inhibitor as the signed-in user and Windows writes a power scheme that user already owns, so both skip the authorization step entirely rather than offering a button that grants something never withheld.
+- **A guard that cannot fire is left out of the window, not greyed out.** Windows publishes no thermal state to user space — the ACPI class needs administrator rights and most consumer firmware does not implement it — so the switch is absent there. A disabled switch reads as *turn something on first*; one that says "this never applies" is still a switch someone can leave on and believe they are protected.
+- **The app icon no longer draws its own rounded square.** macOS 26 masks every app icon to the system squircle and paints a light plate behind it, so our smaller rounded square on transparency showed the plate through as a white rim around the orange. The background is now a full-bleed square and the platform does the rounding. This is an improvement everywhere rather than a macOS fix with a cost elsewhere: the old artwork's corners were opaque white, not transparent, so every platform was already shipping a white box behind the rounded square. Windows and Linux mask nothing, so they now get a hard-cornered orange square — the honest shape of the drawing, and the trade we are taking for a correct icon on the platform that shapes it for us.
+- The app now runs one background thread. It is the first timer in the codebase, and it is what makes the guards reachable: every other scan here is demand-driven, and the lid-closed case is precisely the case where nobody opens the tray and nobody renders the window.
+
+### Security
+
+- The elevated loop is passed inline to `osascript` and never written to disk. Anything under Application Support is user-writable, so an elevated script on disk would be a persistent root escalation for every process running as you rather than a power-management feature.
+- The loop tests the flag file for *existence* only and never reads it, and a data root containing a quote, a backslash or a newline is refused outright rather than escaped through three layers of quoting.
+- The helper identifies the app by pid *and* process start time. Pids are recycled, and a loop that outlived its app would otherwise keep sleep disabled on behalf of a stranger.
+- Windows records the lid action it displaced in a file in your own folder, and refuses to restore any value above 3 out of it. What comes off that file is written straight into a power scheme, and putting the setting back must not be a way to arm a lid that shuts the machine down.
+- The Linux inhibitor is held by a command reading a pipe, not by a sleeping process. Rust never kills a child on drop and a process reparented to init outlives whatever spawned it, so a `kill -9` or a panic would otherwise leave the lid-switch lock held until someone found the process by hand. A pipe cannot be leaked: however this app ends, the kernel closes the write end and the lock goes with it.
+
 ## [0.3.1] — 2026-08-16
 
 The app icon redrawn. Artwork only; no behaviour changes.

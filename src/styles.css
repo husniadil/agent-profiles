@@ -155,6 +155,31 @@
 
   /* Ease-out-quint. No bounce, no elastic — this is a tool, not a toy. */
   --ease-out-quint: cubic-bezier(0.22, 1, 0.36, 1);
+
+  /* The breath on the dot that marks a working agent, matching the session
+     indicator in the Claude desktop app: one slow, even fade in and out, no
+     rest between beats.
+
+     A heartbeat sat still for most of its cycle, so a glance that landed in the
+     rest saw a flat dot and read the session as finished — the same doubt the
+     watch list exists to remove. Something always moving cannot be caught
+     standing.
+
+     Opacity carries it, not scale. The dot is 6px, so a scale pulse large
+     enough to see would also be large enough to shift the row. Bottoming out at
+     0.35 rather than 0 keeps the dot present at every point in the cycle: it is
+     breathing, not flashing. */
+  --animate-live-pulse: live-pulse 1.6s ease-in-out infinite;
+}
+
+@keyframes live-pulse {
+  0%,
+  100% {
+    opacity: 1;
+  }
+  50% {
+    opacity: 0.35;
+  }
 }
 
 @layer base {

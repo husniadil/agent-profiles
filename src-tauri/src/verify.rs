@@ -19,6 +19,54 @@ use crate::platform;
 use crate::runtime;
 use crate::tray::{self, AppSection};
 
+/// Read-only: reports exactly what the Watching list would render right now,
+/// from this machine's own `~/.claude/projects`.
+///
+/// The detector cannot be argued about from a stub. This runs the shipping
+/// `cli_roots` + `scan` against the real home directory and prints the verdict
+/// per row, so "it says idle while my agent is working" becomes a thing that can
+/// be checked in one command rather than reported and guessed at.
+///
+/// ```text
+/// cargo test -- --ignored --nocapture report_what_the_watch_list_would_show
+/// ```
+#[test]
+#[ignore]
+fn report_what_the_watch_list_would_show() {
+    use crate::agent_activity::{cli_roots, scan};
+
+    let home = std::path::PathBuf::from(std::env::var("HOME").expect("HOME"));
+    let roots = cli_roots(&home);
+    let seen = scan(&roots, std::time::SystemTime::now());
+
+    // The window's own default. Printed rather than assumed, because the
+    // verdict is only meaningful next to the number that produced it.
+    let window = std::time::Duration::from_secs(2 * 60);
+    println!("\nwindow: {}s\n", window.as_secs());
+    println!("{:<9} {:>9} {:>9}  label", "verdict", "age", "mid_turn");
+    for root in &seen {
+        let fresh = root.seconds_ago.is_some_and(|ago| ago <= window.as_secs());
+        let verdict = match (root.mid_turn, fresh, root.seconds_ago) {
+            (_, _, None) => "never",
+            (true, true, _) => "WORKING",
+            (true, false, _) => "stalled",
+            (false, _, _) => "idle",
+        };
+        println!(
+            "{:<9} {:>9} {:>9}  {}",
+            verdict,
+            root.seconds_ago
+                .map_or("-".to_string(), |ago| format!("{ago}s")),
+            root.mid_turn,
+            root.label,
+        );
+    }
+    println!(
+        "\nany_working = {}\n",
+        crate::agent_activity::any_working(&seen, window)
+    );
+}
+
 /// Read-only: reports exactly what the tray would render right now.
 #[test]
 #[ignore]

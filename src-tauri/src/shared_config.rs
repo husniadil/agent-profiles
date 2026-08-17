@@ -319,5 +319,13 @@ pub mod tests_support {
         fn quit(&self, _pid: i32) -> anyhow::Result<()> {
             unimplemented!()
         }
+        /// Overridden where the default bails, so a test can reach what
+        /// `keep_awake::restore` does *after* the setting goes back. `hold` is
+        /// deliberately left as the real flag-file default — the flag is the
+        /// channel to a watchdog this process cannot see, so a fake one would
+        /// test nothing.
+        fn restore_sleep(&self) -> anyhow::Result<()> {
+            Ok(())
+        }
     }
 }

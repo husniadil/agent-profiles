@@ -1,6 +1,6 @@
 [package]
 name = "agent-profiles"
-version = "0.3.1"
+version = "0.4.0"
 description = "A tray app for managing Claude Desktop profiles"
 authors = ["Husni Adil Makmur <husni.adil@gmail.com>"]
 license = "MIT"
@@ -46,11 +46,25 @@ objc2-app-kit = { version = "0.3.2", features = [
   "NSMenuItem",
   "NSStatusItem",
 ] }
-objc2-foundation = { version = "0.3.2", features = ["NSAttributedString"] }
+objc2-foundation = { version = "0.3.2", features = [
+  "NSAttributedString",
+  # `thermalState` — Apple's own four-level reading of how hot the machine is.
+  # `pmset -g therm` was the obvious alternative and reports nothing at all on
+  # current hardware; this needs no root and no extra dependency.
+  "NSProcessInfo",
+] }
 
 [target.'cfg(target_os = "windows")'.dependencies]
 windows = { version = "0.62.2", features = [
   "Win32_Foundation",
   "Win32_Storage_FileSystem",
+  # `GetSystemPowerStatus` — charge and line status for the battery guard, the
+  # same call every Windows battery indicator makes. No WMI, no elevation.
+  "Win32_System_Power",
+  # Not for the registry. Every `Power*Scheme` / `Power*ValueIndex` binding is
+  # gated on this feature because each takes an `HKEY` first argument — the
+  # optional user power key, which this app always passes as `None`. Without it
+  # the whole `lid` module is six unresolved imports.
+  "Win32_System_Registry",
   "Win32_UI_WindowsAndMessaging",
 ] }

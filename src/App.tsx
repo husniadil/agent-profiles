@@ -1,16 +1,30 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 
 import { AutostartRow } from "@/components/AutostartRow";
-import { ComposeCard } from "@/components/ComposeCard";
-import { EmptyState } from "@/components/EmptyState";
-import { ErrorBanner } from "@/components/ErrorBanner";
-import { ProfileList } from "@/components/ProfileList";
+import { ProfilesPanel } from "@/components/ProfilesPanel";
 import { StatusStrip } from "@/components/StatusStrip";
+import { KeepAwakeTab } from "@/components/keepawake/KeepAwakeTab";
+import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/motion/tabs";
 import { useAppData } from "@/hooks/useAppData";
 import { useAutostart } from "@/hooks/useAutostart";
+import { useKeepAwake } from "@/hooks/useKeepAwake";
 import { useSizes } from "@/hooks/useSizes";
 import { useSocketBudget } from "@/hooks/useSocketBudget";
 import { PathNamesContext } from "@/lib/paths";
+
+type TabId = "profiles" | "keep-awake";
+
+/// beUI's underline tabs are built for a page, not for a 36px chrome band: they
+/// come at `text-sm` with a 44px touch target and an `inline-flex` list. The
+/// overrides below put them on this window's scale — `twMerge` inside `cn` lets
+/// the later class win — rather than forking the vendored component, which stays
+/// verbatim so it can be re-synced from beui.dev.
+const TAB_LIST = "flex h-9 shrink-0 items-stretch gap-4 border-hairline bg-surface px-5";
+const TAB_TRIGGER = "min-h-0 px-0 py-0 text-callout font-normal";
+/// The band that takes whatever the strip and the floor leave. `min-h-0` is what
+/// lets it shrink at all: a flex item's default `min-height: auto` refuses to go
+/// below its content.
+const TAB_PANEL = "mt-0 flex min-h-0 flex-1 flex-col";
 
 export default function App() {
   const data = useAppData();
@@ -37,6 +51,12 @@ export default function App() {
 
   const clearError = useCallback(() => setError(null), [setError]);
   const autostart = useAutostart(visit, fail, clearError);
+  const keepAwake = useKeepAwake(visit, fail);
+
+  // Not reset on every visit: someone who left the window on Keep Awake was most
+  // likely reading it, and reopening onto the profile list would throw that away
+  // for no reason.
+  const [tab, setTab] = useState<TabId>("profiles");
 
   const counts = useMemo(
     () => ({
@@ -70,9 +90,9 @@ export default function App() {
     <PathNamesContext.Provider value={paths}>
       {/* The window itself, not a card floating on a canvas: the title bar above
           it already carries the name, so this begins at the status strip. */}
-      {/* Fixed height, three bands: a strip that does not move, a list that
-          takes whatever is left, and a chrome bar on the floor. The window is
-          resized by the user, not by how many profiles they happen to have. */}
+      {/* Fixed height, four bands: a strip that does not move, the tab bar, a
+          panel that takes whatever is left, and a chrome bar on the floor. The
+          window is resized by the user, not by how many profiles they have. */}
       <main className="flex h-screen flex-col overflow-hidden bg-bg font-sans text-ink">
         <StatusStrip
           profiles={counts.profiles}
@@ -81,38 +101,45 @@ export default function App() {
           onError={fail}
         />
 
-        {/* `min-h-0` is what lets this shrink at all: a flex item's default
-            `min-height: auto` refuses to go below its content, which would
-            push the bar below the bottom edge of a window this size. */}
-        <section className="flex min-h-0 flex-1 flex-col gap-2 p-2">
-          <ErrorBanner message={data.error} />
+        <Tabs
+          value={tab}
+          onValueChange={(next) => setTab(next as TabId)}
+          variant="underline"
+          className="flex min-h-0 flex-1 flex-col"
+        >
+          <TabsList className={TAB_LIST}>
+            <TabsTrigger value="profiles" className={TAB_TRIGGER}>
+              Agent Profiles
+            </TabsTrigger>
+            <TabsTrigger value="keep-awake" className={TAB_TRIGGER}>
+              Keep Awake
+            </TabsTrigger>
+          </TabsList>
 
-          {available.length === 0 ? (
-            <EmptyState apps={apps} />
-          ) : (
-            <ProfileList
-              apps={available}
+          {/* Both panels stay mounted — beUI hides the inactive one, and
+              Tailwind's preflight makes `[hidden]` win over the flex utilities
+              here. Keeping them mounted is what preserves a half-typed profile
+              name across a trip to the other tab. */}
+          <TabsContent value="profiles" className={TAB_PANEL}>
+            <ProfilesPanel
+              apps={apps}
+              available={available}
+              error={data.error}
               sizes={sizes}
-              reload={reload}
-              onError={fail}
-              clearError={clearError}
-            />
-          )}
-
-          {/* With nothing to add a profile to, the whole band goes: a label over
-              an empty space reads as something failing to load, and the form
-              beneath it is a control that could only fail. */}
-          {available.length > 0 ? (
-            <ComposeCard
-              apps={available}
               appId={appId}
               onAppId={setAppId}
               budget={budget}
               reload={reload}
               visit={visit}
+              fail={fail}
+              clearError={clearError}
             />
-          ) : null}
-        </section>
+          </TabsContent>
+
+          <TabsContent value="keep-awake" className={TAB_PANEL}>
+            <KeepAwakeTab keepAwake={keepAwake} />
+          </TabsContent>
+        </Tabs>
 
         <AutostartRow autostart={autostart} />
       </main>
