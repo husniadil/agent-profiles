@@ -15,7 +15,11 @@
 
        Cards plus stroke span 215–809 on both axes, so the mark is centred on
        the canvas, same as the small variant. -->
-  <rect x="32" y="32" width="960" height="960" rx="220" fill="#dd6b32"/>
+  <!-- ponytail: full-bleed square, no inset and no corner radius of our own.
+       macOS 26 masks app icons to the system squircle; drawing our own
+       smaller rounded square left the system's light plate showing as a
+       white rim around it. Let the platform do the shaping. -->
+  <rect width="1024" height="1024" fill="#dd6b32"/>
   <mask id="behind">
     <rect width="1024" height="1024" fill="#fff"/>
     <rect x="215" y="391" width="472" height="472" rx="132" fill="#000"/>
