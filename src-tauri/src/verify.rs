@@ -110,7 +110,7 @@ fn report_what_the_tray_would_show() {
     }
 
     println!("\ntray menu:");
-    for row in tray::menu_rows(&sections, &processes, None) {
+    for row in tray::menu_rows(&sections, &processes, None, crate::general::Locale::En) {
         println!(
             "  [{}] {:<40} id={}",
             if row.enabled { "x" } else { " " },
@@ -266,7 +266,7 @@ fn both_apps_run_side_by_side_without_being_confused() {
         })
         .collect();
     println!("\ntray menu with both live:");
-    for row in tray::menu_rows(&sections, &processes, None) {
+    for row in tray::menu_rows(&sections, &processes, None, crate::general::Locale::En) {
         println!("  {:<44} id={}", row.text, row.id);
     }
 

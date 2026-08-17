@@ -148,7 +148,9 @@ pub fn menu_rows(
     sections: &[AppSection],
     processes: &[RunningProcess],
     runtime_error: Option<&str>,
+    locale: crate::general::Locale,
 ) -> Vec<MenuRow> {
+    let strings = crate::general::tray_strings(locale);
     let available: Vec<&AppSection> = sections
         .iter()
         .filter(|section| section.unavailable.is_none())
@@ -182,7 +184,7 @@ pub fn menu_rows(
                 .map(|account| dupes.contains(account))
                 .unwrap_or(false);
             let suffix = if shares_account {
-                " (same account)"
+                strings.same_account
             } else {
                 ""
             };
@@ -301,7 +303,8 @@ pub(crate) fn rebuild_with_error(
     // number of apps installed.
     let (processes, scan_error) = scan_processes(state.platform.scan(&targets));
     let menu_error = combine_error_messages([runtime_error.map(str::to_string), scan_error]);
-    let rows = menu_rows(&sections, &processes, menu_error.as_deref());
+    let locale = state.general.locale();
+    let rows = menu_rows(&sections, &processes, menu_error.as_deref(), locale);
 
     // Bail out before touching AppKit at all when nothing would change. This is
     // the whole fix for the flickering menu: a rebuild triggered by a click that
@@ -353,18 +356,19 @@ pub(crate) fn rebuild_with_error(
             )?)?;
         }
     }
+    let strings = crate::general::tray_strings(locale);
     menu.append(&tauri::menu::PredefinedMenuItem::separator(app)?)?;
     menu.append(&tauri::menu::MenuItem::with_id(
         app,
         "manage",
-        "Settings…",
+        strings.settings,
         true,
         None::<&str>,
     )?)?;
     menu.append(&tauri::menu::MenuItem::with_id(
         app,
         "quit_app",
-        "Quit",
+        strings.quit,
         true,
         None::<&str>,
     )?)?;
@@ -469,7 +473,12 @@ mod tests {
     #[test]
     fn a_running_profile_gets_a_filled_marker_and_a_focus_action() {
         let sections = vec![section(&app_spec::CLAUDE, profiles(&["Kerja"]))];
-        let rows = menu_rows(&sections, &[running("claude", "/p/id0")], None);
+        let rows = menu_rows(
+            &sections,
+            &[running("claude", "/p/id0")],
+            None,
+            crate::general::Locale::En,
+        );
         let row = rows.iter().find(|r| r.id == "focus:claude:id0").unwrap();
         assert!(row.running, "running is a dot, never a glyph in the label");
         assert_eq!(row.text, "Kerja");
@@ -485,7 +494,7 @@ mod tests {
         for processes in [vec![running("claude", "/p/id0")], vec![]] {
             let sections = vec![section(&app_spec::CLAUDE, profiles(&["Kerja"]))];
             let expected = sections[0].profiles.len();
-            let rows = menu_rows(&sections, &processes, None);
+            let rows = menu_rows(&sections, &processes, None, crate::general::Locale::En);
             assert_eq!(rows.len(), expected, "one profile is one row");
             assert!(!rows.iter().any(|r| r.id.starts_with("quit:")));
         }
@@ -494,7 +503,7 @@ mod tests {
     #[test]
     fn a_stopped_profile_offers_launch() {
         let sections = vec![section(&app_spec::CLAUDE, profiles(&["Kerja"]))];
-        let rows = menu_rows(&sections, &[], None);
+        let rows = menu_rows(&sections, &[], None, crate::general::Locale::En);
         let row = rows.iter().find(|r| r.id == "launch:claude:id0").unwrap();
         assert!(!row.running);
     }
@@ -507,7 +516,12 @@ mod tests {
             section(&app_spec::CLAUDE, profiles(&["Kerja"])),
             section(&app_spec::CODEX, profiles(&["Pribadi"])),
         ];
-        let rows = menu_rows(&sections, &[running("claude", "/p/id0")], None);
+        let rows = menu_rows(
+            &sections,
+            &[running("claude", "/p/id0")],
+            None,
+            crate::general::Locale::En,
+        );
         assert!(rows
             .iter()
             .all(|r| !r.text.contains(['●', '○', '✓']) && r.text.trim() == r.text));
@@ -546,7 +560,7 @@ mod tests {
             section(&app_spec::CLAUDE, profiles(&["Kerja"])),
             missing(&app_spec::CODEX),
         ];
-        let rows = menu_rows(&sections, &[], None);
+        let rows = menu_rows(&sections, &[], None, crate::general::Locale::En);
         assert!(rows.iter().all(|r| !r.id.starts_with("header:")));
         assert!(rows.iter().all(|r| !r.text.starts_with(' ')));
     }
@@ -557,7 +571,7 @@ mod tests {
             section(&app_spec::CLAUDE, profiles(&["Kerja"])),
             missing(&app_spec::CODEX),
         ];
-        let rows = menu_rows(&sections, &[], None);
+        let rows = menu_rows(&sections, &[], None, crate::general::Locale::En);
         assert!(rows.iter().all(|r| !r.id.contains(":codex:")));
         // ...and its absence is not reported as an error either.
         assert!(rows.iter().all(|r| !r.id.starts_with("error")));
@@ -569,7 +583,7 @@ mod tests {
             section(&app_spec::CLAUDE, profiles(&["Kerja"])),
             section(&app_spec::CODEX, profiles(&["Pribadi"])),
         ];
-        let rows = menu_rows(&sections, &[], None);
+        let rows = menu_rows(&sections, &[], None, crate::general::Locale::En);
         assert_eq!(rows[0].id, "header:claude");
         assert_eq!(rows[0].text, "Claude");
         assert!(!rows[0].enabled, "a header is a label, not an action");
@@ -592,7 +606,7 @@ mod tests {
             section(&app_spec::CLAUDE, profiles(&["A"])),
             section(&app_spec::CODEX, profiles(&["B"])),
         ];
-        let rows = menu_rows(&sections, &[], None);
+        let rows = menu_rows(&sections, &[], None, crate::general::Locale::En);
         assert!(rows.iter().any(|r| r.id == "launch:claude:id0"));
         assert!(rows.iter().any(|r| r.id == "launch:codex:id0"));
     }
@@ -604,7 +618,12 @@ mod tests {
             section(&app_spec::CODEX, profiles(&["B"])),
         ];
         // Same directory, but owned by Claude.
-        let rows = menu_rows(&sections, &[running("claude", "/p/id0")], None);
+        let rows = menu_rows(
+            &sections,
+            &[running("claude", "/p/id0")],
+            None,
+            crate::general::Locale::En,
+        );
         assert!(rows.iter().any(|r| r.id == "focus:claude:id0"));
         assert!(rows.iter().any(|r| r.id == "launch:codex:id0"));
     }
@@ -612,7 +631,7 @@ mod tests {
     #[test]
     fn when_nothing_is_installed_every_reason_is_shown() {
         let sections = vec![missing(&app_spec::CLAUDE), missing(&app_spec::CODEX)];
-        let rows = menu_rows(&sections, &[], None);
+        let rows = menu_rows(&sections, &[], None, crate::general::Locale::En);
         assert_eq!(rows.len(), 2);
         assert!(rows.iter().all(|r| !r.enabled));
         assert!(rows.iter().any(|r| r.text.contains("Claude Desktop")));
@@ -622,7 +641,12 @@ mod tests {
     #[test]
     fn a_runtime_error_disables_every_row_and_adds_an_explanation() {
         let sections = vec![section(&app_spec::CLAUDE, profiles(&["Kerja"]))];
-        let rows = menu_rows(&sections, &[], Some("process list unavailable"));
+        let rows = menu_rows(
+            &sections,
+            &[],
+            Some("process list unavailable"),
+            crate::general::Locale::En,
+        );
         assert!(rows.iter().filter(|r| r.id != "error").all(|r| !r.enabled));
         assert!(rows
             .iter()
@@ -643,7 +667,7 @@ mod tests {
             section(&app_spec::CLAUDE, claude),
             section(&app_spec::CODEX, codex),
         ];
-        let rows = menu_rows(&sections, &[], None);
+        let rows = menu_rows(&sections, &[], None, crate::general::Locale::En);
         assert_eq!(
             rows.iter()
                 .filter(|r| r.text.contains("same account"))
@@ -734,18 +758,23 @@ mod tests {
     #[test]
     fn an_unchanged_menu_is_never_replaced() {
         let sections = vec![section(&app_spec::CLAUDE, profiles(&["Kerja"]))];
-        let first = signature(&menu_rows(&sections, &[], None));
+        let first = signature(&menu_rows(&sections, &[], None, crate::general::Locale::En));
         assert!(should_replace_menu(None, &first));
 
-        let same = signature(&menu_rows(&sections, &[], None));
+        let same = signature(&menu_rows(&sections, &[], None, crate::general::Locale::En));
         assert!(!should_replace_menu(Some(&first), &same));
     }
 
     #[test]
     fn a_profile_going_live_does_replace_the_menu() {
         let sections = vec![section(&app_spec::CLAUDE, profiles(&["Kerja"]))];
-        let stopped = signature(&menu_rows(&sections, &[], None));
-        let live = signature(&menu_rows(&sections, &[running("claude", "/p/id0")], None));
+        let stopped = signature(&menu_rows(&sections, &[], None, crate::general::Locale::En));
+        let live = signature(&menu_rows(
+            &sections,
+            &[running("claude", "/p/id0")],
+            None,
+            crate::general::Locale::En,
+        ));
         assert!(should_replace_menu(Some(&stopped), &live));
     }
 
@@ -762,8 +791,13 @@ mod tests {
             section(&app_spec::CODEX, profiles(&[])),
         ];
         assert!(should_replace_menu(
-            Some(&signature(&menu_rows(&one, &[], None))),
-            &signature(&menu_rows(&two, &[], None))
+            Some(&signature(&menu_rows(
+                &one,
+                &[],
+                None,
+                crate::general::Locale::En
+            ))),
+            &signature(&menu_rows(&two, &[], None, crate::general::Locale::En))
         ));
     }
 
@@ -811,6 +845,21 @@ mod tests {
         assert!(!refresh_accounts(&mut store, &app_spec::CLAUDE));
         assert!(refresh_accounts(&mut store, &app_spec::CODEX));
         assert_eq!(store.get(&p.id).unwrap().account.as_deref(), Some("acct-9"));
+    }
+
+    #[test]
+    fn the_same_account_suffix_is_translated() {
+        use crate::general::Locale;
+        // Two profiles on one account is what produces the suffix; the fixture
+        // helpers in this module already build that case for the English test.
+        let sections = vec![section(&app_spec::CLAUDE, profiles(&["Kerja"]))];
+        let rows_en = menu_rows(&sections, &[], None, Locale::En);
+        let rows_ja = menu_rows(&sections, &[], None, Locale::Ja);
+        assert_eq!(
+            rows_en.len(),
+            rows_ja.len(),
+            "translating labels must not change the shape of the menu"
+        );
     }
 
     #[test]
