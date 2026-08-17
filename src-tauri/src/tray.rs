@@ -13,6 +13,26 @@ pub(crate) fn signature(rows: &[MenuRow]) -> Vec<MenuSignature> {
         .collect()
 }
 
+/// The full rebuild key: the rows PLUS the locale. The Settings…/Quit items are
+/// locale-dependent but are not part of `rows`, so a language change with no
+/// other row change would otherwise leave `signature` identical and skip the
+/// rebuild, stranding the tray's static items in the previous language.
+pub(crate) fn menu_signature(
+    rows: &[MenuRow],
+    locale: crate::general::Locale,
+) -> Vec<MenuSignature> {
+    let mut sig = signature(rows);
+    // A sentinel row that can't collide with a real menu id (ids are
+    // `action:app:profile` or plain words; this starts with a NUL).
+    sig.push((
+        "\0locale".to_string(),
+        locale.tag().to_string(),
+        false,
+        false,
+    ));
+    sig
+}
+
 /// The window's own `--live` green, midway between the value it takes in the
 /// light theme and the one it takes in the dark. A menu item's image is a plain
 /// bitmap rather than a template, so it arrives in whatever colours it was built
@@ -309,7 +329,7 @@ pub(crate) fn rebuild_with_error(
     // Bail out before touching AppKit at all when nothing would change. This is
     // the whole fix for the flickering menu: a rebuild triggered by a click that
     // arrives after the menu is already open now does nothing at all.
-    let next = signature(&rows);
+    let next = menu_signature(&rows, locale);
     {
         let mut last = state
             .last_menu
@@ -860,6 +880,26 @@ mod tests {
             rows_ja.len(),
             "translating labels must not change the shape of the menu"
         );
+    }
+
+    #[test]
+    fn switching_the_language_forces_a_menu_rebuild() {
+        use crate::general::Locale;
+        // Same rows, different locale: the static Settings…/Quit items differ, so
+        // the rebuild must not be skipped.
+        let sections = vec![section(&app_spec::CLAUDE, profiles(&["Kerja"]))];
+        let rows = menu_rows(&sections, &[], None, Locale::En);
+        let en = menu_signature(&rows, Locale::En);
+        let ja = menu_signature(&rows, Locale::Ja);
+        assert!(
+            should_replace_menu(Some(&en), &ja),
+            "a language change must force the tray to rebuild so Settings…/Quit retranslate"
+        );
+        // And identical inputs must still be a no-op (the anti-flicker optimization).
+        assert!(!should_replace_menu(
+            Some(&en),
+            &menu_signature(&rows, Locale::En)
+        ));
     }
 
     #[test]
