@@ -3,6 +3,7 @@ import { useRef } from "react";
 import { formatDuration } from "@/components/keepawake/AwakeStatusCard";
 import { StateTag } from "@/components/StateTag";
 import type { Freshness } from "@/lib/api";
+import { useT } from "@/lib/i18n";
 
 /// How long a row keeps saying "working" after `mid_turn` goes false.
 ///
@@ -31,14 +32,10 @@ export function WatchList({
   // No timer, no state, no extra render. Entries for roots that disappear are
   // left to sit — the key set is two CLIs plus a row per profile.
   const lastWorking = useRef<Map<string, number>>(new Map());
+  const t = useT();
 
   if (roots.length === 0) {
-    return (
-      <p className="text-sub text-ink-3">
-        Nothing to watch yet. Claude Code and Codex are found automatically once they have written a
-        session.
-      </p>
-    );
+    return <p className="text-sub text-ink-3">{t("awake.watch.empty")}</p>;
   }
 
   const window = windowMinutes * 60;
@@ -98,18 +95,18 @@ export function WatchList({
                   the dot and its ring are decoration on top of it. */}
               {working ? (
                 <StateTag token="var(--live)" status="success">
-                  Working
+                  {t("awake.watch.working")}
                 </StateTag>
               ) : null}
             </span>
             <span className="shrink-0 font-mono text-ink-3">
               {root.seconds_ago === null
-                ? "never"
+                ? t("awake.watch.never")
                 : working
-                  ? `${formatDuration(root.seconds_ago)} ago`
+                  ? t("awake.watch.ago", { duration: formatDuration(root.seconds_ago) })
                   : stalled
-                    ? `stalled ${formatDuration(root.seconds_ago)}`
-                    : `idle ${formatDuration(root.seconds_ago)}`}
+                    ? t("awake.watch.stalled", { duration: formatDuration(root.seconds_ago) })
+                    : t("awake.watch.idle", { duration: formatDuration(root.seconds_ago) })}
             </span>
           </li>
         );

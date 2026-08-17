@@ -99,7 +99,48 @@ export const en = {
     "Agent Profiles ended unexpectedly while holding the lid-closed state, and that setting survives a restart.",
   "awake.restoreSleep": "Restore sleep",
   "awake.needsPassword":
-    "Needs an administrator password once per run. A helper turns the setting back off when the hold ends.",
+    "Needs an administrator password once per run. A helper turns the setting on while an agent works, off when it stops, and shuts down with Agent Profiles.",
+
+  // Keep Awake — status card bands (unsupported, stranded, unauthorized, failed hold)
+  "awake.band.unavailable": "Not available here",
+  "awake.band.stranded": "Your Mac may not be able to sleep",
+  "awake.band.notAuthorized": "Not yet authorized",
+  "awake.band.holdFailed": "Not holding — the request failed",
+  "awake.band.holdFailedDetail": "{{machine}} will sleep as usual: {{error}}",
+  "awake.unsupported.linux":
+    "systemd-inhibit was not found, so nothing here can take a lid-switch lock. Holding the lid closed needs a desktop running systemd-logind.",
+  "awake.unsupported.generic":
+    "{{system}} on {{machine}} reports it cannot hold the lid closed.",
+  "awake.authorize": "Authorize…",
+
+  // Keep Awake — status card's assembled status line
+  "awake.status.noBattery": "No battery",
+  "awake.status.battery": "Battery {{percent}}%",
+  "awake.status.pluggedIn": ", plugged in",
+  "awake.status.held": " · held {{duration}}",
+
+  // Keep Awake — section legends
+  "awake.section.hold": "Hold the machine awake",
+  "awake.section.limits": "Limits",
+  "awake.section.watching": "Watching",
+
+  // Keep Awake — low-battery control
+  "awake.battery.name": "Pause on low battery",
+  "awake.battery.aria": "Pause on low battery",
+  "awake.battery.below": "below {{percent}}%",
+
+  // Keep Awake — thermal guard
+  "awake.thermal.name": "Thermal guard",
+  "awake.thermal.aria": "Thermal guard",
+
+  // Keep Awake — hint paragraphs under each Limits setting
+  "awake.hint.noBattery": "{{machine}} has no battery, so this never applies.",
+  "awake.hint.lowBattery":
+    "Dropped below this charge, even mid-task. Ignored while plugged in.",
+  "awake.hint.idleWindow":
+    "An agent that finished its turn releases {{machine}} at once. This only bounds one that stopped part-way: after this long writing nothing, it is treated as gone rather than working.",
+  "awake.hint.thermal":
+    "Release the hold when the machine reports it is overheating.",
 
   // Keep Awake — triggers and limits
   "awake.trigger.off": "Off",
