@@ -1,8 +1,9 @@
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useState, type ReactNode } from "react";
 
 import { AutostartRow } from "@/components/AutostartRow";
 import { ProfilesPanel } from "@/components/ProfilesPanel";
 import { StatusStrip } from "@/components/StatusStrip";
+import { GeneralTab } from "@/components/general/GeneralTab";
 import { KeepAwakeTab } from "@/components/keepawake/KeepAwakeTab";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/motion/tabs";
 import { useAppData } from "@/hooks/useAppData";
@@ -12,10 +13,10 @@ import { useKeepAwake } from "@/hooks/useKeepAwake";
 import { useSizes } from "@/hooks/useSizes";
 import { useSocketBudget } from "@/hooks/useSocketBudget";
 import type { Locale } from "@/lib/api";
-import { I18nProvider, LOCALE_NAMES } from "@/lib/i18n";
+import { I18nProvider, LOCALE_NAMES, useT } from "@/lib/i18n";
 import { PathNamesContext } from "@/lib/paths";
 
-type TabId = "profiles" | "keep-awake";
+type TabId = "profiles" | "keep-awake" | "general";
 
 /// The window's copy of `general::resolve_locale`: chosen wins, else the system
 /// language subtag, else English. Split on the same delimiters as the Rust rule
@@ -127,26 +128,10 @@ export default function App() {
             onError={fail}
           />
 
-          <Tabs
-            value={tab}
-            onValueChange={(next) => setTab(next as TabId)}
-            variant="underline"
-            className="flex min-h-0 flex-1 flex-col"
-          >
-            <TabsList className={TAB_LIST}>
-              <TabsTrigger value="profiles" className={TAB_TRIGGER}>
-                Agent Profiles
-              </TabsTrigger>
-              <TabsTrigger value="keep-awake" className={TAB_TRIGGER}>
-                Keep Awake
-              </TabsTrigger>
-            </TabsList>
-
-            {/* Both panels stay mounted — beUI hides the inactive one, and
-                Tailwind's preflight makes `[hidden]` win over the flex utilities
-                here. Keeping them mounted is what preserves a half-typed profile
-                name across a trip to the other tab. */}
-            <TabsContent value="profiles" className={TAB_PANEL}>
+          <TabbedPanels
+            tab={tab}
+            onTab={setTab}
+            profiles={
               <ProfilesPanel
                 apps={apps}
                 available={available}
@@ -160,16 +145,67 @@ export default function App() {
                 fail={fail}
                 clearError={clearError}
               />
-            </TabsContent>
-
-            <TabsContent value="keep-awake" className={TAB_PANEL}>
-              <KeepAwakeTab keepAwake={keepAwake} />
-            </TabsContent>
-          </Tabs>
+            }
+            keepAwake={<KeepAwakeTab keepAwake={keepAwake} />}
+            general={<GeneralTab general={general} />}
+          />
 
           <AutostartRow autostart={autostart} />
         </main>
       </I18nProvider>
     </PathNamesContext.Provider>
+  );
+}
+
+/// The tab bar and its three panels, split out from `App` because `App` is the
+/// component that renders `I18nProvider` and so cannot call `useT` on its own
+/// output — the provider has to be an ancestor of the call, not a sibling.
+function TabbedPanels({
+  tab,
+  onTab,
+  profiles,
+  keepAwake,
+  general,
+}: {
+  tab: TabId;
+  onTab: (next: TabId) => void;
+  profiles: ReactNode;
+  keepAwake: ReactNode;
+  general: ReactNode;
+}) {
+  const t = useT();
+  return (
+    <Tabs
+      value={tab}
+      onValueChange={(next) => onTab(next as TabId)}
+      variant="underline"
+      className="flex min-h-0 flex-1 flex-col"
+    >
+      <TabsList className={TAB_LIST}>
+        <TabsTrigger value="profiles" className={TAB_TRIGGER}>
+          {t("tab.profiles")}
+        </TabsTrigger>
+        <TabsTrigger value="keep-awake" className={TAB_TRIGGER}>
+          {t("tab.keepAwake")}
+        </TabsTrigger>
+        <TabsTrigger value="general" className={TAB_TRIGGER}>
+          {t("tab.general")}
+        </TabsTrigger>
+      </TabsList>
+
+      {/* All three panels stay mounted — beUI hides the inactive ones, and
+          Tailwind's preflight makes `[hidden]` win over the flex utilities here.
+          Keeping them mounted is what preserves a half-typed profile name across
+          a trip to another tab. */}
+      <TabsContent value="profiles" className={TAB_PANEL}>
+        {profiles}
+      </TabsContent>
+      <TabsContent value="keep-awake" className={TAB_PANEL}>
+        {keepAwake}
+      </TabsContent>
+      <TabsContent value="general" className={TAB_PANEL}>
+        {general}
+      </TabsContent>
+    </Tabs>
   );
 }
