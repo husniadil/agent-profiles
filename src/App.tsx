@@ -7,12 +7,36 @@ import { KeepAwakeTab } from "@/components/keepawake/KeepAwakeTab";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/motion/tabs";
 import { useAppData } from "@/hooks/useAppData";
 import { useAutostart } from "@/hooks/useAutostart";
+import { useGeneral } from "@/hooks/useGeneral";
 import { useKeepAwake } from "@/hooks/useKeepAwake";
 import { useSizes } from "@/hooks/useSizes";
 import { useSocketBudget } from "@/hooks/useSocketBudget";
+import type { Locale } from "@/lib/api";
+import { I18nProvider, LOCALE_NAMES } from "@/lib/i18n";
 import { PathNamesContext } from "@/lib/paths";
 
 type TabId = "profiles" | "keep-awake";
+
+/// The window's copy of `general::resolve_locale`: chosen wins, else the system
+/// language subtag, else English. Split on the same delimiters as the Rust rule
+/// (`-`, `_`, `.`) so a POSIX tag like `de.UTF-8` resolves the way Rust resolves
+/// it. Two implementations of one rule is a thing to be uneasy about, but the
+/// alternative — the backend reporting a resolved locale alongside the stored
+/// one — means every save round-trips a value the window then ignores, and the
+/// picker showing "Same as system" has to carry both. The rule is small and the
+/// Rust side has the tests.
+///
+/// Called with `general.settings?.locale`, which is `undefined` until the first
+/// read lands; that resolves the same as an explicit "follow system", so a user
+/// whose stored choice differs from their system language could in principle see
+/// one frame of the system language first. Not observable here: the window is
+/// created `visible: false` and only shown from the tray, long after this mounts
+/// and the read completes.
+function resolveLocale(chosen: Locale | null | undefined): Locale {
+  if (chosen) return chosen;
+  const language = navigator.language.split(/[-_.]/)[0]?.toLowerCase() ?? "";
+  return language in LOCALE_NAMES ? (language as Locale) : "en";
+}
 
 /// beUI's underline tabs are built for a page, not for a 36px chrome band: they
 /// come at `text-sm` with a 44px touch target and an `inline-flex` list. The
@@ -51,6 +75,7 @@ export default function App() {
 
   const clearError = useCallback(() => setError(null), [setError]);
   const autostart = useAutostart(visit, fail, clearError);
+  const general = useGeneral(fail);
   const keepAwake = useKeepAwake(visit, fail);
 
   // Not reset on every visit: someone who left the window on Keep Awake was most
@@ -88,61 +113,63 @@ export default function App() {
 
   return (
     <PathNamesContext.Provider value={paths}>
-      {/* The window itself, not a card floating on a canvas: the title bar above
-          it already carries the name, so this begins at the status strip. */}
-      {/* Fixed height, four bands: a strip that does not move, the tab bar, a
-          panel that takes whatever is left, and a chrome bar on the floor. The
-          window is resized by the user, not by how many profiles they have. */}
-      <main className="flex h-screen flex-col overflow-hidden bg-bg font-sans text-ink">
-        <StatusStrip
-          profiles={counts.profiles}
-          running={counts.running}
-          bytes={sizes.total}
-          onError={fail}
-        />
+      <I18nProvider locale={resolveLocale(general.settings?.locale)}>
+        {/* The window itself, not a card floating on a canvas: the title bar above
+            it already carries the name, so this begins at the status strip. */}
+        {/* Fixed height, four bands: a strip that does not move, the tab bar, a
+            panel that takes whatever is left, and a chrome bar on the floor. The
+            window is resized by the user, not by how many profiles they have. */}
+        <main className="flex h-screen flex-col overflow-hidden bg-bg font-sans text-ink">
+          <StatusStrip
+            profiles={counts.profiles}
+            running={counts.running}
+            bytes={sizes.total}
+            onError={fail}
+          />
 
-        <Tabs
-          value={tab}
-          onValueChange={(next) => setTab(next as TabId)}
-          variant="underline"
-          className="flex min-h-0 flex-1 flex-col"
-        >
-          <TabsList className={TAB_LIST}>
-            <TabsTrigger value="profiles" className={TAB_TRIGGER}>
-              Agent Profiles
-            </TabsTrigger>
-            <TabsTrigger value="keep-awake" className={TAB_TRIGGER}>
-              Keep Awake
-            </TabsTrigger>
-          </TabsList>
+          <Tabs
+            value={tab}
+            onValueChange={(next) => setTab(next as TabId)}
+            variant="underline"
+            className="flex min-h-0 flex-1 flex-col"
+          >
+            <TabsList className={TAB_LIST}>
+              <TabsTrigger value="profiles" className={TAB_TRIGGER}>
+                Agent Profiles
+              </TabsTrigger>
+              <TabsTrigger value="keep-awake" className={TAB_TRIGGER}>
+                Keep Awake
+              </TabsTrigger>
+            </TabsList>
 
-          {/* Both panels stay mounted — beUI hides the inactive one, and
-              Tailwind's preflight makes `[hidden]` win over the flex utilities
-              here. Keeping them mounted is what preserves a half-typed profile
-              name across a trip to the other tab. */}
-          <TabsContent value="profiles" className={TAB_PANEL}>
-            <ProfilesPanel
-              apps={apps}
-              available={available}
-              error={data.error}
-              sizes={sizes}
-              appId={appId}
-              onAppId={setAppId}
-              budget={budget}
-              reload={reload}
-              visit={visit}
-              fail={fail}
-              clearError={clearError}
-            />
-          </TabsContent>
+            {/* Both panels stay mounted — beUI hides the inactive one, and
+                Tailwind's preflight makes `[hidden]` win over the flex utilities
+                here. Keeping them mounted is what preserves a half-typed profile
+                name across a trip to the other tab. */}
+            <TabsContent value="profiles" className={TAB_PANEL}>
+              <ProfilesPanel
+                apps={apps}
+                available={available}
+                error={data.error}
+                sizes={sizes}
+                appId={appId}
+                onAppId={setAppId}
+                budget={budget}
+                reload={reload}
+                visit={visit}
+                fail={fail}
+                clearError={clearError}
+              />
+            </TabsContent>
 
-          <TabsContent value="keep-awake" className={TAB_PANEL}>
-            <KeepAwakeTab keepAwake={keepAwake} />
-          </TabsContent>
-        </Tabs>
+            <TabsContent value="keep-awake" className={TAB_PANEL}>
+              <KeepAwakeTab keepAwake={keepAwake} />
+            </TabsContent>
+          </Tabs>
 
-        <AutostartRow autostart={autostart} />
-      </main>
+          <AutostartRow autostart={autostart} />
+        </main>
+      </I18nProvider>
     </PathNamesContext.Provider>
   );
 }
