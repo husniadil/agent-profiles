@@ -68,8 +68,14 @@ pub struct Settings {
     pub thermal_guard: bool,
 }
 
+/// Ten minutes, not two: the two losses are not comparable. Holding a dead
+/// session too long spends battery, which the floor guard already bounds
+/// independently; releasing a live one loses the run, and the user sees a dead
+/// build rather than a released hold and cannot attribute it. A foreground
+/// command running five minutes is the most common thing an agent does that
+/// takes real time, so two minutes fails at the purpose of the feature.
 fn default_idle_window() -> u32 {
-    2
+    10
 }
 fn default_battery_floor() -> u8 {
     30

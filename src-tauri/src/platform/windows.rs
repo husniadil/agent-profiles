@@ -485,9 +485,9 @@ mod imp {
             // AC side is compared against the newtype and formatted with `.0`,
             // and the DC side against the `u32` inside it and formatted bare.
             // The same shape in `write` below is right for the same reason.
-            // Worth saying because no compiler on a Mac will say it: this file
-            // has never been built, so the next reader has only code that looks
-            // like a copy-paste error and nothing to tell them otherwise.
+            // Worth saying because the Windows compiler accepts it silently:
+            // without this note the next reader has only code that looks like a
+            // copy-paste error and nothing to tell them otherwise.
             if read_ac != ERROR_SUCCESS || read_dc != ERROR_SUCCESS.0 {
                 return Err(anyhow!(
                     "could not read the lid close action (errors {}, {read_dc})",
