@@ -1,9 +1,9 @@
 //! The app's own two settings: whether it updates itself, and what it speaks.
 //!
-//! Wired into the running app (tray, commands, `setup()`) in a later task;
-//! until then everything here is reachable only from its own tests, hence the
-//! blanket allow below rather than one on every item.
-#![allow(dead_code)]
+//! Wired into the running app: `Handle` lives on `AppState` (see
+//! `runtime.rs`), the `general_settings`/`set_general_settings` commands read
+//! and write it, and `tray_strings`/`Locale` drive the tray's own translated
+//! text.
 
 use anyhow::Result;
 use serde::{Deserialize, Serialize};

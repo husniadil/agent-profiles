@@ -121,8 +121,9 @@ pub fn keep_awake_settings(data_root: &std::path::Path) -> PathBuf {
 /// speaks. Beside `keep-awake.json` at the data root rather than inside a
 /// [`Paths`], for the same reason: these are facts about the installation, not
 /// about Claude or Codex.
-// Called from `general::Handle` once a later task wires it into `setup()`.
-#[allow(dead_code)]
+///
+/// Called from `general::Handle::new`, which `setup()` and `runtime.rs`
+/// construct at startup.
 pub fn general_settings(data_root: &std::path::Path) -> PathBuf {
     data_root.join("general.json")
 }
