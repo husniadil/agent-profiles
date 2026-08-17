@@ -4,7 +4,7 @@ import type { Strings } from "./index";
 /// `.summaryProfile`/`.summaryProfiles` pairs hold the same string. Deliberate.
 export const ja: Strings = {
   // Tabs
-  "tab.profiles": "Agent Profiles",
+  "tab.profiles": "エージェントプロファイル",
   "tab.keepAwake": "スリープ防止",
   "tab.general": "一般",
 

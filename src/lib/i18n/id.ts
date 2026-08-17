@@ -4,7 +4,7 @@ import type { Strings } from "./index";
 /// `.summaryProfile`/`.summaryProfiles` pairs hold the same string. Deliberate.
 export const id: Strings = {
   // Tabs
-  "tab.profiles": "Agent Profiles",
+  "tab.profiles": "Profil Agen",
   "tab.keepAwake": "Tetap Terjaga",
   "tab.general": "Umum",
 

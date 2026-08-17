@@ -2,7 +2,7 @@ import type { Strings } from "./index";
 
 export const pt: Strings = {
   // Tabs
-  "tab.profiles": "Agent Profiles",
+  "tab.profiles": "Perfis de agente",
   "tab.keepAwake": "Manter Ativo",
   "tab.general": "Geral",
 
