@@ -8,7 +8,16 @@ import { id } from "./id";
 import { ja } from "./ja";
 import { pt } from "./pt";
 
-export type Strings = typeof en;
+/// Every key of the English dictionary, each mapping to a plain `string`.
+///
+/// Deliberately NOT `typeof en`: `en` is `as const`, so `typeof en` types each
+/// value as its exact English literal (`"Version {{version}}"`), which would
+/// reject every translation — a locale file could only ever restate English.
+/// Mapping over the keys keeps the contract that matters — a locale missing a
+/// key, or inventing one, is a build error — while letting each value be any
+/// string. The keys are the shared shape; the values are what differ per
+/// language.
+export type Strings = { [K in keyof typeof en]: string };
 export type Key = keyof Strings;
 
 /// The picker's options, each named in its own language. A list of languages
