@@ -77,6 +77,12 @@ jobs:
       - uses: tauri-apps/tauri-action@v1
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          # Signing for the updater, which is a minisign keypair and nothing to
+          # do with OS code signing — the bundles stay unsigned, and the release
+          # notes above still say so. Without these the build succeeds and
+          # produces artifacts no installed copy will accept.
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
         with:
           # This is the switch between publishing and rehearsing. On a tag push
           # it is the tag; on `workflow_dispatch` it is empty, and the action
@@ -102,3 +108,7 @@ jobs:
           # Only on a rehearsal, where there is no release to hold the bundles.
           # A tag push has one, and uploading twice would just cost bandwidth.
           uploadWorkflowArtifacts: ${{ github.event_name != 'push' }}
+          # The manifest the updater reads. Same switch as every other release
+          # input: inert on a `workflow_dispatch` rehearsal, because `tagName` is
+          # empty there and the action skips all uploads.
+          uploadUpdaterJson: true
