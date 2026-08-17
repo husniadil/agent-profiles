@@ -4,6 +4,7 @@ import { motion, useReducedMotion } from "motion/react";
 import { ProfileRow } from "@/components/ProfileRow";
 import type { AppView } from "@/lib/api";
 import type { Sizes } from "@/hooks/useSizes";
+import { useT } from "@/lib/i18n";
 
 // The window is fixed and non-resizable, so its height is ours to get right, and
 // the right height is exactly the content's — a tray window is a popover, not a
@@ -183,6 +184,7 @@ function Rows({
   onError: (error: unknown) => void;
   clearError: () => void;
 }) {
+  const t = useT();
   const still = useReducedMotion() ?? false;
   const arrivals = useArrivals(app.profiles.map((profile) => profile.id));
   const arrival = useRef<HTMLLIElement | null>(null);
@@ -203,7 +205,7 @@ function Rows({
   // that now runs the full height of the window reads as something that failed
   // to load rather than as a fact about this app.
   if (app.profiles.length === 0) {
-    return <p className="px-2 py-1.5 text-callout text-ink-2">No profiles yet.</p>;
+    return <p className="px-2 py-1.5 text-callout text-ink-2">{t("profiles.empty")}</p>;
   }
 
   return (

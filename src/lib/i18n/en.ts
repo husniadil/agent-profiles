@@ -54,6 +54,7 @@ export const en = {
   "compose.thisApp": "This app",
 
   // A profile row
+  "profiles.empty": "No profiles yet.",
   "row.running": "Running",
   "row.sharedSignIn": "Shared sign-in",
   "row.open": "Open {{name}}",
@@ -175,7 +176,6 @@ export const en = {
   // General tab — language
   "general.language.label": "Language",
   "general.language.detail": "Applies to this window and the tray menu.",
-  "general.language.aria": "Interface language",
   "general.language.system": "Same as system",
 
   // General tab — updates
