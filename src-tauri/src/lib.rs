@@ -2,6 +2,7 @@ mod account;
 mod agent_activity;
 mod app_spec;
 mod commands;
+mod general;
 mod instance_manager;
 mod keep_awake;
 mod paths;
