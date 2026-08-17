@@ -184,6 +184,7 @@ export const en = {
   "general.update.aria": "Install updates automatically",
   "general.update.version": "Version {{version}}",
   "general.update.checkNow": "Check now",
+  "general.update.lastChecked": "Last checked at {{time}}",
   "general.update.idle": "Not checked yet.",
   "general.update.checking": "Checking for updates…",
   "general.update.current": "Up to date.",

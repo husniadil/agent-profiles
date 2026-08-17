@@ -174,6 +174,7 @@ export const es: Strings = {
   "general.update.aria": "Instalar actualizaciones automáticamente",
   "general.update.version": "Versión {{version}}",
   "general.update.checkNow": "Buscar ahora",
+  "general.update.lastChecked": "Última comprobación a las {{time}}",
   "general.update.idle": "Aún no se ha comprobado.",
   "general.update.checking": "Buscando actualizaciones…",
   "general.update.current": "Actualizado.",

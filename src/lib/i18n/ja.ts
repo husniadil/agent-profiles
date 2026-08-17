@@ -176,6 +176,7 @@ export const ja: Strings = {
   "general.update.aria": "更新を自動的にインストール",
   "general.update.version": "バージョン {{version}}",
   "general.update.checkNow": "今すぐ確認",
+  "general.update.lastChecked": "最終確認 {{time}}",
   "general.update.idle": "まだ確認していません。",
   "general.update.checking": "更新を確認中…",
   "general.update.current": "最新の状態です。",

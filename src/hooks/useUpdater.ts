@@ -18,6 +18,7 @@ export type UpdateState =
 export type Updater = {
   state: UpdateState;
   version: string;
+  lastChecked: number | null;
   checkNow: () => Promise<void>;
 };
 
@@ -31,6 +32,7 @@ export type Updater = {
 export function useUpdater(autoUpdate: boolean | undefined): Updater {
   const [state, setState] = useState<UpdateState>({ kind: "idle" });
   const [version, setVersion] = useState("");
+  const [lastChecked, setLastChecked] = useState<number | null>(null);
   /// One check at a time, and one automatic check per launch. Without this, the
   /// effect below would fire again every time `autoUpdate` is toggled off and on,
   /// and a second `downloadAndInstall` over the first would race two writers onto
@@ -52,6 +54,7 @@ export function useUpdater(autoUpdate: boolean | undefined): Updater {
     setState({ kind: "checking" });
     try {
       const update = await check();
+      setLastChecked(Date.now());
       if (!update) {
         setState({ kind: "current" });
         return;
@@ -117,6 +120,7 @@ export function useUpdater(autoUpdate: boolean | undefined): Updater {
   return {
     state,
     version,
+    lastChecked,
     checkNow: useCallback(() => run(), [run]),
   };
 }

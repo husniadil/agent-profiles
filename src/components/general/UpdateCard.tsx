@@ -62,12 +62,22 @@ export function UpdateCard({
             {t("general.update.version", { version: updater.version })}
           </p>
           <p className="truncate text-sub text-ink-2">{line(t, updater.state)}</p>
+          {updater.lastChecked !== null && (
+            <p className="text-sub text-ink-3">
+              {t("general.update.lastChecked", {
+                time: new Date(updater.lastChecked).toLocaleTimeString(),
+              })}
+            </p>
+          )}
         </div>
         <Button
           variant="secondary"
           size="sm"
           className="h-7 shrink-0 rounded-lg px-2.5 text-callout"
-          disabled={working}
+          // When auto-update is off, the manual check is off too — the
+          // invariant is "off means no network," and a live "Check now"
+          // would be a hole in it.
+          disabled={working || !autoUpdate}
           onClick={() => void updater.checkNow()}
         >
           {t("general.update.checkNow")}
