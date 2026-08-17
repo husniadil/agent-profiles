@@ -2,7 +2,9 @@
 
 Notable changes, newest first. This project follows [Semantic Versioning](https://semver.org).
 
-## [Unreleased]
+## [0.4.0] — 2026-08-17
+
+An agent can now finish its work with the lid shut. Off by default, and it asks for nothing until you turn it on.
 
 ### Added
 
