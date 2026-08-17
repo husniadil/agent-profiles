@@ -1,6 +1,5 @@
 import { useCallback, useEffect, useMemo, useState, type ReactNode } from "react";
 
-import { AutostartRow } from "@/components/AutostartRow";
 import { ProfilesPanel } from "@/components/ProfilesPanel";
 import { StatusStrip } from "@/components/StatusStrip";
 import { GeneralTab } from "@/components/general/GeneralTab";
@@ -46,9 +45,9 @@ function resolveLocale(chosen: Locale | null | undefined): Locale {
 /// verbatim so it can be re-synced from beui.dev.
 const TAB_LIST = "flex h-9 shrink-0 items-stretch gap-4 border-hairline bg-surface px-5";
 const TAB_TRIGGER = "min-h-0 px-0 py-0 text-callout font-normal";
-/// The band that takes whatever the strip and the floor leave. `min-h-0` is what
-/// lets it shrink at all: a flex item's default `min-height: auto` refuses to go
-/// below its content.
+/// The band that takes whatever the strip leaves. `min-h-0` is what lets it
+/// shrink at all: a flex item's default `min-height: auto` refuses to go below
+/// its content.
 const TAB_PANEL = "mt-0 flex min-h-0 flex-1 flex-col";
 
 export default function App() {
@@ -117,9 +116,9 @@ export default function App() {
       <I18nProvider locale={resolveLocale(general.settings?.locale)}>
         {/* The window itself, not a card floating on a canvas: the title bar above
             it already carries the name, so this begins at the status strip. */}
-        {/* Fixed height, four bands: a strip that does not move, the tab bar, a
-            panel that takes whatever is left, and a chrome bar on the floor. The
-            window is resized by the user, not by how many profiles they have. */}
+        {/* Fixed height, three bands: a strip that does not move, the tab bar,
+            and a panel that takes whatever is left. The window is resized by
+            the user, not by how many profiles they have. */}
         <main className="flex h-screen flex-col overflow-hidden bg-bg font-sans text-ink">
           <StatusStrip
             profiles={counts.profiles}
@@ -147,10 +146,8 @@ export default function App() {
               />
             }
             keepAwake={<KeepAwakeTab keepAwake={keepAwake} />}
-            general={<GeneralTab general={general} />}
+            general={<GeneralTab general={general} autostart={autostart} />}
           />
-
-          <AutostartRow autostart={autostart} />
         </main>
       </I18nProvider>
     </PathNamesContext.Provider>

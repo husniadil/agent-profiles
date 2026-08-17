@@ -5,8 +5,11 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/motion/select";
+import { Switch } from "@/components/motion/switch";
+import type { Autostart } from "@/hooks/useAutostart";
 import type { General } from "@/hooks/useGeneral";
 import type { Locale } from "@/lib/api";
+import { SWITCH } from "@/lib/controls";
 import { LOCALE_NAMES, useT } from "@/lib/i18n";
 
 /// Same shell as the other two tabs use, for the same reason: a card here has to
@@ -21,7 +24,13 @@ const FIELD = "h-7 rounded-lg px-2.5 text-callout";
 /// indistinguishable from an unset value on the way back.
 const SYSTEM = "system";
 
-export function GeneralTab({ general }: { general: General }) {
+export function GeneralTab({
+  general,
+  autostart,
+}: {
+  general: General;
+  autostart: Autostart;
+}) {
   const t = useT();
 
   if (!general.settings) {
@@ -66,6 +75,31 @@ export function GeneralTab({ general }: { general: General }) {
               ))}
             </SelectContent>
           </Select>
+        </div>
+        {/* Where the platform will not take the setting the row stays, greyed,
+            and says why in its sub-text, rather than disappearing: a control
+            that is present and explains itself teaches the rule, a control
+            that is missing teaches nothing. */}
+        <div className={`${BAND} ${DIVIDED}`}>
+          <div>
+            <p
+              className={
+                autostart.state.offered ? "text-callout text-ink" : "text-callout text-ink-2"
+              }
+            >
+              {t("autostart.label")}
+            </p>
+            <p className="text-sub text-ink-2">
+              {t(autostart.state.offered ? "autostart.offered" : "autostart.unavailable")}
+            </p>
+          </div>
+          <Switch
+            className={`shrink-0 ${SWITCH}`}
+            checked={autostart.state.enabled}
+            disabled={!autostart.state.offered}
+            onCheckedChange={(next) => void autostart.toggle(next)}
+            ariaLabel={t("autostart.aria")}
+          />
         </div>
         {/* The update band lands here in Task 12. The divider class is defined
             now so that task is one insertion rather than a restructure. */}

@@ -29,7 +29,7 @@ export function StatusStrip({
     // Not sticky any more: the list scrolls inside its own frame, so there is
     // nothing left for this to stick over — only a stacking context and an
     // overlap waiting to happen. `px-5` lines its content up with the first
-    // row's chip and with the bar on the floor.
+    // row's chip.
     <header className="flex h-10 shrink-0 items-center justify-between gap-3 border-b border-hairline bg-surface px-5">
       <p aria-hidden="true" className="flex items-baseline gap-1.5 text-callout text-ink-2">
         <Count value={profiles} className="font-mono text-ink" />

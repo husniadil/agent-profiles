@@ -27,7 +27,7 @@ export const en = {
   "status.summaryRunning": "{{count}} running",
   "status.summaryOnDisk": "{{size}} on disk",
 
-  // Start-at-login row, on the floor of the window
+  // Start-at-login row, in the General tab
   "autostart.label": "Start at login",
   "autostart.offered": "opens the tray only — no profile is launched",
   "autostart.unavailable": "available once Agent Profiles is installed",
