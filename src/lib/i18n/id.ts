@@ -176,6 +176,7 @@ export const id: Strings = {
   "general.update.aria": "Pasang pembaruan secara otomatis",
   "general.update.version": "Versi {{version}}",
   "general.update.checkNow": "Periksa sekarang",
+  "general.update.checkFailed": "Tidak dapat memeriksa pembaruan",
   "general.update.lastChecked": "Terakhir diperiksa {{time}}",
   "general.update.idle": "Belum diperiksa.",
   "general.update.checking": "Memeriksa pembaruan…",

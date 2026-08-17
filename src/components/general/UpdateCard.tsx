@@ -23,7 +23,13 @@ function line(t: T, state: UpdateState): string {
     case "installing":
       return t("general.update.installing");
     case "failed":
-      return t("general.update.failed", { reason: state.reason });
+      // A failed check is not a failed update: the common case (an endpoint with
+      // no manifest yet, or a dropped connection) means the app is most likely
+      // fine and simply couldn't look. Only a genuine download/install failure
+      // gets the alarming "could not update", with its reason.
+      return state.phase === "check"
+        ? t("general.update.checkFailed")
+        : t("general.update.failed", { reason: state.reason });
   }
 }
 

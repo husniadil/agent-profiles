@@ -13,7 +13,12 @@ export type UpdateState =
   | { kind: "current" }
   | { kind: "downloading"; version: string; percent: number }
   | { kind: "installing"; version: string }
-  | { kind: "failed"; reason: string };
+  /// `phase` is which step failed: "check" means we never reached an update —
+  /// the manifest was unreachable or unreadable, which is not the same news as
+  /// an actual update that failed to install ("install"). The window says very
+  /// different things for the two, so a 404 on the endpoint reads as "couldn't
+  /// check" rather than the alarming "could not update".
+  | { kind: "failed"; phase: "check" | "install"; reason: string };
 
 export type Updater = {
   state: UpdateState;
@@ -52,6 +57,9 @@ export function useUpdater(autoUpdate: boolean | undefined): Updater {
     if (busy.current) return;
     busy.current = true;
     setState({ kind: "checking" });
+    // Which step we are on when something throws: until an update is in hand the
+    // failure is a failed *check*, after that a failed *install*.
+    let phase: "check" | "install" = "check";
     try {
       const update = await check();
       setLastChecked(Date.now());
@@ -59,6 +67,7 @@ export function useUpdater(autoUpdate: boolean | undefined): Updater {
         setState({ kind: "current" });
         return;
       }
+      phase = "install";
       let total = 0;
       let received = 0;
       setState({ kind: "downloading", version: update.version, percent: 0 });
@@ -94,7 +103,7 @@ export function useUpdater(autoUpdate: boolean | undefined): Updater {
       // option would be a promise we could only keep on two platforms.
       await relaunch();
     } catch (cause) {
-      setState({ kind: "failed", reason: errorMessage(cause) });
+      setState({ kind: "failed", phase, reason: errorMessage(cause) });
     } finally {
       busy.current = false;
     }
