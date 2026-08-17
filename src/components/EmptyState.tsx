@@ -1,6 +1,7 @@
 import { PackageOpen } from "lucide-react";
 
 import type { AppView } from "@/lib/api";
+import { useT } from "@/lib/i18n";
 import { systemNames } from "@/lib/system";
 
 /// The window with nothing to manage.
@@ -11,6 +12,7 @@ import { systemNames } from "@/lib/system";
 /// list here, so this sentence cannot come to describe a different set of apps
 /// than the one the app supports.
 export function EmptyState({ apps }: { apps: AppView[] }) {
+  const t = useT();
   const names = apps.map((app) => app.label).join(", ");
   return (
     // Takes the list card's slot and the height that comes with it. Centring
@@ -24,18 +26,20 @@ export function EmptyState({ apps }: { apps: AppView[] }) {
         className="mx-auto text-ink-3"
       />
       <p className="mt-3 text-title font-semibold text-ink">
-        Nothing to open yet
+        {t("empty.title")}
       </p>
       <p className="mx-auto mt-1.5 max-w-[46ch] text-body text-ink-2">
-        Agent Profiles runs the coding agents already installed on {systemNames().machine}
-        {names ? ` — ${names}` : ""}. Install one, then reopen this window.
+        {t("empty.body", {
+          machine: systemNames(t).machine,
+          names: names ? ` — ${names}` : "",
+        })}
       </p>
       {/* These are the apps this tool supports, not ones found on the machine:
           this screen only renders when nothing is installed, so a "found" count
           would always be the whole list under a heading that says nothing was
           found — a contradiction. "supported" is the reading that stays true. */}
       <p className="mt-3 font-mono text-sub text-ink-2">
-        {apps.length} apps supported
+        {t("empty.appsSupported", { count: apps.length })}
       </p>
     </div>
   );

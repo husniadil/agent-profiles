@@ -3,6 +3,7 @@ import { AlertTriangle, Moon, ShieldCheck } from "lucide-react";
 import { Button } from "@/components/motion/button/base";
 import type { KeepAwake } from "@/hooks/useKeepAwake";
 import type { KeepAwakeStatus, Phase } from "@/lib/api";
+import { useT } from "@/lib/i18n";
 import { systemNames } from "@/lib/system";
 
 /// The same 28px control the compose row uses, so a button in this tab is the
@@ -93,7 +94,8 @@ export function AwakeStatusCard({
   status: KeepAwakeStatus;
   keepAwake: KeepAwake;
 }) {
-  const { system, machine } = systemNames();
+  const t = useT();
+  const { system, machine } = systemNames(t);
 
   // Ordered by what blocks what. An unsupported platform makes authorization
   // meaningless, and a stranded machine is a live problem that outranks a

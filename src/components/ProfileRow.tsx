@@ -9,6 +9,7 @@ import { StateTag } from "@/components/StateTag";
 import { DeletePanel, RenamePanel } from "@/components/RowPanel";
 import * as api from "@/lib/api";
 import type { ProfileView } from "@/lib/api";
+import { useT } from "@/lib/i18n";
 import { cn } from "@/lib/utils";
 
 type Panel = { kind: "none" } | { kind: "rename" } | { kind: "delete"; bytes: number };
@@ -42,6 +43,7 @@ export function ProfileRow({
   onError: (error: unknown) => void;
   clearError: () => void;
 }) {
+  const t = useT();
   const [panel, setPanel] = useState<Panel>({ kind: "none" });
 
   async function act(work: Promise<unknown>): Promise<void> {
@@ -84,12 +86,12 @@ export function ProfileRow({
                 word say the same thing twice on purpose. */}
             {profile.running ? (
               <StateTag token="var(--live)" status="success">
-                Running
+                {t("row.running")}
               </StateTag>
             ) : null}
             {profile.shares_account ? (
               <StateTag token="var(--warning)" status="warning">
-                Shared sign-in
+                {t("row.sharedSignIn")}
               </StateTag>
             ) : null}
           </div>
@@ -141,8 +143,8 @@ export function ProfileRow({
               variant="ghost"
               size="icon"
               className={ICON_ACTION}
-              title={`Open ${profile.label}`}
-              aria-label={`Open ${profile.label}`}
+              title={t("row.open", { name: profile.label })}
+              aria-label={t("row.open", { name: profile.label })}
               onClick={() => void act(api.openProfile(profile.app_id, profile.id))}
             >
               <ExternalLink size={15} strokeWidth={1.75} aria-hidden="true" />
@@ -151,8 +153,8 @@ export function ProfileRow({
               variant="ghost"
               size="icon"
               className={ICON_ACTION}
-              title={`Rename ${profile.label}`}
-              aria-label={`Rename ${profile.label}`}
+              title={t("row.rename", { name: profile.label })}
+              aria-label={t("row.rename", { name: profile.label })}
               onClick={() => setPanel({ kind: "rename" })}
             >
               <Pencil size={15} strokeWidth={1.75} aria-hidden="true" />
@@ -177,7 +179,7 @@ export function ProfileRow({
                 size="icon"
                 className={ICON_ACTION}
                 disabled
-                aria-label={`${profile.label} is the app's own installation and cannot be deleted`}
+                aria-label={t("row.deleteUnavailable", { name: profile.label })}
               >
                 <Trash2 size={15} strokeWidth={1.75} aria-hidden="true" />
               </Button>
@@ -190,8 +192,8 @@ export function ProfileRow({
                   "hover:bg-[color-mix(in_oklab,var(--danger)_14%,var(--surface))]",
                   "hover:text-[color-mix(in_oklab,var(--danger)_70%,var(--ink))]",
                 )}
-                title={`Delete ${profile.label}`}
-                aria-label={`Delete ${profile.label}`}
+                title={t("row.deleteTrigger", { name: profile.label })}
+                aria-label={t("row.deleteTrigger", { name: profile.label })}
                 onClick={() => void askToDelete()}
               >
                 <Trash2 size={15} strokeWidth={1.75} aria-hidden="true" />

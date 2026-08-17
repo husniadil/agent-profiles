@@ -4,6 +4,7 @@ import { Tooltip } from "@/components/motion/tooltip";
 
 import type { SocketBudget } from "@/lib/api";
 import { readable } from "@/lib/color";
+import { useT } from "@/lib/i18n";
 import { shortenPath, usePathNames } from "@/lib/paths";
 import { systemNames } from "@/lib/system";
 import { cn } from "@/lib/utils";
@@ -32,6 +33,7 @@ const TIGHT_BYTES = 8;
 /// this block was a number nobody could act on, held permanently in a window
 /// with no room to spare. It comes back the moment the margin gets thin.
 export function BudgetMeter({ budget, appLabel }: { budget: SocketBudget; appLabel: string }) {
+  const t = useT();
   const names = usePathNames();
   const still = useReducedMotion();
   const limit = budget.limit_bytes;
@@ -81,7 +83,7 @@ export function BudgetMeter({ budget, appLabel }: { budget: SocketBudget; appLab
         <div
           className="mt-1.5 h-1 overflow-hidden rounded-full bg-line"
           role="meter"
-          aria-label="Socket path budget"
+          aria-label={t("budget.aria")}
           aria-valuenow={budget.used_bytes}
           aria-valuemin={0}
           aria-valuemax={limit}
@@ -104,8 +106,8 @@ export function BudgetMeter({ budget, appLabel }: { budget: SocketBudget; appLab
             style={over ? { color: danger } : undefined}
           >
             {over
-              ? `${budget.used_bytes - limit} bytes over the limit`
-              : `socket path budget · ${systemNames().system} stops at ${limit}`}
+              ? t("budget.over", { bytes: budget.used_bytes - limit })
+              : t("budget.under", { system: systemNames(t).system, limit })}
           </span>
           <span
             className="shrink-0 font-mono tabular-nums"
@@ -114,7 +116,7 @@ export function BudgetMeter({ budget, appLabel }: { budget: SocketBudget; appLab
             <b className="font-normal text-ink" style={over ? { color: danger } : undefined}>
               {budget.used_bytes}
             </b>
-            {` / ${limit} bytes`}
+            {t("budget.ofLimit", { limit })}
           </span>
         </div>
 
@@ -140,8 +142,7 @@ export function BudgetMeter({ budget, appLabel }: { budget: SocketBudget; appLab
 
       {over ? (
         <p className="mt-1.5 text-sub text-ink-2">
-          {appLabel} would not be able to create its socket here. Move the data root somewhere
-          shorter to make room.
+          {t("budget.cannotCreate", { app: appLabel })}
         </p>
       ) : null}
 
@@ -150,9 +151,7 @@ export function BudgetMeter({ budget, appLabel }: { budget: SocketBudget; appLab
           at. The readout says it in place; this says it out loud, and only in
           the case that warrants interrupting. */}
       <p className="sr-only" role="alert">
-        {over
-          ? `This folder is too deep for ${budget.used_bytes - limit} bytes of the socket path a profile needs. No profile can be added here.`
-          : ""}
+        {over ? t("budget.tooDeep", { bytes: budget.used_bytes - limit }) : ""}
       </p>
     </>
   );

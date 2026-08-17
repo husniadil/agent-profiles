@@ -9,6 +9,7 @@ import { Switch } from "@/components/motion/switch";
 import type { KeepAwake } from "@/hooks/useKeepAwake";
 import type { KeepAwakeSettings, KeepAwakeStatus, Trigger } from "@/lib/api";
 import { SWITCH } from "@/lib/controls";
+import { useT } from "@/lib/i18n";
 import { systemNames } from "@/lib/system";
 
 /// Only the options that are not their own explanation carry a line of prose.
@@ -295,7 +296,8 @@ function KeepAwakePanel({
   const armed = status.supported && !pendingAuth && settings.trigger !== "off";
   // "this Mac" / "this PC" / "this computer". The tab is about the reader's own
   // hardware, and this feature now runs on all three.
-  const { machine } = systemNames();
+  const t = useT();
+  const { machine } = systemNames(t);
   const Machine = machine[0].toUpperCase() + machine.slice(1);
 
   const [floor, setFloor] = useCommitted(

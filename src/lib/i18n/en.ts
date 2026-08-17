@@ -26,6 +26,7 @@ export const en = {
   "status.summaryProfiles": "{{count}} profiles",
   "status.summaryRunning": "{{count}} running",
   "status.summaryOnDisk": "{{size}} on disk",
+  "status.revealFolder": "Show the profiles folder in the file manager: {{path}}",
 
   // Start-at-login row, in the General tab
   "autostart.label": "Start at login",
@@ -36,7 +37,8 @@ export const en = {
   // Nothing installed
   "empty.title": "Nothing to open yet",
   "empty.body":
-    "No supported app was found{{names}}. Install one, then reopen this window.",
+    "Agent Profiles runs the coding agents already installed on {{machine}}{{names}}. Install one, then reopen this window.",
+  "empty.appsSupported": "{{count}} apps supported",
 
   // Add a profile
   "compose.heading": "New profile",
@@ -44,6 +46,9 @@ export const en = {
   "compose.nameAria": "Profile name",
   "compose.appAria": "App",
   "compose.add": "Add",
+  "compose.adding": "Adding",
+  "compose.added": "Added",
+  "compose.retry": "Retry",
   "compose.needName": "Enter a name for this profile.",
   "compose.noApp": "No supported app was found to add a profile to.",
   "compose.thisApp": "This app",
@@ -53,9 +58,10 @@ export const en = {
   "row.sharedSignIn": "Shared sign-in",
   "row.open": "Open {{name}}",
   "row.rename": "Rename {{name}}",
+  "row.deleteTrigger": "Delete {{name}}",
   "row.delete": "Delete {{name}} permanently. Press and hold to confirm.",
   "row.deleteUnavailable":
-    "The default profile uses the app's own folder, which is not ours to delete.",
+    "{{name}} is the app's own installation and cannot be deleted",
   "row.renameNameAria": "New name for {{name}}",
   "row.saveName": "Save name",
   "row.cancel": "Cancel",
@@ -64,7 +70,7 @@ export const en = {
   "row.completeLabel": "Deleting…",
   "row.keepIt": "Keep it",
   "row.deleteBody":
-    "This deletes {{size}} in its folder. This can’t be undone.",
+    "Delete {{label}} and the {{bytes}} in its folder. This can’t be undone.",
 
   // Socket path budget
   "budget.aria": "Socket path budget",
@@ -73,6 +79,8 @@ export const en = {
   "budget.ofLimit": " / {{limit}} bytes",
   "budget.tooDeep":
     "This folder is too deep for {{bytes}} bytes of the socket path a profile needs. No profile can be added here.",
+  "budget.cannotCreate":
+    "{{app}} would not be able to create its socket here. Move the data root somewhere shorter to make room.",
 
   // Keep Awake — status card
   "awake.off.title": "Off",
