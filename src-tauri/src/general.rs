@@ -347,6 +347,27 @@ mod tests {
     }
 
     #[test]
+    fn a_handle_reads_what_was_written_through_it() {
+        let dir = tempfile::tempdir().unwrap();
+        let handle = Handle::new(dir.path().to_path_buf(), None);
+        // Whatever the machine running this test speaks, an explicit choice wins.
+        handle
+            .set_settings(Settings {
+                auto_update: false,
+                locale: Some(Locale::Es),
+            })
+            .unwrap();
+        assert_eq!(handle.locale(), Locale::Es);
+        assert!(!handle.settings().auto_update);
+
+        // And it is on disk, not only in the mutex: a second handle over the same
+        // directory is what the next launch of the app amounts to.
+        let reopened = Handle::new(dir.path().to_path_buf(), None);
+        assert_eq!(reopened.locale(), Locale::Es);
+        assert!(!reopened.settings().auto_update);
+    }
+
+    #[test]
     fn locale_tags_are_the_ones_the_frontend_uses() {
         // The tag crosses the command boundary as a string and is looked up in a
         // TypeScript record. A serde rename here silently breaks that lookup.

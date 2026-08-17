@@ -22,6 +22,7 @@ pub struct AppState {
     /// Keeping the machine awake while an agent works. Present on every
     /// platform; inert where [`Platform::can_hold_awake`] is false.
     pub keep_awake: crate::keep_awake::Handle,
+    pub general: crate::general::Handle,
 }
 
 impl AppState {
@@ -153,6 +154,7 @@ mod tests {
                     stranded: false,
                 },
             ),
+            general: crate::general::Handle::new(root.join("data"), None),
         }
     }
 
