@@ -48,9 +48,12 @@ impl AppState {
 
     /// Whether this app is installed, and the reason if not.
     ///
-    /// Resolved on every use rather than cached at startup: a user can install
-    /// the second app without restarting this one, and a cached "missing" would
-    /// leave its section greyed out until they did.
+    /// Resolved on every use rather than cached: an app's binary can come and go
+    /// while this runs, so re-checking greys or un-greys its section without a
+    /// restart. This only covers apps `build` already listed. An app whose stock
+    /// data directory was absent at startup has no runtime at all until the next
+    /// launch (see `build`) — on macOS that never happens, on Windows it is the
+    /// not-installed case.
     pub fn availability(&self, runtime: &AppRuntime) -> Option<String> {
         self.platform
             .binary(&runtime.spec.locations, runtime.spec.product)
