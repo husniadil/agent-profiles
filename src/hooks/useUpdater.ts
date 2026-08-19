@@ -130,6 +130,12 @@ export function useUpdater(autoUpdate: boolean | undefined): Updater {
     state,
     version,
     lastChecked,
-    checkNow: useCallback(() => run(), [run]),
+    // "Off means no network" lives here, not only on the button's disabled
+    // prop: a manual check must never fire while the switch is off (or before
+    // settings land, when `autoUpdate` is undefined).
+    checkNow: useCallback(async () => {
+      if (!autoUpdate) return;
+      await run();
+    }, [autoUpdate, run]),
   };
 }
