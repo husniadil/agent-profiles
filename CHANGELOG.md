@@ -2,7 +2,7 @@
 
 Notable changes, newest first. This project follows [Semantic Versioning](https://semver.org).
 
-## [Unreleased]
+## [0.5.0] — 2026-08-19
 
 A General tab, carrying a silent updater and six languages for the window and the tray.
 
@@ -15,6 +15,10 @@ A General tab, carrying a silent updater and six languages for the window and th
 
 - **Start at login moved into the General tab**, alongside the new update and language rows, rather than sitting on its own beside the profile list. All three are settings about how the app itself behaves rather than about a profile, and now live together.
 - Every visible string in the window now comes from a typed dictionary rather than being written inline in JSX; a locale file missing a key fails `pnpm build`, so a translation cannot ship incomplete.
+
+### Fixed
+
+- **Windows: one uninstalled app no longer stops the whole app from starting.** A declared app whose data directory was absent aborted startup and took every other app down with it; it is now skipped. It is skipped entirely rather than listed as unavailable, which is tracked in [#11](https://github.com/husniadil/agent-profiles/issues/11).
 
 ## [0.4.0] — 2026-08-17
 
