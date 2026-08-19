@@ -22,6 +22,7 @@ pub struct AppState {
     /// Keeping the machine awake while an agent works. Present on every
     /// platform; inert where [`Platform::can_hold_awake`] is false.
     pub keep_awake: crate::keep_awake::Handle,
+    pub general: crate::general::Handle,
 }
 
 impl AppState {
@@ -47,9 +48,12 @@ impl AppState {
 
     /// Whether this app is installed, and the reason if not.
     ///
-    /// Resolved on every use rather than cached at startup: a user can install
-    /// the second app without restarting this one, and a cached "missing" would
-    /// leave its section greyed out until they did.
+    /// Resolved on every use rather than cached: an app's binary can come and go
+    /// while this runs, so re-checking greys or un-greys its section without a
+    /// restart. This only covers apps `build` already listed. An app whose stock
+    /// data directory was absent at startup has no runtime at all until the next
+    /// launch (see `build`) — on macOS that never happens, on Windows it is the
+    /// not-installed case.
     pub fn availability(&self, runtime: &AppRuntime) -> Option<String> {
         self.platform
             .binary(&runtime.spec.locations, runtime.spec.product)
@@ -58,29 +62,36 @@ impl AppState {
     }
 }
 
-/// Builds one runtime per app declared for this platform.
+/// Builds one runtime per app declared *and* installed on this platform.
 ///
-/// Every declared app gets a runtime whether or not it is installed — nothing is
-/// written to disk until a profile is actually added, and resolving availability
-/// lazily is what lets a newly installed app appear without a restart. An app
-/// not declared here is skipped outright rather than reported as missing: it is
-/// not that the user lacks it, it is that nobody has checked this platform.
+/// An app declared here but not installed has no stock data directory to point
+/// its Default profile at, so it is skipped rather than aborting startup for
+/// every other app — it appears the next time this launches with the app
+/// present. A missing app must never be fatal: a user with only one of the
+/// declared apps still gets that one. An app not declared here is skipped
+/// earlier still: nobody has checked this platform for it.
 pub fn build(platform: &dyn Platform) -> Result<Vec<AppRuntime>> {
     let root = platform.data_root()?;
-    app_spec::all()
+    let mut runtimes = Vec::new();
+    for spec in app_spec::all()
         .iter()
         .filter(|spec| platform.declared_here(&spec.locations))
-        .map(|spec| {
-            let paths = Paths::new(root.join(spec.id));
-            let default_dir = platform.default_profile_dir(&spec.locations)?;
-            let store = ProfileStore::load(&paths, &default_dir)?;
-            Ok(AppRuntime {
-                spec,
-                paths,
-                store: Mutex::new(store),
-            })
-        })
-        .collect()
+    {
+        // Not installed: no stock directory to adopt as Default. Skip it — this
+        // is the difference between "you don't have ChatGPT" and "Agent Profiles
+        // won't start", and only the first is acceptable.
+        let Ok(default_dir) = platform.default_profile_dir(&spec.locations) else {
+            continue;
+        };
+        let paths = Paths::new(root.join(spec.id));
+        let store = ProfileStore::load(&paths, &default_dir)?;
+        runtimes.push(AppRuntime {
+            spec,
+            paths,
+            store: Mutex::new(store),
+        });
+    }
+    Ok(runtimes)
 }
 
 #[cfg(test)]
@@ -153,6 +164,7 @@ mod tests {
                     stranded: false,
                 },
             ),
+            general: crate::general::Handle::new(root.join("data"), None),
         }
     }
 
@@ -211,6 +223,65 @@ mod tests {
     fn an_unknown_app_id_is_an_error_rather_than_a_panic() {
         let d = tempfile::tempdir().unwrap();
         assert!(state(d.path()).app("no-such-app").is_err());
+    }
+
+    #[test]
+    fn an_app_with_no_stock_directory_is_skipped_not_fatal() {
+        // The Windows crash: one declared app is not installed, so its stock
+        // directory does not exist. That must skip the app, never abort the
+        // build and take every other app down with it. Modelled by failing
+        // `default_profile_dir` for codex (its default profile is `.codex`)
+        // while claude resolves normally.
+        struct PartialInstall {
+            root: PathBuf,
+        }
+        impl Platform for PartialInstall {
+            fn declared_here(&self, locations: &Locations) -> bool {
+                locations.macos.is_some()
+            }
+            fn data_root(&self) -> Result<PathBuf> {
+                Ok(self.root.join("data"))
+            }
+            fn default_profile_dir(&self, locations: &Locations) -> Result<PathBuf> {
+                let default = locations.macos.as_ref().unwrap().default_profile;
+                if default == ".codex" {
+                    return Err(anyhow!("the app's data directory was not found"));
+                }
+                Ok(self.root.join("home").join(default))
+            }
+            fn binary(&self, _l: &Locations, _p: &str) -> Result<PathBuf> {
+                Err(anyhow!("not installed"))
+            }
+            fn process_marker(&self, locations: &Locations) -> Result<String> {
+                Ok(locations.macos.as_ref().unwrap().binary.to_string())
+            }
+            fn scan(&self, _t: &[ScanTarget]) -> Result<Vec<RunningProcess>> {
+                Ok(Vec::new())
+            }
+            fn link(&self, _s: &Path, _t: &Path) -> Result<()> {
+                Ok(())
+            }
+            fn focus(&self, _pid: i32, _h: &FocusHint) -> Result<FocusOutcome> {
+                Ok(FocusOutcome::Focused)
+            }
+            fn quit(&self, _pid: i32) -> Result<()> {
+                Ok(())
+            }
+        }
+
+        let d = tempfile::tempdir().unwrap();
+        let apps = build(&PartialInstall {
+            root: d.path().to_path_buf(),
+        })
+        .expect("a missing app must not fail the whole build");
+        assert!(
+            apps.iter().any(|r| r.spec.id == "claude"),
+            "the installed app survives"
+        );
+        assert!(
+            !apps.iter().any(|r| r.spec.id == "codex"),
+            "the uninstalled app is skipped, not present"
+        );
     }
 
     #[test]

@@ -15,6 +15,7 @@ import {
 } from "@/components/motion/select";
 import * as api from "@/lib/api";
 import type { AppView, SocketBudget } from "@/lib/api";
+import { useT } from "@/lib/i18n";
 
 // One band of 32px controls at 13px: the field, the picker and the button are
 // the same height and the same type size, so the compose row reads as one thing
@@ -45,6 +46,7 @@ export function ComposeCard({
   reload: () => Promise<void>;
   visit: number;
 }) {
+  const t = useT();
   const [label, setLabel] = useState("");
   // Adding a profile reports next to the form rather than in the page banner.
   // The banner sits above the profile list, which on any populated window is far
@@ -83,7 +85,7 @@ export function ComposeCard({
 
   const over =
     budget !== null && budget.limit_bytes !== null && budget.used_bytes > budget.limit_bytes;
-  const appLabel = apps.find((app) => app.id === appId)?.label ?? "This app";
+  const appLabel = apps.find((app) => app.id === appId)?.label ?? t("compose.thisApp");
 
   function refuse(message: string): void {
     setError(message);
@@ -95,11 +97,11 @@ export function ComposeCard({
     if (state === "loading") return;
     const name = label.trim();
     if (!name) {
-      refuse("Enter a name for this profile.");
+      refuse(t("compose.needName"));
       return;
     }
     if (!appId) {
-      refuse("No supported app was found to add a profile to.");
+      refuse(t("compose.noApp"));
       return;
     }
     setState("loading");
@@ -123,7 +125,7 @@ export function ComposeCard({
         id="compose-heading"
         className="mb-1.5 text-sub font-semibold text-ink-2"
       >
-        New profile
+        {t("compose.heading")}
       </h2>
 
       {/* Aligned to the top, not stretched: a refusal grows the field's box
@@ -138,8 +140,8 @@ export function ComposeCard({
           // sits on one line beside the running badge without truncating.
           maxLength={15}
           autoComplete="off"
-          placeholder="Name this profile"
-          aria-label="Profile name"
+          placeholder={t("compose.namePlaceholder")}
+          aria-label={t("compose.nameAria")}
           value={label}
           // A refusal is about the label as it was submitted. The moment it is
           // edited the verdict is stale, and leaving it on screen invites the
@@ -173,7 +175,7 @@ export function ComposeCard({
                 any button gets one: inside it, out of sight. The accessible
                 name reads "App, <chosen app>". */}
             <SelectTrigger className={CONTROL}>
-              <span className="sr-only">App</span>
+              <span className="sr-only">{t("compose.appAria")}</span>
               <SelectValue />
             </SelectTrigger>
             <SelectContent>
@@ -203,11 +205,11 @@ export function ComposeCard({
           className={`${CONTROL} w-[88px] shrink-0`}
           disabled={over}
           state={state}
-          loadingText="Adding"
-          successText="Added"
-          errorText="Retry"
+          loadingText={t("compose.adding")}
+          successText={t("compose.added")}
+          errorText={t("compose.retry")}
         >
-          Add
+          {t("compose.add")}
         </StatefulButton>
       </form>
 

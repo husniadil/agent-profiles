@@ -3,7 +3,8 @@ import { revealItemInDir } from "@tauri-apps/plugin-opener";
 
 import { ByteCount, Count } from "@/components/Counters";
 import { Tooltip } from "@/components/motion/tooltip";
-import { statusLine } from "@/format";
+import { summary } from "@/format";
+import { useT } from "@/lib/i18n";
 import { shortenRoot, usePathNames } from "@/lib/paths";
 
 /// The one line that replaces the eyebrow, the h1 and the lede.
@@ -23,32 +24,33 @@ export function StatusStrip({
   bytes: number | null;
   onError: (error: unknown) => void;
 }) {
+  const t = useT();
   const { dataRoot, homePath } = usePathNames();
 
   return (
     // Not sticky any more: the list scrolls inside its own frame, so there is
     // nothing left for this to stick over — only a stacking context and an
     // overlap waiting to happen. `px-5` lines its content up with the first
-    // row's chip and with the bar on the floor.
+    // row's chip.
     <header className="flex h-10 shrink-0 items-center justify-between gap-3 border-b border-hairline bg-surface px-5">
       <p aria-hidden="true" className="flex items-baseline gap-1.5 text-callout text-ink-2">
         <Count value={profiles} className="font-mono text-ink" />
-        <span>{profiles === 1 ? "profile" : "profiles"}</span>
+        <span>{profiles === 1 ? t("status.profile") : t("status.profiles")}</span>
         <Separator />
         <Count value={running} className="font-mono text-ink" />
-        <span>running</span>
+        <span>{t("status.running")}</span>
         {/* Absent until every row has reported: a total that counts half the
             profiles is a wrong number stated confidently. */}
         {bytes !== null ? (
           <>
             <Separator />
             <ByteCount bytes={bytes} className="font-mono text-ink" />
-            <span>on disk</span>
+            <span>{t("status.onDisk")}</span>
           </>
         ) : null}
       </p>
       <span className="sr-only" aria-live="polite">
-        {statusLine(profiles, running, bytes)}
+        {summary(t, profiles, running, bytes)}
       </span>
 
       {/* The strip names the folder; this is the only way to actually get to it. */}
@@ -74,7 +76,7 @@ export function StatusStrip({
           >
             <FolderOpen size={13} strokeWidth={1.75} aria-hidden="true" className="shrink-0" />
             <span className="sr-only">
-              Show the profiles folder in the file manager: {dataRoot}
+              {t("status.revealFolder", { path: dataRoot })}
             </span>
             <bdi aria-hidden="true" className="truncate font-mono text-sub">
               {shortenRoot(dataRoot, homePath)}

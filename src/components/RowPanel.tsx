@@ -6,6 +6,7 @@ import { HoldActionButton } from "@/components/motion/hold-action-button";
 import { Input, type InputClassNames } from "@/components/motion/input";
 import { formatBytes } from "@/format";
 import { EASE_OUT } from "@/lib/ease";
+import { useT } from "@/lib/i18n";
 import { cn } from "@/lib/utils";
 
 /// Rename and delete both used to call `window.prompt` / `window.confirm`.
@@ -78,6 +79,7 @@ export function RenamePanel({
   onSave: (next: string) => void;
   onCancel: () => void;
 }) {
+  const t = useT();
   const [value, setValue] = useState(label);
   const input = useRef<HTMLInputElement>(null);
 
@@ -107,16 +109,16 @@ export function RenamePanel({
           maxLength={80}
           value={value}
           onChange={setValue}
-          aria-label={`New name for ${label}`}
+          aria-label={t("row.renameNameAria", { name: label })}
           className="w-full"
           classNames={FIELD}
         />
         <div className="mt-2 flex gap-2">
           <Button type="submit" size="sm" className={ACTION}>
-            Save name
+            {t("row.saveName")}
           </Button>
           <Button type="button" variant="secondary" size="sm" className={ACTION} onClick={onCancel}>
-            Cancel
+            {t("row.cancel")}
           </Button>
         </div>
       </form>
@@ -135,6 +137,7 @@ export function DeletePanel({
   onConfirm: () => void;
   onCancel: () => void;
 }) {
+  const t = useT();
   const confirm = useRef<HTMLButtonElement>(null);
   useEffect(() => {
     confirm.current?.focus();
@@ -147,9 +150,21 @@ export function DeletePanel({
           is already showing the other — the path — so this says "its folder"
           rather than pushing the sentence to three lines to repeat it. */}
       <p className="text-callout text-ink-2">
-        Delete <strong className="font-semibold text-ink">{label}</strong> and the{" "}
-        <strong className="font-mono font-normal text-ink">{formatBytes(bytes)}</strong> in its
-        folder. This can’t be undone.
+        {t("row.deleteBody")
+          .split(/(\{\{label\}\}|\{\{bytes\}\})/)
+          .map((part, i) =>
+            part === "{{label}}" ? (
+              <strong key={i} className="font-semibold text-ink">
+                {label}
+              </strong>
+            ) : part === "{{bytes}}" ? (
+              <strong key={i} className="font-mono font-normal text-ink">
+                {formatBytes(bytes)}
+              </strong>
+            ) : (
+              part
+            ),
+          )}
       </p>
       <div className="mt-2 flex gap-2">
         {/* Held rather than clicked. A click is one slip away from destroying a
@@ -166,9 +181,9 @@ export function DeletePanel({
           type="horizontal"
           holdDuration={HOLD_MS}
           onHoldComplete={onConfirm}
-          aria-label={`Delete ${label} permanently. Press and hold to confirm.`}
-          holdingLabel="Keep holding…"
-          completeLabel="Deleting…"
+          aria-label={t("row.delete", { name: label })}
+          holdingLabel={t("row.holdingLabel")}
+          completeLabel={t("row.completeLabel")}
           fillClassName={HOLD_FILL}
           labelClassName="text-callout font-medium"
           className={cn(
@@ -181,10 +196,10 @@ export function DeletePanel({
             "focus-visible:ring-danger focus-visible:ring-offset-1",
           )}
         >
-          Hold to delete
+          {t("row.holdToDelete")}
         </HoldActionButton>
         <Button type="button" variant="secondary" size="sm" className={ACTION} onClick={onCancel}>
-          Keep it
+          {t("row.keepIt")}
         </Button>
       </div>
     </Panel>

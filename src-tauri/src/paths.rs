@@ -117,6 +117,17 @@ pub fn keep_awake_settings(data_root: &std::path::Path) -> PathBuf {
     data_root.join("keep-awake.json")
 }
 
+/// The app's own settings — whether it updates itself, and what language it
+/// speaks. Beside `keep-awake.json` at the data root rather than inside a
+/// [`Paths`], for the same reason: these are facts about the installation, not
+/// about Claude or Codex.
+///
+/// Called from `general::Handle::new`, which `setup()` and `runtime.rs`
+/// construct at startup.
+pub fn general_settings(data_root: &std::path::Path) -> PathBuf {
+    data_root.join("general.json")
+}
+
 /// Existence means "hold the machine awake". Never read, only tested for — its
 /// contents would otherwise be interpolated into a root shell.
 pub fn keep_awake_flag(data_root: &std::path::Path) -> PathBuf {

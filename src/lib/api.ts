@@ -105,6 +105,22 @@ export const setKeepAwake = (settings: KeepAwakeSettings) =>
 export const authorizeKeepAwake = () => invoke<KeepAwakeStatus>("authorize_keep_awake");
 export const restoreSleep = () => invoke<KeepAwakeStatus>("restore_sleep");
 
+/// Kept in the same order as `Locale::ALL` in `general.rs`, which is the order
+/// the picker offers them in.
+export type Locale = "en" | "id" | "ja" | "de" | "es" | "pt";
+
+export type GeneralSettings = {
+  autoUpdate: boolean;
+  /// `null` is "follow the system". Not the same as `"en"`: someone who never
+  /// touched this gets their own language when we add it, and someone who chose
+  /// English keeps English.
+  locale: Locale | null;
+};
+
+export const generalSettings = () => invoke<GeneralSettings>("general_settings");
+export const setGeneralSettings = (settings: GeneralSettings) =>
+  invoke<GeneralSettings>("set_general_settings", { settings });
+
 export function errorMessage(error: unknown): string {
   return error instanceof Error ? error.message : String(error);
 }

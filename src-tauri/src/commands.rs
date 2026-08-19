@@ -462,6 +462,28 @@ pub fn set_keep_awake(
     Ok(state.keep_awake.status())
 }
 
+#[tauri::command]
+pub fn general_settings(state: tauri::State<AppState>) -> crate::general::Settings {
+    state.general.settings()
+}
+
+#[tauri::command]
+pub fn set_general_settings(
+    app: tauri::AppHandle,
+    state: tauri::State<AppState>,
+    settings: crate::general::Settings,
+) -> Result<crate::general::Settings, String> {
+    state
+        .general
+        .set_settings(settings)
+        .map_err(|e| e.to_string())?;
+    // The tray carries three of the translated strings, and it was built in the
+    // old language. A tray that fails to redraw must not turn a setting that was
+    // saved into a reported failure — same rule as `open_profile`.
+    let _ = crate::tray::rebuild(&app);
+    Ok(state.general.settings())
+}
+
 /// Asks for the administrator password, once, and starts the watchdog.
 ///
 /// Explicitly a command rather than something `setup` does when the trigger is

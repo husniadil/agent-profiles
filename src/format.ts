@@ -1,3 +1,5 @@
+import type { T } from "@/lib/i18n";
+
 export function formatBytes(bytes: number): string {
   if (bytes < 1024) return `${bytes} B`;
   const units = ["KB", "MB", "GB", "TB"];
@@ -15,11 +17,20 @@ export function formatBytes(bytes: number): string {
 /// `bytes` is null until every row has reported its size, because a total that
 /// counts half the profiles is a wrong number stated confidently — worse than
 /// no number at all.
-export function statusLine(profiles: number, running: number, bytes: number | null): string {
+export function summary(
+  t: T,
+  profiles: number,
+  running: number,
+  bytes: number | null,
+): string {
   const parts = [
-    `${profiles} profile${profiles === 1 ? "" : "s"}`,
-    `${running} running`,
+    t(profiles === 1 ? "status.summaryProfile" : "status.summaryProfiles", {
+      count: profiles,
+    }),
+    t("status.summaryRunning", { count: running }),
   ];
-  if (bytes !== null) parts.push(`${formatBytes(bytes)} on disk`);
+  if (bytes !== null) {
+    parts.push(t("status.summaryOnDisk", { size: formatBytes(bytes) }));
+  }
   return parts.join(" · ");
 }

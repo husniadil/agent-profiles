@@ -4,6 +4,7 @@ import { AnimatedNumber } from "@/components/motion/animated-number";
 import { TextShimmer } from "@/components/motion/text-shimmer";
 import { formatBytes } from "@/format";
 import { useAwake } from "@/lib/hooks/use-awake";
+import { useT } from "@/lib/i18n";
 import { cn } from "@/lib/utils";
 
 /// A count that arrives by counting up, because the counting *is* the change.
@@ -83,7 +84,8 @@ export function ByteCount({ bytes, className }: { bytes: number; className?: str
 /// is the message, the movement was only ever the manner.
 export function PendingSize({ className }: { className?: string }) {
   const still = useReducedMotion();
-  const word = "Sizing";
+  const t = useT();
+  const word = t("status.sizing");
 
   if (still) return <span className={cn("text-ink-2", className)}>{word}</span>;
   return (

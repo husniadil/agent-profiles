@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 
 import { AwakeStatusCard } from "@/components/keepawake/AwakeStatusCard";
 import { WatchList } from "@/components/keepawake/WatchList";
@@ -9,24 +9,30 @@ import { Switch } from "@/components/motion/switch";
 import type { KeepAwake } from "@/hooks/useKeepAwake";
 import type { KeepAwakeSettings, KeepAwakeStatus, Trigger } from "@/lib/api";
 import { SWITCH } from "@/lib/controls";
+import { useT, type T } from "@/lib/i18n";
 import { systemNames } from "@/lib/system";
 
 /// Only the options that are not their own explanation carry a line of prose.
 /// "Off" saying "never hold the machine awake" is the label twice.
-const TRIGGERS: { id: Trigger; label: string; detail?: string }[] = [
-  { id: "off", label: "Off" },
-  {
-    id: "agent-active",
-    label: "When an agent is working",
-    detail: "A Claude Code or Codex session being written to.",
-  },
-  {
-    id: "always",
-    label: "Always while Agent Profiles runs",
-    detail:
-      "For agents inside a desktop app, where there is nothing to detect.",
-  },
-];
+///
+/// Built from `t` rather than declared at module scope: the labels are display
+/// strings, and a module-level constant is evaluated once, before any locale is
+/// known. The shape is unchanged — only the moment it is built.
+function triggers(t: T): { id: Trigger; label: string; detail?: string }[] {
+  return [
+    { id: "off", label: t("awake.trigger.off") },
+    {
+      id: "agent-active",
+      label: t("awake.trigger.agentActive"),
+      detail: t("awake.trigger.agentActiveDetail"),
+    },
+    {
+      id: "always",
+      label: t("awake.trigger.always"),
+      detail: t("awake.trigger.alwaysDetail"),
+    },
+  ];
+}
 
 /// Only the settings that are actually numbers. Derived rather than listed, so
 /// a new numeric setting joins automatically — and a new boolean one, like the
@@ -47,25 +53,27 @@ type LimitKey = {
 ///
 /// The bounds are restated here so the field cannot offer a number the backend
 /// will clamp underneath it.
-const LIMITS: {
+function limits(t: T): {
   key: LimitKey;
   label: string;
   unit: string;
   min: number;
   max: number;
-}[] = [
-  {
-    // Not "idle window", and no longer "agent idle after" either: neither named
-    // what this decides. A reader who has to ask what a setting does has been
-    // failed by its label, and this one now buys exactly one thing — the moment
-    // we stop waiting on an agent that went quiet mid-task.
-    key: "idle_window_minutes",
-    label: "Give up on a silent agent after",
-    unit: "min",
-    min: 1,
-    max: 60,
-  },
-];
+}[] {
+  return [
+    {
+      // Not "idle window", and no longer "agent idle after" either: neither named
+      // what this decides. A reader who has to ask what a setting does has been
+      // failed by its label, and this one now buys exactly one thing — the moment
+      // we stop waiting on an agent that went quiet mid-task.
+      key: "idle_window_minutes",
+      label: t("awake.limit.idleWindow"),
+      unit: t("awake.limit.minutes"),
+      min: 1,
+      max: 60,
+    },
+  ];
+}
 
 /// The battery floor's range, in whole steps of five.
 ///
@@ -196,10 +204,11 @@ function LimitField({
   value,
   onCommit,
 }: {
-  limit: (typeof LIMITS)[number];
+  limit: ReturnType<typeof limits>[number];
   value: number;
   onCommit: (next: number) => void;
 }) {
+  const t = useT();
   const [draft, setDraft] = useState(String(value));
   // Follows the committed value while the field is not being edited, so a
   // number the backend clamped shows up here rather than being contradicted.
@@ -225,7 +234,7 @@ function LimitField({
       max={limit.max}
       // The visible name is the row's, not the field's. This still carries the
       // unit, which the row cannot say without repeating what is inside the box.
-      aria-label={`${limit.label} (${limit.unit})`}
+      aria-label={t("awake.limit.aria", { label: limit.label, unit: limit.unit })}
       value={draft}
       onChange={setDraft}
       onBlur={commit}
@@ -295,8 +304,11 @@ function KeepAwakePanel({
   const armed = status.supported && !pendingAuth && settings.trigger !== "off";
   // "this Mac" / "this PC" / "this computer". The tab is about the reader's own
   // hardware, and this feature now runs on all three.
-  const { machine } = systemNames();
+  const t = useT();
+  const { machine } = systemNames(t);
   const Machine = machine[0].toUpperCase() + machine.slice(1);
+  const triggerList = useMemo(() => triggers(t), [t]);
+  const limitList = useMemo(() => limits(t), [t]);
 
   const [floor, setFloor] = useCommitted(
     settings.battery_floor_percent,
@@ -321,14 +333,14 @@ function KeepAwakePanel({
             className="disabled:opacity-50"
           >
             <legend className={`${LEGEND} mb-1.5`}>
-              Hold the machine awake
+              {t("awake.section.hold")}
             </legend>
             <RadioGroup
               value={settings.trigger}
               onValueChange={(next) => change({ trigger: next as Trigger })}
               className="gap-1.5"
             >
-              {TRIGGERS.map((trigger) => (
+              {triggerList.map((trigger) => (
                 // The second line is not a label prop — beUI's item takes a
                 // string — so it sits beside the item and is indented past the
                 // control by hand, to the width of the dot plus its gap.
@@ -351,7 +363,7 @@ function KeepAwakePanel({
 
         <div className={`${BAND} ${DIVIDED}`}>
           <fieldset disabled={!armed} className="disabled:opacity-50">
-            <legend className={`${LEGEND} mb-2`}>Limits</legend>
+            <legend className={`${LEGEND} mb-2`}>{t("awake.section.limits")}</legend>
 
             <div className="flex flex-col gap-3">
               {/* The battery floor leads: it is the guard people actually
@@ -377,7 +389,7 @@ function KeepAwakePanel({
                       on `NAME` itself — a label long enough to need wrapping
                       should wrap rather than run out of its row. */}
                   <span className={`${NAME} whitespace-nowrap`}>
-                    Pause on low battery
+                    {t("awake.battery.name")}
                   </span>
                   {/* The battery glyph used to ride here. It said the threshold
                       a third time — the track already draws it and the figure
@@ -403,11 +415,13 @@ function KeepAwakePanel({
                       that has to: the figure is dragged, and proportional
                       digits would shift the whole line under the hand. */}
                   <output className="shrink-0 text-callout tabular-nums text-ink">
-                    below {floor}%
+                    {t("awake.battery.below", { percent: floor })}
                   </output>
                   <RangeSlider
-                    aria-label="Pause on low battery"
-                    formatValueText={(value) => `below ${value}%`}
+                    aria-label={t("awake.battery.aria")}
+                    formatValueText={(value) =>
+                      t("awake.battery.below", { percent: value })
+                    }
                     min={FLOOR.min}
                     max={FLOOR.max}
                     step={FLOOR.step}
@@ -429,15 +443,15 @@ function KeepAwakePanel({
                     saying it twice in one card is how the panel filled up. */}
                 <p className={HINT}>
                   {status.battery_percent === null
-                    ? `${Machine} has no battery, so this never applies.`
-                    : "Dropped below this charge, even mid-task. Ignored while plugged in."}
+                    ? t("awake.hint.noBattery", { machine: Machine })
+                    : t("awake.hint.lowBattery")}
                 </p>
               </div>
 
               {/* Typed, not dragged: minutes are exact quantities with no
                   comfortable feel to them, and a track that resolved a range
                   this wide would be answering by accident. */}
-              {LIMITS.map((limit) => (
+              {limitList.map((limit) => (
                 <div key={limit.key} className={SETTING}>
                   <div className={SETTING_ROW}>
                     <label htmlFor={limit.key} className={NAME}>
@@ -456,9 +470,7 @@ function KeepAwakePanel({
                       longer has, at the price of the one failure it exists to
                       prevent. */}
                   <p className={HINT}>
-                    An agent that finished its turn releases {machine} at once.
-                    This only bounds one that stopped part-way: after this long
-                    writing nothing, it is treated as gone rather than working.
+                    {t("awake.hint.idleWindow", { machine })}
                   </p>
                 </div>
               ))}
@@ -475,7 +487,7 @@ function KeepAwakePanel({
               {status.thermal_supported ? (
                 <div className={SETTING}>
                   <div className={SETTING_ROW}>
-                    <span className={NAME}>Thermal guard</span>
+                    <span className={NAME}>{t("awake.thermal.name")}</span>
                     {/* The same switch the window already uses for "Start at
                         login", named from here rather than by a `<label for>`:
                         the sentence belongs to the setting, not the control. */}
@@ -484,14 +496,12 @@ function KeepAwakePanel({
                       checked={settings.thermal_guard}
                       disabled={!armed}
                       onCheckedChange={(next) => change({ thermal_guard: next })}
-                      ariaLabel="Thermal guard"
+                      ariaLabel={t("awake.thermal.aria")}
                     />
                   </div>
                   {/* Full width like the other two, rather than wrapped into a
                       narrow column beside the switch. */}
-                  <p className={HINT}>
-                    Release the hold when the machine reports it is overheating.
-                  </p>
+                  <p className={HINT}>{t("awake.hint.thermal")}</p>
                 </div>
               ) : null}
             </div>
@@ -506,7 +516,7 @@ function KeepAwakePanel({
           when it cannot. */}
       {status.authorized && settings.trigger === "agent-active" ? (
         <div className={`${CARD} ${BAND}`}>
-          <p className={`${LEGEND} mb-1.5`}>Watching</p>
+          <p className={`${LEGEND} mb-1.5`}>{t("awake.section.watching")}</p>
           <WatchList
             roots={status.roots}
             windowMinutes={settings.idle_window_minutes}

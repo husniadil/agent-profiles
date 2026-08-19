@@ -2,6 +2,7 @@ mod account;
 mod agent_activity;
 mod app_spec;
 mod commands;
+mod general;
 mod instance_manager;
 mod keep_awake;
 mod paths;
@@ -128,6 +129,8 @@ pub fn run() {
             tauri_plugin_autostart::MacosLauncher::LaunchAgent,
             None,
         ))
+        .plugin(tauri_plugin_updater::Builder::new().build())
+        .plugin(tauri_plugin_process::init())
         .invoke_handler(tauri::generate_handler![
             commands::list_apps,
             commands::add_profile,
@@ -143,6 +146,8 @@ pub fn run() {
             commands::set_keep_awake,
             commands::authorize_keep_awake,
             commands::restore_sleep,
+            commands::general_settings,
+            commands::set_general_settings,
         ])
         .on_menu_event(|app, event| {
             let id = event.id().as_ref();
@@ -204,6 +209,7 @@ pub fn run() {
                     .or_else(|_| std::env::var("USERPROFILE"))
                     .unwrap_or_default(),
             );
+            let general = general::Handle::new(data_root.clone(), general::system_locale());
             let keep_awake = keep_awake::Handle::new(
                 data_root,
                 home,
@@ -220,6 +226,7 @@ pub fn run() {
                 apps,
                 last_menu: std::sync::Mutex::new(None),
                 keep_awake,
+                general,
             });
 
             // The sweep the guards depend on. Nothing else in this app runs on a

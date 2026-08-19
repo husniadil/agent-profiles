@@ -111,6 +111,10 @@ It creates a profile, launches the real application, confirms a process scan att
 
 Declare an app only for the platforms someone has actually checked. Leaving a platform's row out is honest; filling it with a plausible-looking path is a guess that ships.
 
+## Adding a UI string
+
+A visible string starts in `src/lib/i18n/en.ts`, which is the type every other locale is checked against — add the key there first. Then add the same key to the other five files (`id.ts`, `ja.ts`, `de.ts`, `es.ts`, `pt.ts`): a locale missing a key, or inventing one the English dictionary does not have, fails `pnpm build` rather than shipping a blank label. If the string also appears in the tray menu — which draws from its own small table rather than the frontend's dictionary — add it to `tray_strings` in `src-tauri/src/general.rs` as well; a Rust test there enforces that all six locales carry every tray string, so a locale that forgot one fails `cargo test` instead of shipping silence.
+
 ## Launch at login
 
 The management window offers an opt-in **Launch at login** toggle. It is off until you turn it on, and it starts only the tray: no profile is opened for you.
@@ -136,6 +140,20 @@ Agent Profiles holds that flag while an agent is working and gives it back when 
 **What it does not do.** It disables *all* sleep while held, not only lid-close sleep — the Sleep menu item and low-power auto-sleep are blocked too. It does nothing on Windows or Linux, where the lid action is a system power-plan setting with no user-space override.
 
 **One thing worth knowing.** The flag file lives in your own Application Support folder and is writable by anything running as you, so any process of yours could pin the machine awake. This is not a privilege boundary — Agent Profiles runs as you — and the worst it costs is a flat battery, not root.
+
+## Updating
+
+Agent Profiles updates itself silently by default: once per launch it checks this repository's own GitHub releases, and if a newer one exists it downloads, installs and relaunches with no dialog in between. The switch — **Update automatically** — lives in the General tab, alongside the version currently installed, a **Check now** button for running the same check on demand, and a status line reporting exactly what it is doing. Turning it off is a real off: no request to GitHub is made at any point, not a check whose result is discarded.
+
+The manifest it reads (`latest.json`) is attached to each GitHub release next to the installers, and each artifact carries a minisign signature the plugin verifies before installing. That signature is **separate from OS code signing** — it proves the update file came from this project's release process, not that the binary is signed for macOS Gatekeeper or Windows SmartScreen. The bundles are still unsigned, so the "damaged"/SmartScreen warnings described under [Installing a release build](#installing-a-release-build) are unchanged by any of this; they apply to the first install and to any manual download the same as before.
+
+**Operational note:** a release created by tagging is opened as a **draft**, and GitHub's `/releases/latest` endpoint — which the updater's manifest URL resolves through — only ever returns the most recent *published* release. A draft sitting on the Releases page is invisible to every installed copy of the app until someone opens it and clicks **Publish release**.
+
+## Languages
+
+The window and the tray menu are both translated into six languages: **English**, **Bahasa Indonesia**, **日本語**, **Deutsch**, **Español** and **Português**. The picker is the **Language** row in the General tab, and its detail line says so directly — the choice is not scoped to the window alone.
+
+The default is **Same as system**, which reads the operating system's language once at startup and falls back to English for anything not in the six above. Picking a language explicitly overrides that and is remembered across restarts; picking **Same as system** again hands the decision back to the OS. Switching takes effect immediately, in both the window and the tray menu, with no restart.
 
 ## Platform status
 
