@@ -25,6 +25,18 @@ pub fn pick_default_profile(candidates: &[PathBuf]) -> Option<PathBuf> {
         .cloned()
 }
 
+/// Which directory to treat as an app's Default profile — including for an app
+/// that is not installed. Prefer a candidate that exists; otherwise fall back
+/// to the first (canonical) one. Requiring existence, as `pick_default_profile`
+/// does, made `runtime::build` skip an uninstalled app entirely, so it vanished
+/// from the window instead of appearing greyed with a reason and returning the
+/// moment the app is installed — the very case `availability` exists for.
+/// macOS never existence-checks here; this brings Windows in line. `None` only
+/// when the app declares no location at all.
+pub fn default_profile_or_canonical(candidates: &[PathBuf]) -> Option<PathBuf> {
+    pick_default_profile(candidates).or_else(|| candidates.first().cloned())
+}
+
 pub fn pick_binary(candidates: &[PathBuf]) -> Option<PathBuf> {
     candidates
         .iter()
@@ -184,9 +196,13 @@ mod imp {
                 &local,
                 &roaming,
             );
-            pick_default_profile(&candidates).ok_or_else(|| {
+            // Fall back to the canonical candidate when none exist yet, rather
+            // than erroring: an uninstalled app must still get a runtime so it
+            // shows up greyed (availability decides "installed") and returns the
+            // moment it is installed, without a relaunch — as on macOS.
+            default_profile_or_canonical(&candidates).ok_or_else(|| {
                 anyhow!(
-                    "the app's data directory was not found. Looked in: {}",
+                    "this app declares no data directory to look in: {}",
                     looked_in(&candidates)
                 )
             })
@@ -622,6 +638,38 @@ mod tests {
     fn no_existing_candidate_yields_none() {
         assert_eq!(pick_default_profile(&[PathBuf::from("/nope")]), None);
         assert_eq!(pick_binary(&[PathBuf::from("/nope/claude.exe")]), None);
+    }
+
+    #[test]
+    fn a_default_directory_prefers_one_that_exists() {
+        let d = tempfile::tempdir().unwrap();
+        let msix = d.path().join("msix");
+        let classic = d.path().join("classic");
+        std::fs::create_dir_all(&classic).unwrap();
+        assert_eq!(
+            default_profile_or_canonical(&[msix, classic.clone()]),
+            Some(classic)
+        );
+    }
+
+    #[test]
+    fn a_default_directory_falls_back_to_the_canonical_candidate_when_none_exist() {
+        // An app that is merely not installed has no existing directory, but it
+        // must still get a Default path so `build` gives it a runtime and it
+        // shows up greyed with a reason — never vanishing. The first candidate
+        // is its canonical location. (Contrast `pick_default_profile`, which
+        // returns None here and made Windows skip the app entirely.)
+        let canonical = PathBuf::from(r"C:\Users\h\AppData\Roaming\Claude");
+        let fallback = PathBuf::from(r"C:\Users\h\AppData\Local\Claude");
+        assert_eq!(
+            default_profile_or_canonical(&[canonical.clone(), fallback]),
+            Some(canonical)
+        );
+    }
+
+    #[test]
+    fn a_default_directory_is_none_only_when_no_location_is_declared() {
+        assert_eq!(default_profile_or_canonical(&[]), None);
     }
 
     #[test]
