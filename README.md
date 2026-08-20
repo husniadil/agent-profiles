@@ -147,7 +147,11 @@ Agent Profiles updates itself silently by default: once per launch it checks thi
 
 The manifest it reads (`latest.json`) is attached to each GitHub release next to the installers, and each artifact carries a minisign signature the plugin verifies before installing. That signature is **separate from OS code signing** — it proves the update file came from this project's release process, not that the binary is signed for macOS Gatekeeper or Windows SmartScreen. The bundles are still unsigned, so the "damaged"/SmartScreen warnings described under [Installing a release build](#installing-a-release-build) are unchanged by any of this; they apply to the first install and to any manual download the same as before.
 
-**Operational note:** a release created by tagging is opened as a **draft**, and GitHub's `/releases/latest` endpoint — which the updater's manifest URL resolves through — only ever returns the most recent *published* release. A draft sitting on the Releases page is invisible to every installed copy of the app until someone opens it and clicks **Publish release**.
+**Publishing is a deliberate step, and it is the step that ships the update.** A release created by tagging is opened as a **draft**, and GitHub's `/releases/latest` endpoint — which the updater's manifest URL resolves through — only ever returns the most recent *published* release. So a draft sitting on the Releases page is invisible to every installed copy of the app until someone opens it and clicks **Publish release**.
+
+That is the policy rather than an accident of the workflow: tagging builds and signs, publishing is what installs on other people's machines, and a person decides when to cross that line. It is the same caution the unsigned bundles already ask of anyone installing by hand. The cost is one click per release, and the failure it guards against is a bad build reaching every installed copy automatically — with nothing to undo it, since the updater only ever moves forward.
+
+The forgettable failure runs the other way: a release left as a draft ships nothing, and every installed copy goes on reporting itself up to date, which looks exactly like a release nobody needed. **Publishing the draft is part of releasing, not tidying up afterwards.**
 
 ## Languages
 
