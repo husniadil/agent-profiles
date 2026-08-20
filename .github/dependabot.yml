@@ -1,0 +1,10 @@
+# The workflow actions are pinned to commit SHAs so a moved tag cannot slip new
+# code into the release runner (which holds the updater signing key). Pinning
+# freezes them, so let Dependabot open the version bumps on a schedule instead —
+# it rewrites the SHA and the trailing version comment together.
+version: 2
+updates:
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: weekly

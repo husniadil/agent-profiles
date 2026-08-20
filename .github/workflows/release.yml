@@ -35,7 +35,7 @@ jobs:
             rust-targets: ""
 
     steps:
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
       - name: Install Linux system dependencies
         if: matrix.os == 'ubuntu-22.04'
@@ -54,27 +54,30 @@ jobs:
             libssl-dev \
             libgtk-3-dev
 
-      - uses: dtolnay/rust-toolchain@stable
+      # Pinned to a commit, so `stable` can no longer be read from the ref name —
+      # name the toolchain explicitly instead.
+      - uses: dtolnay/rust-toolchain@4360b52568e2003a75bf9bc1d59f33a8e3fc893c # 'stable' branch, pinned
         with:
+          toolchain: stable
           targets: ${{ matrix.rust-targets }}
 
-      - uses: Swatinem/rust-cache@v2
+      - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
         with:
           workspaces: src-tauri
 
       # No version pinned here: the action reads `packageManager` from
       # package.json, so CI installs the pnpm the repo declares rather than a
       # number that has to be remembered in two places.
-      - uses: pnpm/action-setup@v6
+      - uses: pnpm/action-setup@0977fd99725f1db4007ccb2928dbb4e90d06cc86 # v6.0.10
 
-      - uses: actions/setup-node@v7
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
         with:
           node-version: 26
           cache: pnpm
 
       - run: pnpm install --frozen-lockfile
 
-      - uses: tauri-apps/tauri-action@v1
+      - uses: tauri-apps/tauri-action@1deb371b0cd8bd54025b384f1cd735e725c4060f # v1.0.0
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           # Signing for the updater, which is a minisign keypair and nothing to
