@@ -203,35 +203,74 @@ export const StatefulButton = forwardRef<HTMLButtonElement, StatefulButtonProps>
 
   return (
     <Button ref={ref} disabled={disabled || isBusy} aria-busy={isBusy} whileHover={undefined} {...rest}>
-      <span
-        aria-live="polite"
-        className="relative inline-flex items-center justify-center overflow-hidden"
-      >
-        <AnimatePresence initial={false}>
-          {state === "loading" ? (
-            <IconSlot keyId="loading-icon">
-              <Loader2 className="h-4 w-4 animate-spin" />
-            </IconSlot>
-          ) : null}
-          {state === "success" ? (
-            <IconSlot keyId="success-icon">
-              <Check className="h-4 w-4" />
-            </IconSlot>
-          ) : null}
-          {state === "error" ? (
-            <IconSlot keyId="error-icon">
-              <X className="h-4 w-4" />
-            </IconSlot>
-          ) : null}
-        </AnimatePresence>
+      <span className="grid">
+        {/* The visible layer swaps one label at a time and animates its own
+            width, so on its own the button would resize under the pointer as the
+            state changes — which is why the call sites froze it at a fixed pixel
+            width. That width was English's, and a longer translation of any state
+            then wraps and is clipped. This invisible layer lays out every state's
+            label at once, so the box sizes to the widest of them in whatever
+            locale is loaded and stays that width as the visible label changes.
+            The letters are split the same way the live cascade splits them, so
+            this reserves the cascade's exact width, not the tighter kerned one. */}
+        <span
+          aria-hidden
+          className="pointer-events-none invisible col-start-1 row-start-1 inline-flex items-center justify-center"
+        >
+          {/* One state's icon of space; loading, success and error each show one. */}
+          <span className="w-6 shrink-0" />
+          <span className="grid">
+            {[children, loadingText, successText, errorText].map((label, index) => (
+              <span
+                // biome-ignore lint/suspicious/noArrayIndexKey: fixed set of four states.
+                key={index}
+                className="col-start-1 row-start-1 whitespace-nowrap"
+              >
+                {typeof label === "string"
+                  ? label.split("").map((char, charIndex) => (
+                      <span
+                        // biome-ignore lint/suspicious/noArrayIndexKey: position is the letter identity.
+                        key={charIndex}
+                        className="inline-block whitespace-pre"
+                      >
+                        {char}
+                      </span>
+                    ))
+                  : label}
+              </span>
+            ))}
+          </span>
+        </span>
+        <span
+          aria-live="polite"
+          className="relative col-start-1 row-start-1 inline-flex items-center justify-center overflow-hidden"
+        >
+          <AnimatePresence initial={false}>
+            {state === "loading" ? (
+              <IconSlot keyId="loading-icon">
+                <Loader2 className="h-4 w-4 animate-spin" />
+              </IconSlot>
+            ) : null}
+            {state === "success" ? (
+              <IconSlot keyId="success-icon">
+                <Check className="h-4 w-4" />
+              </IconSlot>
+            ) : null}
+            {state === "error" ? (
+              <IconSlot keyId="error-icon">
+                <X className="h-4 w-4" />
+              </IconSlot>
+            ) : null}
+          </AnimatePresence>
 
-        <TextSlot value={textKey}>{stateText}</TextSlot>
+          <TextSlot value={textKey}>{stateText}</TextSlot>
 
-        <AnimatePresence initial={false}>
-          {state === "idle" && icon ? (
-            <IconSlot keyId="idle-icon">{icon}</IconSlot>
-          ) : null}
-        </AnimatePresence>
+          <AnimatePresence initial={false}>
+            {state === "idle" && icon ? (
+              <IconSlot keyId="idle-icon">{icon}</IconSlot>
+            ) : null}
+          </AnimatePresence>
+        </span>
       </span>
     </Button>
   );

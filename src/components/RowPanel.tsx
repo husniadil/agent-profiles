@@ -190,9 +190,14 @@ export function DeletePanel({
             ACTION,
             DESTRUCTIVE,
             // beUI's own is a 64px pill 288px wide; this is one of a pair of
-            // 28px controls. Fixed width, not min-width: the three labels it
-            // swaps between must not resize the row mid-hold.
-            "h-7 w-[132px] min-w-0 rounded-lg px-2.5",
+            // 28px controls. The three labels it swaps between are all laid out
+            // at once inside (opacity is the only thing that changes), so the
+            // box already sizes to the widest of them and never resizes the row
+            // mid-hold. A min-width, not a fixed width: a fixed one was English's
+            // width, and five of six locales have a longer label than that. The
+            // floor keeps the English pairing; a longer translation grows the box
+            // to fit rather than wrapping and clipping under `overflow: hidden`.
+            "h-7 min-w-[132px] rounded-lg px-2.5",
             "focus-visible:ring-danger focus-visible:ring-offset-1",
           )}
         >
