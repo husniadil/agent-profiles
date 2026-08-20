@@ -197,12 +197,13 @@ export function ComposeCard({
         <StatefulButton
           type="submit"
           size="sm"
-          // Fixed so the label swapping through Add → Adding → Added → Retry
-          // never resizes the button under the pointer. 88px is the widest of
-          // those, "Adding" with its spinner and padding; the resting "Add"
-          // sits comfortably inside. No idle icon: "Add" is the whole label,
-          // and a trailing plus only repeated the word.
-          className={`${CONTROL} w-[88px] shrink-0`}
+          // The button sizes itself to the widest of the states it swaps through
+          // — Add → Adding → Added → Retry — in whatever locale is loaded, and
+          // holds that width so the label swap never resizes it under the pointer
+          // or moves the field beside it. It used to be pinned at 88px, English's
+          // width, which clipped the longer German and Portuguese states. No idle
+          // icon: "Add" is the whole label, and a trailing plus only repeated it.
+          className={`${CONTROL} shrink-0`}
           disabled={over}
           state={state}
           loadingText={t("compose.adding")}

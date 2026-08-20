@@ -201,9 +201,15 @@ export const HoldActionButton = forwardRef<
         ) : null}
       </motion.span>
 
+      {/* The three labels are stacked in one grid cell and swapped by opacity, so
+          the button's own width is already the widest of them and never changes
+          mid-hold — but only if they are kept to one line. Left to wrap, a label
+          longer than the box breaks onto a second line the fixed height then clips
+          under `overflow: hidden`; nowrap makes it widen the (min-width-floored)
+          box instead, which is what every non-English locale needs. */}
       <span
         className={cn(
-          "relative z-10 grid place-items-center text-base font-medium tracking-[-0.01em]",
+          "relative z-10 grid place-items-center whitespace-nowrap text-base font-medium tracking-[-0.01em]",
           labelClassName,
         )}
       >
