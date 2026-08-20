@@ -16,6 +16,10 @@ export const de: Strings = {
   "status.summaryProfiles": "{{count}} Profile",
   "status.summaryRunning": "{{count}} aktiv",
   "status.summaryOnDisk": "{{size}} auf der Festplatte",
+  "status.summaryOnDiskApprox": "mindestens {{size}} auf der Festplatte",
+  "status.sizeAtLeast": "mindestens {{size}}",
+  "status.onDiskApproxWhy":
+    "Einige Ordner konnten nicht gelesen werden; der tatsächliche Wert liegt um einen unbekannten Betrag höher.",
   "status.revealFolder": "Profilordner im Dateimanager anzeigen: {{path}}",
 
   // Start-at-login row, in the General tab

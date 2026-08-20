@@ -2,7 +2,7 @@ import { useReducedMotion } from "motion/react";
 
 import { AnimatedNumber } from "@/components/motion/animated-number";
 import { TextShimmer } from "@/components/motion/text-shimmer";
-import { formatBytes } from "@/format";
+import { APPROX_MARK, formatBytes } from "@/format";
 import { useAwake } from "@/lib/hooks/use-awake";
 import { useT } from "@/lib/i18n";
 import { cn } from "@/lib/utils";
@@ -43,7 +43,21 @@ export function Count({ value, className }: { value: number; className?: string 
 /// is taken from `formatBytes` rather than recomputed, so there is one answer to
 /// what a number of bytes is called, and the ticker is told how to render a
 /// figure rather than handed one to re-derive.
-export function ByteCount({ bytes, className }: { bytes: number; className?: string }) {
+///
+/// `approximate` marks a walk that could not reach everything: the mark is
+/// rendered beside the ticker rather than folded into it, because the ticker is
+/// handed a number and `≥4.2` is not one. The mark itself comes from `format` —
+/// the same one answer to what an approximate size is called that the plain
+/// `formatBytes` string uses, rather than a second copy hard-coded here.
+export function ByteCount({
+  bytes,
+  approximate = false,
+  className,
+}: {
+  bytes: number;
+  approximate?: boolean;
+  className?: string;
+}) {
   const still = useReducedMotion();
   const awake = useAwake();
   const text = formatBytes(bytes);
@@ -51,10 +65,13 @@ export function ByteCount({ bytes, className }: { bytes: number; className?: str
   const figure = text.slice(0, cut);
   const unit = text.slice(cut + 1);
   const places = figure.includes(".") ? 1 : 0;
+  const mark = approximate ? APPROX_MARK : "";
 
-  if (still || !awake) return <span className={cn("tabular-nums", className)}>{text}</span>;
+  if (still || !awake)
+    return <span className={cn("tabular-nums", className)}>{mark + text}</span>;
   return (
     <span className={cn("tabular-nums", className)}>
+      {mark}
       {/* Keyed on the unit: crossing from KB to MB restates the figure rather
           than gliding 900-something down to 0.9. */}
       <AnimatedNumber

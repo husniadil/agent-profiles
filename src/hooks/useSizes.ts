@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 
-import { profileSizeBytes, type AppView } from "@/lib/api";
+import { profileSizeBytes, type AppView, type ProfileSize } from "@/lib/api";
 
 export type Sizes = {
   /// Bytes per profile, keyed `app:profile`. Absent until that row reports.
@@ -12,9 +12,19 @@ export type Sizes = {
   /// been reached yet are the same absence — and they are not the same thing to
   /// say. In neither `byKey` nor here means still to come.
   failed: ReadonlySet<string>;
+  /// The rows whose walk could not reach everything, keyed the same way.
+  ///
+  /// Different from `failed`: these rows have a number, it is simply short by an
+  /// unknown amount — a subtree the walk could not descend into. Shown, but
+  /// marked, because an unmarked short figure is the one thing worse than no
+  /// figure.
+  approximate: ReadonlySet<string>;
   /// Absent until every row has reported: a total that counts half the profiles
   /// is a wrong number stated confidently.
   total: number | null;
+  /// Whether any row that went into `total` was itself short. One approximate
+  /// row makes the sum approximate; there is no partial version of this.
+  totalApproximate: boolean;
 };
 
 /// Filling in the size of every row, one row at a time, after the list is drawn.
@@ -39,12 +49,14 @@ export function useSizes(apps: AppView[], visit: number): Sizes {
   // delete something — so measuring once per visit is fresh enough, and
   // re-measuring on every list reload is not. Renaming a profile cannot change a
   // byte of it, and neither can opening it, but both reload the list.
-  const cache = useRef(new Map<string, number>());
+  const cache = useRef(new Map<string, ProfileSize>());
   const lastVisit = useRef(visit);
 
   const [byKey, setByKey] = useState<Record<string, number>>({});
   const [failed, setFailed] = useState<ReadonlySet<string>>(() => new Set());
+  const [approximate, setApproximate] = useState<ReadonlySet<string>>(() => new Set());
   const [total, setTotal] = useState<number | null>(null);
+  const [totalApproximate, setTotalApproximate] = useState(false);
 
   useEffect(() => {
     // A new visit is the one moment the numbers could have moved without us.
@@ -62,7 +74,9 @@ export function useSizes(apps: AppView[], visit: number): Sizes {
     // previous list added up to.
     setByKey({});
     setFailed(new Set());
+    setApproximate(new Set());
     setTotal(null);
+    setTotalApproximate(false);
 
     void (async () => {
       // The running sum and the published rows both belong to this pass alone.
@@ -75,25 +89,36 @@ export function useSizes(apps: AppView[], visit: number): Sizes {
       // Pass-local for the same reason `found` is: a row that could not be read
       // belongs to the list it was read for.
       const missed = new Set<string>();
+      // Pass-local for the same reason, and separate from `missed`: a row that
+      // came back short still has a number to show.
+      const short = new Set<string>();
+
+      // One place decides what a walk's answer means, so a cached row and a
+      // freshly measured one cannot disagree about whether they are exact.
+      const record = (key: string, size: ProfileSize) => {
+        sum += size.bytes;
+        found[key] = size.bytes;
+        setByKey({ ...found });
+        if (size.skipped > 0) {
+          short.add(key);
+          setApproximate(new Set(short));
+        }
+      };
 
       for (const target of targets) {
         const key = `${target.appId}:${target.id}`;
         const known = cache.current.get(key);
         if (known !== undefined) {
-          sum += known;
-          found[key] = known;
-          setByKey({ ...found });
+          record(key, known);
           continue;
         }
         try {
-          const bytes = await profileSizeBytes(target.appId, target.id);
+          const size = await profileSizeBytes(target.appId, target.id);
           // The list this row belongs to has been replaced; the bytes are about
           // a row nobody is looking at.
           if (pass !== generation.current) return;
-          cache.current.set(key, bytes);
-          sum += bytes;
-          found[key] = bytes;
-          setByKey({ ...found });
+          cache.current.set(key, size);
+          record(key, size);
         } catch {
           if (pass !== generation.current) return;
           // No banner: a size that could not be read is not an action that
@@ -111,8 +136,9 @@ export function useSizes(apps: AppView[], visit: number): Sizes {
 
       if (pass !== generation.current || !complete) return;
       setTotal(sum);
+      setTotalApproximate(short.size > 0);
     })();
   }, [apps, visit]);
 
-  return { byKey, failed, total };
+  return { byKey, failed, approximate, total, totalApproximate };
 }

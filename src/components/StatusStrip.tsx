@@ -17,11 +17,16 @@ export function StatusStrip({
   profiles,
   running,
   bytes,
+  approximate,
   onError,
 }: {
   profiles: number;
   running: number;
   bytes: number | null;
+  /// At least one profile's walk could not reach every entry. The total is real
+  /// but short by an unknown amount, so it is marked and the mark is explained
+  /// — a bare glyph in a status strip is a riddle, not a disclosure.
+  approximate: boolean;
   onError: (error: unknown) => void;
 }) {
   const t = useT();
@@ -44,13 +49,30 @@ export function StatusStrip({
         {bytes !== null ? (
           <>
             <Separator />
-            <ByteCount bytes={bytes} className="font-mono text-ink" />
-            <span>{t("status.onDisk")}</span>
+            {approximate ? (
+              <Tooltip
+                content={t("status.onDiskApproxWhy")}
+                side="bottom"
+                className="max-w-[min(320px,calc(100vw-16px))] whitespace-normal text-sub font-normal"
+              >
+                <span className="flex items-baseline gap-1.5">
+                  <ByteCount bytes={bytes} approximate className="font-mono text-ink" />
+                  <span>{t("status.onDisk")}</span>
+                </span>
+              </Tooltip>
+            ) : (
+              <>
+                <ByteCount bytes={bytes} className="font-mono text-ink" />
+                <span>{t("status.onDisk")}</span>
+              </>
+            )}
           </>
         ) : null}
       </p>
+      {/* The tooltip is `aria-hidden`, so the spoken sentence carries the
+          shortfall in words of its own rather than a mark nobody hears. */}
       <span className="sr-only" aria-live="polite">
-        {summary(t, profiles, running, bytes)}
+        {summary(t, profiles, running, bytes, approximate)}
       </span>
 
       {/* The strip names the folder; this is the only way to actually get to it. */}

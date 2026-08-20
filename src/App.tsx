@@ -124,6 +124,7 @@ export default function App() {
             profiles={counts.profiles}
             running={counts.running}
             bytes={sizes.total}
+            approximate={sizes.totalApproximate}
             onError={fail}
           />
 
