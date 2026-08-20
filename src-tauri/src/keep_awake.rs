@@ -307,6 +307,23 @@ pub fn restore(handle: &Handle, platform: &dyn crate::platform::Platform) -> Res
     Ok(())
 }
 
+/// Hands the machine back on the way out.
+///
+/// Two of the three backends survive a quit without this: macOS's root loop
+/// watches our pid and puts `disablesleep` back within one poll, and Linux's
+/// inhibitor lock dies with the pipe it was spawned on. Windows does not — its
+/// hold *is* a power-scheme write, so a quit while holding leaves the lid-close
+/// action on "do nothing" until the next launch runs `recover_hold`. That is a
+/// laptop that goes in a bag awake, and the app that owns the way back is the
+/// one that just exited.
+///
+/// Not `restore`: quitting is not "turn Keep Awake off". The trigger is left
+/// exactly as the user set it, so the next launch holds again if it should —
+/// only the hold itself goes back.
+pub fn release_at_exit(handle: &Handle, platform: &dyn crate::platform::Platform) -> Result<()> {
+    platform.hold(&handle.data_root, false)
+}
+
 /// The one thing a sweep carries forward: how long this stretch of holding has
 /// run, which the window reports as "held 15m".
 ///
@@ -1493,5 +1510,45 @@ mod tests {
 
         let loaded = Settings::load(&partial);
         assert_eq!(loaded.trigger, Trigger::Always);
+    }
+
+    #[test]
+    fn quitting_hands_the_machine_back_but_keeps_the_trigger_armed() {
+        // Windows holds by writing the lid-close action into the power scheme,
+        // and that write outlives the process: without a release on the exit
+        // path a quit leaves the lid doing nothing until the next launch.
+        // The flag stands in for the hold here — it is what `Platform::hold`
+        // does by default, and what a watchdog this process cannot see reads.
+        let d = tempfile::tempdir().unwrap();
+        let handle = handle_with(
+            Recovery {
+                reclaimed_prior: None,
+                stranded: false,
+            },
+            d.path(),
+        );
+        handle
+            .set_settings(Settings {
+                trigger: Trigger::Always,
+                ..Settings::default()
+            })
+            .unwrap();
+        apply(d.path(), true).unwrap();
+        let flag = crate::paths::keep_awake_flag(d.path());
+        assert!(flag.exists(), "the sweep's hold is what quitting must drop");
+
+        release_at_exit(
+            &handle,
+            &crate::shared_config::tests_support::FakePlatform::default(),
+        )
+        .unwrap();
+
+        assert!(!flag.exists(), "quitting has to release the hold itself");
+        // Quitting is not "turn Keep Awake off": the next launch honours the
+        // trigger the user chose, and only the OS-level hold is handed back.
+        assert_eq!(
+            Settings::load(&crate::paths::keep_awake_settings(d.path())).trigger,
+            Trigger::Always
+        );
     }
 }

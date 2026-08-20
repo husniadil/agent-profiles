@@ -245,10 +245,22 @@ pub fn run() {
         .build(tauri::generate_context!());
 
     match app {
-        Ok(app) => app.run(|_app, event| {
+        Ok(app) => app.run(|app, event| {
             if let tauri::RunEvent::ExitRequested { api, code, .. } = &event {
                 if exit_should_be_prevented(*code) {
                     api.prevent_exit();
+                    return;
+                }
+                // The last moment anything of ours runs. Nothing else releases
+                // the hold on the way out: the sweep has stopped, and on
+                // Windows the hold is a power-scheme write that would stand
+                // until the next launch.
+                if let Some(state) = app.try_state::<AppState>() {
+                    if let Err(error) =
+                        keep_awake::release_at_exit(&state.keep_awake, &*state.platform)
+                    {
+                        eprintln!("could not release the keep-awake hold on exit: {error}");
+                    }
                 }
             }
         }),
