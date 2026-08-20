@@ -11,6 +11,28 @@ pub struct AppRuntime {
     pub spec: &'static AppSpec,
     pub paths: Paths,
     pub store: Mutex<ProfileStore>,
+    /// Why this app's registry could not be read, if it could not.
+    ///
+    /// A registry we cannot read is not an empty one, and the difference is the
+    /// whole point: the store beside this is empty, so nothing offers to launch
+    /// or delete a profile it never saw, and [`AppRuntime::writable`] refuses
+    /// the one operation that could write over the file anyway.
+    pub unreadable_registry: Option<String>,
+}
+
+impl AppRuntime {
+    /// Whether this app's registry may be written to.
+    ///
+    /// Creating a profile saves the entire registry, so doing it while the file
+    /// cannot be read would overwrite profiles nobody has seen. Every other
+    /// mutation names an existing profile and so already fails against the
+    /// empty store; this is the one that does not.
+    pub fn writable(&self) -> Result<()> {
+        match &self.unreadable_registry {
+            Some(reason) => Err(anyhow!("{reason}")),
+            None => Ok(()),
+        }
+    }
 }
 
 pub struct AppState {
@@ -55,6 +77,13 @@ impl AppState {
     /// launch (see `build`) — on macOS that never happens, on Windows it is the
     /// not-installed case.
     pub fn availability(&self, runtime: &AppRuntime) -> Option<String> {
+        // Ahead of the binary check, and not merged with it: an installed app
+        // whose registry cannot be read is unavailable for a reason the user can
+        // actually act on, and naming the binary instead would send them looking
+        // in the wrong place.
+        if let Some(reason) = &runtime.unreadable_registry {
+            return Some(reason.clone());
+        }
         self.platform
             .binary(&runtime.spec.locations, runtime.spec.product)
             .err()
@@ -84,11 +113,24 @@ pub fn build(platform: &dyn Platform) -> Result<Vec<AppRuntime>> {
             continue;
         };
         let paths = Paths::new(root.join(spec.id));
-        let store = ProfileStore::load(&paths, &default_dir)?;
+        // A registry that cannot be read is this app's problem, not every app's,
+        // and least of all a reason for the tray never to appear: the section is
+        // kept so it can say what happened, with nothing in it to act on.
+        let (store, unreadable_registry) = match ProfileStore::load(&paths, &default_dir) {
+            Ok(store) => (store, None),
+            Err(error) => (
+                ProfileStore::default(),
+                Some(format!(
+                    "{}'s profile registry could not be read: {error}",
+                    spec.product
+                )),
+            ),
+        };
         runtimes.push(AppRuntime {
             spec,
             paths,
             store: Mutex::new(store),
+            unreadable_registry,
         });
     }
     Ok(runtimes)
@@ -322,5 +364,49 @@ mod tests {
         let state = state(d.path());
         let reason = state.availability(state.app("codex").unwrap()).unwrap();
         assert!(reason.contains("ChatGPT"), "got: {reason}");
+    }
+
+    /// A registry in place before the first build, and unreadable — a directory
+    /// standing in for the file, which no platform can read as one.
+    fn with_an_unreadable_registry(root: &Path) {
+        std::fs::create_dir_all(root.join("data").join("claude").join("profiles.json")).unwrap();
+    }
+
+    #[test]
+    fn an_app_whose_registry_cannot_be_read_still_appears_and_carries_the_reason() {
+        let d = tempfile::tempdir().unwrap();
+        with_an_unreadable_registry(d.path());
+        let state = state(d.path());
+
+        let claude = state
+            .app("claude")
+            .expect("the app stays listed: a section that vanishes explains nothing");
+        assert!(
+            claude.store.lock().unwrap().list().is_empty(),
+            "no profiles at all — a fabricated Default is the lie this fixes"
+        );
+        // Carried on the runtime, not merely logged: this is the same channel
+        // an uninstalled app uses, so whatever #11 settles on for showing a
+        // reason instead of dropping the row covers this fault too.
+        let reason = state.availability(claude).unwrap();
+        assert!(
+            reason.contains("profile registry"),
+            "the reason names the registry rather than the binary: {reason}"
+        );
+    }
+
+    #[test]
+    fn a_registry_that_could_not_be_read_refuses_to_be_written_to() {
+        // Creating a profile saves the whole registry. Doing that on top of a
+        // file we could not read would overwrite profiles we never saw.
+        let d = tempfile::tempdir().unwrap();
+        with_an_unreadable_registry(d.path());
+        let state = state(d.path());
+
+        assert!(state.app("claude").unwrap().writable().is_err());
+        assert!(
+            state.app("codex").unwrap().writable().is_ok(),
+            "an app whose registry read cleanly is unaffected"
+        );
     }
 }

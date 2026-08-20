@@ -37,10 +37,14 @@ impl ProfileStore {
                 }
             },
             Err(error) if error.kind() == std::io::ErrorKind::NotFound => Self::default(),
-            Err(_) => {
-                preserve_corrupt_registry(&file)?;
-                Self::default()
-            }
+            // Everything else is a fault, not a verdict on the contents. A
+            // locked file, a disk that hiccuped, a descriptor limit, a home
+            // directory restored with the wrong owner — the bytes may be
+            // perfectly good, and we have not read one of them. Treating that as
+            // corruption moved a valid registry aside and started the user over
+            // with a single profile, silently, while their real profile
+            // directories stayed on disk with no way back to them.
+            Err(error) => return Err(anyhow!("{}: {error}", file.display())),
         };
 
         if !store.profiles.iter().any(|p| p.is_default) {
@@ -173,12 +177,20 @@ impl ProfileStore {
     }
 }
 
+/// Moves a registry we cannot parse out of the way, without destroying one that
+/// was moved aside earlier.
+///
+/// The first copy is the one worth keeping: by the time a second arrives, the
+/// app has already rewritten the registry down to whatever it could still see,
+/// so the newer file is the poorer record. Later copies are numbered rather than
+/// dropped — each one costs a corruption event to create, so there is no run of
+/// them to bound.
 fn preserve_corrupt_registry(file: &Path) -> Result<()> {
-    let corrupt = file.with_extension("json.corrupt");
-    match std::fs::remove_file(&corrupt) {
-        Ok(()) => {}
-        Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
-        Err(error) => return Err(error.into()),
+    let mut corrupt = file.with_extension("json.corrupt");
+    let mut nth = 1;
+    while corrupt.exists() {
+        corrupt = file.with_extension(format!("json.corrupt.{nth}"));
+        nth += 1;
     }
     std::fs::rename(file, corrupt)?;
     Ok(())
@@ -365,5 +377,85 @@ mod tests {
         assert!(store.remove(&id, &paths).is_err());
         assert_eq!(store.list().len(), 1);
         assert!(def.exists());
+    }
+
+    #[test]
+    fn a_registry_that_cannot_be_read_is_not_mistaken_for_a_corrupt_one() {
+        // Corruption is a statement about bytes. A read that never returned any
+        // has not earned it — the file may be perfectly good and merely locked,
+        // on a disk that hiccuped, or behind a descriptor limit.
+        let (_d, paths, def) = fixture();
+        let mut store = ProfileStore::load(&paths, &def).unwrap();
+        store.add("Kerja", &paths).unwrap();
+        block_the_registry(&paths);
+
+        assert!(
+            ProfileStore::load(&paths, &def).is_err(),
+            "a registry we cannot read is not an empty one: refuse, do not start over"
+        );
+        assert!(
+            !paths
+                .profiles_json()
+                .with_extension("json.corrupt")
+                .exists(),
+            "nothing is moved aside on the strength of an error we never read past"
+        );
+    }
+
+    /// The shape the bug was actually found in: a valid registry, a permission
+    /// fault, and the question of whether the file is still there afterwards.
+    #[cfg(unix)]
+    #[test]
+    fn an_unreadable_registry_is_left_exactly_where_it_is() {
+        use std::os::unix::fs::PermissionsExt;
+        let (_d, paths, def) = fixture();
+        let mut store = ProfileStore::load(&paths, &def).unwrap();
+        store.add("Kerja", &paths).unwrap();
+        let file = paths.profiles_json();
+        let before = std::fs::read(&file).unwrap();
+
+        std::fs::set_permissions(&file, std::fs::Permissions::from_mode(0o000)).unwrap();
+        // A test running as root can still read it, and would be asserting
+        // nothing. Skip rather than fail: the same gate runs in a container.
+        if std::fs::read(&file).is_ok() {
+            std::fs::set_permissions(&file, std::fs::Permissions::from_mode(0o644)).unwrap();
+            return;
+        }
+        let outcome = ProfileStore::load(&paths, &def);
+        std::fs::set_permissions(&file, std::fs::Permissions::from_mode(0o644)).unwrap();
+
+        assert!(outcome.is_err(), "a permission fault is not corruption");
+        assert_eq!(
+            std::fs::read(&file).unwrap(),
+            before,
+            "the registry is still the user's registry, byte for byte"
+        );
+        assert!(!file.with_extension("json.corrupt").exists());
+    }
+
+    #[test]
+    fn a_second_corrupt_registry_does_not_destroy_the_first_one_preserved() {
+        // The first copy set aside is by construction the likeliest to be the
+        // good one: by the time a second arrives, the app has already rewritten
+        // the registry down to whatever it could still see.
+        let (_d, paths, def) = fixture();
+        let file = paths.profiles_json();
+        std::fs::create_dir_all(file.parent().unwrap()).unwrap();
+
+        std::fs::write(&file, b"{ the first, and the one worth keeping").unwrap();
+        ProfileStore::load(&paths, &def).unwrap();
+        std::fs::write(&file, b"{ the second").unwrap();
+        ProfileStore::load(&paths, &def).unwrap();
+
+        assert_eq!(
+            std::fs::read(file.with_extension("json.corrupt")).unwrap(),
+            b"{ the first, and the one worth keeping",
+            "the first preserved copy survives the second event"
+        );
+        assert_eq!(
+            std::fs::read(file.with_extension("json.corrupt.1")).unwrap(),
+            b"{ the second",
+            "and the second is kept too, under a name of its own"
+        );
     }
 }

@@ -225,6 +225,10 @@ pub fn add_profile(
     label: String,
 ) -> Result<ProfileView, String> {
     let runtime = state.app(&app_id).map_err(|e| e.to_string())?;
+    // Before the store is touched: adding saves the whole registry, and an
+    // empty store beside an unreadable file would write over profiles nobody
+    // has seen. Every other mutation names a profile and already fails here.
+    runtime.writable().map_err(|e| e.to_string())?;
     let mut store = runtime.store.lock().map_err(|e| e.to_string())?;
     let label = validate_label(&store, &label, "")?;
     let created = store
