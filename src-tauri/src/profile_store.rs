@@ -174,14 +174,27 @@ impl ProfileStore {
 }
 
 fn preserve_corrupt_registry(file: &Path) -> Result<()> {
-    let corrupt = file.with_extension("json.corrupt");
-    match std::fs::remove_file(&corrupt) {
-        Ok(()) => {}
-        Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
-        Err(error) => return Err(error.into()),
-    }
-    std::fs::rename(file, corrupt)?;
+    std::fs::rename(file, corrupt_backup_name(file))?;
     Ok(())
+}
+
+/// Where to set a corrupt registry aside without overwriting an earlier one.
+///
+/// The backup used to be a single fixed name, so a second corruption destroyed
+/// the first copy — and by then the app has usually rewritten the live registry
+/// down to a lone Default, so that second event was preserving the near-empty
+/// file on top of the user's real one. The first copy is by construction the one
+/// most likely to be the good registry, so keep it: `.corrupt`, then `.corrupt.1`,
+/// `.corrupt.2`, … for each event after.
+fn corrupt_backup_name(file: &Path) -> PathBuf {
+    let first = file.with_extension("json.corrupt");
+    if !first.exists() {
+        return first;
+    }
+    (1..)
+        .map(|n| file.with_extension(format!("json.corrupt.{n}")))
+        .find(|candidate| !candidate.exists())
+        .expect("an unbounded search always finds a free name")
 }
 
 #[cfg(test)]
@@ -226,6 +239,37 @@ mod tests {
         assert_eq!(
             std::fs::read(paths.profiles_json().with_extension("json.corrupt")).unwrap(),
             corrupt_bytes
+        );
+    }
+
+    #[test]
+    fn a_second_corruption_does_not_destroy_the_first_preserved_registry() {
+        let (_d, paths, def) = fixture();
+        let file = paths.profiles_json();
+        let corrupt = file.with_extension("json.corrupt");
+        std::fs::create_dir_all(file.parent().unwrap()).unwrap();
+
+        // Strike one: the real registry is set aside.
+        let real = b"{ the user's four profiles, unparseable to reach this arm";
+        std::fs::write(&file, real).unwrap();
+        ProfileStore::load(&paths, &def).unwrap();
+        assert_eq!(std::fs::read(&corrupt).unwrap(), real);
+
+        // Strike two: a different corrupt file (in the real bug, the lone-Default
+        // rewrite) must not overwrite the first, more valuable, backup.
+        let second = b"{ only Default now";
+        std::fs::write(&file, second).unwrap();
+        ProfileStore::load(&paths, &def).unwrap();
+
+        assert_eq!(
+            std::fs::read(&corrupt).unwrap(),
+            real,
+            "the first preserved registry must survive a second corruption"
+        );
+        assert_eq!(
+            std::fs::read(file.with_extension("json.corrupt.1")).unwrap(),
+            second,
+            "the second corrupt file is kept under a numbered name, not dropped"
         );
     }
 
