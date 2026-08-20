@@ -2,6 +2,22 @@
 
 Notable changes, newest first. This project follows [Semantic Versioning](https://semver.org).
 
+## [0.6.0] — 2026-08-20
+
+Five fixes, two of which stop a readable registry being set aside and the profiles it named going quiet.
+
+### Fixed
+
+- **A profile registry that cannot be read is no longer mistaken for a corrupt one.** A `profiles.json` that was merely locked, on a disk that hiccuped, behind a descriptor limit, or restored with the wrong owner was moved aside and replaced with a registry holding one profile — silently, while the real profile directories stayed on disk with no way back to them through the app. Only a file whose contents cannot be parsed is treated as corrupt now. A registry that could not be read leaves the file untouched, and the app it belongs to says so instead of offering a fresh start nobody asked for.
+- **A preserved registry is no longer destroyed by the next one.** `profiles.json.corrupt` was a single fixed name, so a second corruption overwrote the first copy — which is the one worth keeping, since by then the app has already rewritten the registry down to whatever it could still see. Later copies are numbered instead.
+- **The "on disk" total no longer disappears because one file did.** A live profile directory rewrites and deletes files while its app runs, and a single entry vanishing mid-measurement withheld the total for every profile for the whole visit. An entry that cannot be reached is skipped now, the way `du` has always done it.
+- **Windows: an app that is not installed appears greyed with the reason, rather than vanishing.** It also becomes usable the moment it is installed, with no relaunch — the behaviour macOS already had.
+- **Translated labels are no longer clipped mid-word.** Two controls were sized in pixels to their English label, and five of the six shipped languages had at least one label that did not fit; the overflow wrapped inside a fixed height and was cut off. In Spanish the delete confirmation lost its verb. Both controls now size themselves to the longest label in whatever language is loaded.
+
+### Security
+
+- **Every GitHub Actions workflow step is pinned to a commit SHA**, and Dependabot opens the version bumps weekly so the pins move deliberately instead of freezing. The release job holds the updater's signing key, and a mutable tag means the code in that job can change without anything in this repository changing — which is how a compromised action would sign an update the app then installs on its own. Pinning is what closes that door.
+
 ## [0.5.0] — 2026-08-19
 
 A General tab, carrying a silent updater and six languages for the window and the tray.
