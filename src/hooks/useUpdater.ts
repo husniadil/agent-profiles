@@ -2,9 +2,9 @@ import { useCallback, useEffect, useRef, useState } from "react";
 
 import { getVersion } from "@tauri-apps/api/app";
 import { relaunch } from "@tauri-apps/plugin-process";
-import { check } from "@tauri-apps/plugin-updater";
+import { check, type Update } from "@tauri-apps/plugin-updater";
 
-import { errorMessage } from "@/lib/api";
+import { errorMessage, releaseKeepAwakeForUpdate } from "@/lib/api";
 
 export type UpdateState =
   | { kind: "disabled" }
@@ -60,23 +60,43 @@ export function useUpdater(autoUpdate: boolean | undefined): Updater {
     // Which step we are on when something throws: until an update is in hand the
     // failure is a failed *check*, after that a failed *install*.
     let phase: "check" | "install" = "check";
+    // Held outside the `try` so the `catch` can release it. `download()` parks the
+    // bundle bytes in the webview's resource table (a `DownloadedBytes` rid); the
+    // plugin only frees that rid inside a *successful* `install()`. If anything
+    // between download and a clean install throws — `releaseKeepAwakeForUpdate()`
+    // or `install()` itself — the rid is orphaned, and since each retry runs a
+    // fresh `check()`/`download()` it would leak another whole bundle for the life
+    // of the webview. `update.close()` frees both the bytes rid and the update
+    // handle; on the success path we never reach the `catch` and `install()` has
+    // already nulled the bytes, so there is no double free.
+    let update: Update | null = null;
     try {
-      const update = await check();
+      update = await check();
       setLastChecked(Date.now());
       if (!update) {
         setState({ kind: "current" });
         return;
       }
+      // Narrowed alias so the closures below stay non-null: `update` is a `let`
+      // (the `catch` needs it), which TypeScript widens back to `Update | null`
+      // inside a callback since it cannot prove no reassignment. `ready` is the
+      // same handle, and closing either in the `catch` frees the same resources.
+      const ready = update;
       phase = "install";
       let total = 0;
       let received = 0;
-      setState({ kind: "downloading", version: update.version, percent: 0 });
+      setState({ kind: "downloading", version: ready.version, percent: 0 });
+      // Download and install are split, rather than the single
+      // `downloadAndInstall`, so the keep-awake hold can be handed back in
+      // between — see the release below. A download failure therefore leaves the
+      // hold untouched: nothing has been released until the package is in hand.
+      //
       // ponytail: no mid-download cancel — flipping the switch off during an
       // in-flight install still completes it. The launch guard already prevents
       // starting one while off; cancelling one already running would need an
       // AbortController the plugin doesn't expose. Add that if it proves
       // annoying.
-      await update.downloadAndInstall((event) => {
+      await ready.download((event) => {
         switch (event.event) {
           case "Started":
             total = event.data.contentLength ?? 0;
@@ -85,7 +105,7 @@ export function useUpdater(autoUpdate: boolean | undefined): Updater {
             received += event.data.chunkLength;
             setState({
               kind: "downloading",
-              version: update.version,
+              version: ready.version,
               // A server that sends no content-length leaves the percentage
               // meaningless rather than wrong: it stays at zero and the label
               // still says what is happening.
@@ -93,16 +113,32 @@ export function useUpdater(autoUpdate: boolean | undefined): Updater {
             });
             break;
           case "Finished":
-            setState({ kind: "installing", version: update.version });
             break;
         }
       });
+      setState({ kind: "installing", version: ready.version });
+      // Hand the machine back BEFORE installing, not after: the install exits
+      // the process itself — on Windows through the NSIS installer and
+      // `std::process::exit(0)`, which reaches neither `RunEvent::ExitRequested`
+      // nor `RunEvent::Exit` — so the release wired into Rust's `App::run` would
+      // never fire and the lid-close action would stay on "do nothing" past the
+      // update. This is the last point our own code runs. The trigger is left
+      // armed, so the relaunched app holds again if it should.
+      await releaseKeepAwakeForUpdate();
+      await ready.install();
       // ponytail: relaunch straight away. This app holds no unsaved state, and
       // the profiles it launched are separate processes that outlive it. On
       // Windows `installMode: "quiet"` closes us anyway, so a "restart later"
       // option would be a promise we could only keep on two platforms.
       await relaunch();
     } catch (cause) {
+      // Free the downloaded bundle the plugin would otherwise retain (see above).
+      // Guarded so a close failure never masks the real error we are reporting.
+      try {
+        await update?.close();
+      } catch {
+        // best effort: the leak is the lesser problem than losing the real cause
+      }
       setState({ kind: "failed", phase, reason: errorMessage(cause) });
     } finally {
       busy.current = false;
