@@ -15,7 +15,7 @@ pub struct Profile {
     pub account: Option<String>,
 }
 
-#[derive(Serialize, Deserialize, Default)]
+#[derive(Serialize, Deserialize, Default, Debug)]
 pub struct ProfileStore {
     profiles: Vec<Profile>,
 }
@@ -28,18 +28,28 @@ pub const ID_LEN: usize = 8;
 impl ProfileStore {
     pub fn load(paths: &Paths, default_dir: &Path) -> Result<Self> {
         let file = paths.profiles_json();
-        let mut store = match std::fs::read(&file) {
-            Ok(raw) => match serde_json::from_slice::<ProfileStore>(&raw) {
-                Ok(store) => store,
-                Err(_) => {
-                    preserve_corrupt_registry(&file)?;
-                    Self::default()
-                }
-            },
-            Err(error) if error.kind() == std::io::ErrorKind::NotFound => Self::default(),
-            Err(_) => {
+        let mut store = match classify_registry(std::fs::read(&file)) {
+            RegistryRead::Loaded(store) => store,
+            RegistryRead::Missing => Self::default(),
+            // Bytes we read but could not parse: the contents are unusable, so
+            // preserve them and start over. This is the only kind of failure
+            // that means the registry itself is bad.
+            RegistryRead::Corrupt => {
                 preserve_corrupt_registry(&file)?;
                 Self::default()
+            }
+            // Bytes we could not read at all — EACCES, EIO, EMFILE, a locked or
+            // wrong-owned file. The registry may be perfectly valid; we simply
+            // cannot see it this moment. Discarding it here would replace the
+            // real profiles with a lone Default and (via save) overwrite the
+            // original for good. So refuse, like a failed process scan does, and
+            // leave the file untouched for a later start that can read it.
+            RegistryRead::Unreadable(error) => {
+                return Err(anyhow!(
+                    "could not read the profile registry at {} ({error}); \
+                     refusing to start rather than discard it",
+                    file.display()
+                ));
             }
         };
 
@@ -173,6 +183,33 @@ impl ProfileStore {
     }
 }
 
+/// What a read of `profiles.json` amounts to. Kept apart from the IO so the one
+/// judgement that matters — a fault reaching the bytes is *not* the same as the
+/// bytes being bad — can be tested without a filesystem or a particular user.
+#[derive(Debug)]
+enum RegistryRead {
+    /// Read and parsed: use it.
+    Loaded(ProfileStore),
+    /// No file yet: a fresh install, seed the Default.
+    Missing,
+    /// Read, but the bytes are not valid JSON: preserve them, start over.
+    Corrupt,
+    /// The read itself failed (anything but not-found): a transient fault, not
+    /// corruption. The caller must refuse rather than discard the registry.
+    Unreadable(std::io::Error),
+}
+
+fn classify_registry(read: std::io::Result<Vec<u8>>) -> RegistryRead {
+    match read {
+        Ok(raw) => match serde_json::from_slice::<ProfileStore>(&raw) {
+            Ok(store) => RegistryRead::Loaded(store),
+            Err(_) => RegistryRead::Corrupt,
+        },
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => RegistryRead::Missing,
+        Err(error) => RegistryRead::Unreadable(error),
+    }
+}
+
 fn preserve_corrupt_registry(file: &Path) -> Result<()> {
     let corrupt = file.with_extension("json.corrupt");
     match std::fs::remove_file(&corrupt) {
@@ -237,6 +274,88 @@ mod tests {
         let store = ProfileStore::load(&paths, &def).unwrap();
         assert_eq!(store.list().len(), 1);
         assert!(store.list()[0].is_default);
+    }
+
+    // The whole point of the fix: the four things a read of the registry can
+    // mean are distinguished by classification alone, with no filesystem and no
+    // dependence on running as an unprivileged user (so a root CI runner, where
+    // chmod is a no-op, still exercises the transient-error branch).
+    #[test]
+    fn a_valid_registry_is_loaded() {
+        let raw = serde_json::to_vec(&ProfileStore::default()).unwrap();
+        assert!(matches!(
+            classify_registry(Ok(raw)),
+            RegistryRead::Loaded(_)
+        ));
+    }
+
+    #[test]
+    fn a_missing_registry_is_fresh_not_corrupt() {
+        let missing = Err(std::io::Error::from(std::io::ErrorKind::NotFound));
+        assert!(matches!(classify_registry(missing), RegistryRead::Missing));
+    }
+
+    #[test]
+    fn unparseable_bytes_are_the_only_corruption() {
+        assert!(matches!(
+            classify_registry(Ok(b"{ not json".to_vec())),
+            RegistryRead::Corrupt
+        ));
+    }
+
+    #[test]
+    fn a_transient_read_error_is_not_corruption() {
+        // EACCES/EIO/EMFILE, a file a backup tool has locked, wrong ownership
+        // after a restore — the bytes are intact, we just could not reach them.
+        let denied = Err(std::io::Error::from(std::io::ErrorKind::PermissionDenied));
+        match classify_registry(denied) {
+            RegistryRead::Unreadable(error) => {
+                assert_eq!(error.kind(), std::io::ErrorKind::PermissionDenied);
+            }
+            other => panic!("a read fault must not be classified as {other:?}"),
+        }
+    }
+
+    // And the wiring: `load` must refuse rather than discard a registry it could
+    // not read, leaving the file untouched for a later, readable start.
+    #[cfg(unix)]
+    #[test]
+    fn an_unreadable_registry_makes_load_refuse_and_keeps_the_file() {
+        use std::os::unix::fs::PermissionsExt;
+        let (_d, paths, def) = fixture();
+        let file = paths.profiles_json();
+        std::fs::create_dir_all(file.parent().unwrap()).unwrap();
+        let original = br#"{"profiles":[{"id":"aaaa1111","label":"Work","path":"/tmp/p/aaaa1111","is_default":false,"account":null}]}"#;
+        std::fs::write(&file, original).unwrap();
+        std::fs::set_permissions(&file, std::fs::Permissions::from_mode(0o000)).unwrap();
+
+        // Root ignores the mode bits, so this branch is only meaningful for an
+        // unprivileged user; the pure-function tests above cover the rest.
+        if std::fs::read(&file).is_ok() {
+            std::fs::set_permissions(&file, std::fs::Permissions::from_mode(0o600)).unwrap();
+            return;
+        }
+
+        let result = ProfileStore::load(&paths, &def);
+        std::fs::set_permissions(&file, std::fs::Permissions::from_mode(0o600)).unwrap();
+
+        assert!(
+            result.is_err(),
+            "an unreadable registry must not load as Default"
+        );
+        assert!(
+            file.exists(),
+            "the registry must be left in place, not renamed"
+        );
+        assert!(
+            !file.with_extension("json.corrupt").exists(),
+            "a read fault must not preserve the file as corrupt"
+        );
+        assert_eq!(
+            std::fs::read(&file).unwrap(),
+            original,
+            "the bytes must be untouched"
+        );
     }
 
     #[test]
