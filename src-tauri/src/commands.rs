@@ -106,13 +106,24 @@ pub(crate) fn directory_size(path: &Path) -> anyhow::Result<u64> {
 
     let mut total = 0;
     for entry in std::fs::read_dir(path)? {
-        let entry = entry?;
+        // A live profile directory — a Chromium user-data store, a Codex rollout
+        // dir — rewrites and deletes files while its app runs, so an entry can
+        // vanish or turn unreadable between being listed here and being measured
+        // below. Skip whatever we cannot reach this instant (the `du` convention),
+        // the same way `list_apps` lets a failed scan cost the dots and not the
+        // list. Aborting the whole walk over one raced file withholds the entire
+        // "on disk" total for the visit; skipping it leaves the total off by at
+        // most that one entry. A genuinely unreadable profile root still fails,
+        // above, at `read_dir` — that is a failed row, not a mid-walk race.
+        let Ok(entry) = entry else { continue };
         // `symlink_metadata` does NOT follow links. Following them would descend
         // into whatever a link points at — counting bytes that live outside this
         // profile, and recursing forever on a link that points back up its own tree.
-        let metadata = entry.path().symlink_metadata()?;
+        let Ok(metadata) = entry.path().symlink_metadata() else {
+            continue;
+        };
         if metadata.is_dir() {
-            total += directory_size(&entry.path())?;
+            total += directory_size(&entry.path()).unwrap_or(0);
         } else {
             total += metadata.len();
         }
@@ -862,5 +873,40 @@ mod tests {
         std::fs::write(nested.join("child.bin"), b"12345").unwrap();
 
         assert_eq!(directory_size(d.path()).unwrap(), 8);
+    }
+
+    // A live profile dir (a Chromium user-data store, a Codex rollout dir)
+    // rewrites and deletes files while the app runs, so an entry can vanish or
+    // turn unreadable between listing it and measuring it. That is a race, not
+    // an unreadable profile: the walk must return the size of what it could see
+    // (the `du` convention), not fail outright and cost the whole "on disk"
+    // total for the visit.
+    #[cfg(unix)]
+    #[test]
+    fn an_unreadable_entry_is_skipped_rather_than_failing_the_whole_walk() {
+        use std::os::unix::fs::PermissionsExt;
+        let d = tempfile::tempdir().unwrap();
+        std::fs::write(d.path().join("seen.bin"), b"12345").unwrap();
+        let blocked = d.path().join("blocked");
+        std::fs::create_dir(&blocked).unwrap();
+        std::fs::write(blocked.join("hidden.bin"), b"9999999999").unwrap();
+        // A directory the walk cannot descend into stands in for the entry that
+        // errored mid-walk.
+        std::fs::set_permissions(&blocked, std::fs::Permissions::from_mode(0o000)).unwrap();
+
+        // Root ignores the mode bits; the assertion is only meaningful for an
+        // unprivileged user. Restore permissions either way so tempdir cleanup works.
+        let readable_as_root = std::fs::read_dir(&blocked).is_ok();
+        let measured = directory_size(d.path());
+        std::fs::set_permissions(&blocked, std::fs::Permissions::from_mode(0o755)).unwrap();
+
+        if readable_as_root {
+            return;
+        }
+        assert_eq!(
+            measured.unwrap(),
+            5,
+            "the readable file still counts; the unreadable directory is skipped, not fatal"
+        );
     }
 }
