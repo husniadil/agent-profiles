@@ -165,7 +165,26 @@ impl ProfileStore {
             return Err(error);
         }
         if removed.path.exists() {
-            std::fs::remove_dir_all(&removed.path)?;
+            if let Err(error) = std::fs::remove_dir_all(&removed.path) {
+                // The directory is still there, credentials and all, so the
+                // registry has to go on owning it: an entry pointing at real
+                // bytes beats an orphan nothing will ever clean up. If putting
+                // the entry back fails too, the message has to name the path,
+                // because from here only the user can deal with it.
+                let path = removed.path.clone();
+                self.profiles.insert(idx, removed);
+                if let Err(save_error) = self.save(paths) {
+                    return Err(anyhow!(
+                        "could not remove {}: {error} — and the profile could not be put back in the registry either: {save_error}. Its data, including credentials, is still at {}",
+                        path.display(),
+                        path.display()
+                    ));
+                }
+                return Err(anyhow!(
+                    "could not remove {}: {error}. The profile is still listed and its data is still on disk",
+                    path.display()
+                ));
+            }
         }
         Ok(())
     }
@@ -347,6 +366,40 @@ mod tests {
         assert_eq!(
             leftovers, 0,
             "an orphaned directory is owned by nothing and cleaned up by nobody"
+        );
+    }
+
+    /// Makes the directory removal fail without permission games: a plain file
+    /// standing where the profile directory belongs still `exists()`, and
+    /// `remove_dir_all` refuses it on every platform.
+    fn block_the_directory(path: &Path) {
+        std::fs::remove_dir_all(path).unwrap();
+        std::fs::write(path, b"not a directory").unwrap();
+    }
+
+    #[test]
+    fn a_directory_that_cannot_be_removed_keeps_its_registry_entry() {
+        // The directory holds the profile's credentials. If it survives the
+        // delete, the registry has to go on owning it — an orphaned directory
+        // is owned by nothing and cleaned up by nobody.
+        let (_d, paths, def) = fixture();
+        let mut store = ProfileStore::load(&paths, &def).unwrap();
+        let p = store.add("Kerja", &paths).unwrap();
+        block_the_directory(&p.path);
+
+        let error = store.remove(&p.id, &paths).unwrap_err().to_string();
+        assert!(
+            error.contains(&p.path.display().to_string()),
+            "the error has to name the data still on disk, got: {error}"
+        );
+        assert!(
+            store.get(&p.id).is_some(),
+            "the profile must still be listed, matching what is on disk"
+        );
+        let reloaded = ProfileStore::load(&paths, &def).unwrap();
+        assert!(
+            reloaded.get(&p.id).is_some(),
+            "the committed registry must not have dropped it either"
         );
     }
 
