@@ -91,14 +91,17 @@ impl AppState {
     }
 }
 
-/// Builds one runtime per app declared *and* installed on this platform.
+/// Builds one runtime per app declared on this platform, installed or not.
 ///
-/// An app declared here but not installed has no stock data directory to point
-/// its Default profile at, so it is skipped rather than aborting startup for
-/// every other app — it appears the next time this launches with the app
-/// present. A missing app must never be fatal: a user with only one of the
-/// declared apps still gets that one. An app not declared here is skipped
-/// earlier still: nobody has checked this platform for it.
+/// A declared-but-not-installed app still gets a runtime pointed at its
+/// canonical Default directory, so it appears greyed with a reason (from
+/// `availability`) and becomes usable the moment it is installed, without a
+/// relaunch. It is skipped only when the platform cannot even name a candidate
+/// directory — never merely because that directory does not exist yet. A
+/// missing app must never be fatal: a user with only one of the declared apps
+/// still gets that one, and one app failing to resolve does not abort startup
+/// for the rest. An app not declared here is skipped earlier still: nobody has
+/// checked this platform for it.
 pub fn build(platform: &dyn Platform) -> Result<Vec<AppRuntime>> {
     let root = platform.data_root()?;
     let mut runtimes = Vec::new();
