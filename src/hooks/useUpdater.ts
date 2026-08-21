@@ -4,7 +4,11 @@ import { getVersion } from "@tauri-apps/api/app";
 import { relaunch } from "@tauri-apps/plugin-process";
 import { check, type Update } from "@tauri-apps/plugin-updater";
 
-import { errorMessage, releaseKeepAwakeForUpdate } from "@/lib/api";
+import {
+  errorMessage,
+  releaseKeepAwakeForUpdate,
+  resumeKeepAwakeAfterFailedUpdate,
+} from "@/lib/api";
 
 export type UpdateState =
   | { kind: "disabled" }
@@ -132,6 +136,17 @@ export function useUpdater(autoUpdate: boolean | undefined): Updater {
       // option would be a promise we could only keep on two platforms.
       await relaunch();
     } catch (cause) {
+      // The install did not take the process with it, so hand keep-awake back its
+      // sweep: `releaseKeepAwakeForUpdate` paused it so nothing could re-arm the
+      // hold in the gap before the installer took over, and leaving that pause set
+      // would silently switch the feature off for the rest of this run. Safe to
+      // call even when the failure came before the release — resuming a sweep that
+      // was never paused is a no-op — and guarded so it cannot mask the real cause.
+      try {
+        await resumeKeepAwakeAfterFailedUpdate();
+      } catch {
+        // best effort: nothing useful can be done on the error path itself
+      }
       // Free the downloaded bundle the plugin would otherwise retain (see above).
       // Guarded so a close failure never masks the real error we are reporting.
       try {
