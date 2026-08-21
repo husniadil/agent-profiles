@@ -2,7 +2,7 @@
 
 ## The most useful contribution
 
-This project was built and verified entirely on macOS. **Windows and Linux have never been compiled or run on real hardware** — every test for them executes on macOS against fixtures. See the platform checklists in the [README](README.md).
+This project was built and verified entirely on macOS. **Windows and Linux have never been compiled or run on real hardware** — every test for them executes on macOS against fixtures. See the platform checklists in [docs/platform-status.md](docs/platform-status.md).
 
 If you run Windows or Linux, checking one of those boxes with a real report is worth more than any further test written on macOS. A bug report saying "the process list looks like this instead" is a genuine contribution, even without a patch.
 
@@ -24,6 +24,14 @@ pnpm start
 ```
 
 Start the app with `pnpm start`, not by running the binary from `target/debug`. A development build loads its interface from the Vite dev server, so a bare binary opens a blank management window.
+
+Create an unsigned local bundle for the current platform:
+
+```bash
+pnpm tauri build
+```
+
+Why the app is shaped the way it is — process pinning, path budgets, shared configuration, and the platform caveats — is in [docs/design.md](docs/design.md). Cutting a release is [docs/releasing.md](docs/releasing.md).
 
 ## Before opening a pull request
 
@@ -74,6 +82,49 @@ docker run --rm -v "$PWD:/src:ro" ubuntu:22.04 bash -c '
 Ubuntu 22.04 is the distribution CI pins, and the container is architecture-native, so on Apple Silicon this is an arm64 Linux rather than the amd64 one CI uses. That difference has never mattered for this code, which contains nothing architecture-specific — but it is a difference, and a container is still not a desktop. It proves the code builds and its tests pass on Linux. It proves nothing about the tray, the window, or `xdotool`.
 
 One command, so there is no chance of running a weaker check than CI does: it is the frontend build, `cargo fmt --check`, `cargo clippy --all-targets -- -D warnings` and `cargo test`, stopping at the first failure. The build is expected to be warning-free. If your change adds a warning, resolve it rather than leaving it for someone else to wonder about.
+
+
+## Adding another app
+
+An app is a data declaration in `src-tauri/src/app_spec.rs` — one `AppSpec` constant and one line in the registry. No OS backend is touched, which is what keeps the third app cheaper than the second.
+
+Before declaring one, answer four questions. All four must be yes:
+
+1. Can a profile be expressed as **one directory**?
+2. Can that directory be **selected at launch**, through an argument or the environment?
+3. Can the selection be **read back** off a running process?
+4. Does **no global lock** survive the directories being separated?
+
+These are limits, not obstacles to work around. A sandboxed app fails (2) because the system pins its container. An app keeping its credentials in the system keychain fails (1) because its profile is not a directory at all. Better to find that out at the declaration than three days into an implementation.
+
+The four questions have an executable form. After declaring an app, run the manual harness against a real installation:
+
+```bash
+cd src-tauri
+PROBE_APP=/Applications/Something.app cargo test -- --ignored probe --nocapture
+```
+
+The probe launches the application twice, works out which channels move its
+profile and which are ignored, checks whether a second profile can live
+alongside the first, and prints a draft declaration with the parts it cannot
+know marked `TODO`. It runs at a path as long as the real profile layout, and
+reports the socket budget every time — an id that is too long fails here rather
+than in a user's tray. Try a shorter one with `PROBE_ID=<id>`.
+
+Once declared, the same harness exercises it end to end:
+
+```bash
+cargo test -- --ignored --nocapture                          # every check
+VERIFY_APP=<app id> cargo test -- --ignored launch_detect    # just the new app
+```
+
+It creates a profile, launches the real application, confirms a process scan attributes it back to that profile, confirms the app wrote its state into the profile directory rather than the stock one, quits it, and cleans up. These checks launch real applications, so they are `#[ignore]`d and never run in CI or in a normal `cargo test`.
+
+Declare an app only for the platforms someone has actually checked. Leaving a platform's row out is honest; filling it with a plausible-looking path is a guess that ships.
+
+## Adding a UI string
+
+A visible string starts in `src/lib/i18n/en.ts`, which is the type every other locale is checked against — add the key there first. Then add the same key to the other five files (`id.ts`, `ja.ts`, `de.ts`, `es.ts`, `pt.ts`): a locale missing a key, or inventing one the English dictionary does not have, fails `pnpm build` rather than shipping a blank label. If the string also appears in the tray menu — which draws from its own small table rather than the frontend's dictionary — add it to `tray_strings` in `src-tauri/src/general.rs` as well; a Rust test there enforces that all six locales carry every tray string, so a locale that forgot one fails `cargo test` instead of shipping silence.
 
 ## Tests
 
