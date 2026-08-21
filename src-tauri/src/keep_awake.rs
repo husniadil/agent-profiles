@@ -409,7 +409,12 @@ impl Sweep {
     /// What the sweep achieved, told after the hold was attempted: the phase it
     /// asked for and whether the platform obliged. Nothing else may set this —
     /// the whole point is that the clock answers to the hold, not to the phase.
-    pub fn settle(&mut self, phase: Phase, hold_error: Option<&str>) {
+    ///
+    /// Private, and deliberately: the only production caller is [`hold_step`],
+    /// which is the one function that attempts the write this is the record of.
+    /// Keeping it out of the module's surface means "the clock answers to the
+    /// hold" is enforced by the compiler rather than by a comment.
+    fn settle(&mut self, phase: Phase, hold_error: Option<&str>) {
         self.held = phase.holds() && hold_error.is_none();
     }
 }
@@ -796,12 +801,26 @@ pub enum HoldStep {
 /// calls this in the same order it used to run inline, so runtime behaviour is
 /// unchanged — extracting it only makes the guard testable, which it was not
 /// before: a suite could delete this check and stay green.
+///
+/// The sweep clock is settled *here*, for the same reason. [`Sweep::held`] is
+/// the record of whether the machine was really held, and it is only knowable
+/// once this function has attempted the write. Left as a separate line in
+/// `watch` it was untestable in exactly the way the guard above used to be:
+/// delete it, reorder it, or jump it with a `continue`, and `held` goes stale
+/// while every test stays green — the window then reports a pause, or an
+/// outage, as time the machine was held. Every exit from this function settles,
+/// so there is no path out of the one place that takes a hold which leaves the
+/// clock believing a stale answer.
 pub fn hold_step(
     handle: &Handle,
     platform: &dyn crate::platform::Platform,
     phase: Phase,
+    sweep: &mut Sweep,
 ) -> HoldStep {
     if handle.is_stopping() {
+        // Nothing was written, and `release_at_exit` has already handed the
+        // machine back — so whatever the phase asked for, nothing is held.
+        sweep.settle(Phase::Idle, None);
         return HoldStep::Stopped;
     }
 
@@ -824,6 +843,10 @@ pub fn hold_step(
             );
             error.to_string()
         });
+    // Told what actually happened, so the next sweep credits its interval to
+    // the hold that was really in place rather than to the phase that asked
+    // for one.
+    sweep.settle(phase, hold_error.as_deref());
     HoldStep::Applied(hold_error)
 }
 
@@ -921,14 +944,12 @@ pub fn watch(app: tauri::AppHandle) {
         // re-arm guard can be tested; the check sits immediately before the only
         // call that re-takes the hold, because the race being closed is exactly a
         // sweep already mid-iteration when `release_at_exit` ran.
-        let hold_error = match hold_step(handle, state.platform.as_ref(), phase) {
+        // `hold_step` settles the clock itself, on every path out of it, so no
+        // line here can be deleted or jumped in a way that leaves `held` stale.
+        let hold_error = match hold_step(handle, state.platform.as_ref(), phase, &mut sweep) {
             HoldStep::Stopped => return,
             HoldStep::Applied(hold_error) => hold_error,
         };
-        // Told what actually happened, so the next sweep credits its interval
-        // to the hold that was really in place rather than to the phase that
-        // asked for one.
-        sweep.settle(phase, hold_error.as_deref());
         handle.publish(phase, roots, power, thermal, sweep.held_for, hold_error);
     }
 }
@@ -1730,6 +1751,9 @@ mod tests {
     #[derive(Default)]
     struct RecordingHold {
         calls: Mutex<Vec<bool>>,
+        /// Make every `hold` write fail, so a test can drive the case the clock
+        /// has to answer to: the app asked for a hold and the platform refused.
+        fails: bool,
     }
 
     impl crate::platform::Platform for RecordingHold {
@@ -1773,6 +1797,9 @@ mod tests {
         }
         fn hold(&self, _data_root: &Path, on: bool) -> Result<()> {
             self.calls.lock().unwrap().push(on);
+            if self.fails {
+                return Err(anyhow::anyhow!("could not hold the machine awake"));
+            }
             Ok(())
         }
     }
@@ -1857,7 +1884,8 @@ mod tests {
         // Drive the extracted step exactly as the sweep would, asking to hold —
         // the worst case, the one that re-arms. The guard must turn it into a
         // no-op that ends the loop instead.
-        match hold_step(&handle, &platform, Phase::Holding) {
+        let mut sweep = Sweep::default();
+        match hold_step(&handle, &platform, Phase::Holding, &mut sweep) {
             HoldStep::Stopped => {}
             HoldStep::Applied(_) => {
                 panic!("a stopped sweep must not reach the hold write")
@@ -1867,6 +1895,78 @@ mod tests {
             platform.calls.lock().unwrap().is_empty(),
             "no hold call may reach the platform after stop_sweeping — the sweep \
              must not re-arm the hold the exit path just released"
+        );
+        // And the clock was told, on this path too: a step that wrote nothing
+        // held nothing, so nothing after it may be credited as held.
+        sweep.observe(Phase::Holding, Duration::from_secs(3600));
+        assert_eq!(
+            sweep.held_for,
+            Duration::ZERO,
+            "a step that never reached the hold write must not leave the clock \
+             believing the machine is held"
+        );
+    }
+
+    #[test]
+    fn the_step_that_holds_is_the_step_that_settles_the_clock() {
+        // The invariant this test exists to hold down is not "`settle` computes
+        // the right boolean" — the `Sweep` tests already cover that. It is that
+        // *nothing between the hold write and the next sweep can forget to tell
+        // the clock what happened*. When `settle` was a separate line in `watch`,
+        // deleting it, reordering it, or jumping it with a `continue` left `held`
+        // stale and the whole suite green: `watch` takes a `tauri::AppHandle` and
+        // no test can construct one. Settling inside `hold_step` puts the
+        // invariant under a function tests can drive, which is the same treatment
+        // and the same reason the `is_stopping` guard was pulled in here.
+        //
+        // So this drives `hold_step` exactly as the sweep does and asserts on the
+        // clock afterwards, never on `settle` directly.
+        let d = tempfile::tempdir().unwrap();
+        let handle = handle_with(
+            Recovery {
+                reclaimed_prior: None,
+                stranded: false,
+            },
+            d.path(),
+        );
+        let mut sweep = Sweep::default();
+
+        // A hold the platform took: the interval after it is genuinely held, so
+        // the next sweep credits it.
+        let taken = RecordingHold::default();
+        match hold_step(&handle, &taken, Phase::Holding, &mut sweep) {
+            HoldStep::Applied(None) => {}
+            HoldStep::Applied(Some(error)) => panic!("the hold should have taken: {error}"),
+            HoldStep::Stopped => panic!("a live app must reach the hold write"),
+        }
+        sweep.observe(Phase::Holding, Duration::from_secs(60));
+        assert_eq!(
+            sweep.held_for,
+            Duration::from_secs(60),
+            "a hold the platform took has to start the clock — if it does not, \
+             the step is not settling at all and the next assertion proves \
+             nothing"
+        );
+
+        // A hold the platform refused: the phase still says `Holding`, but the
+        // machine is free to sleep, so the interval after it counts for nothing.
+        // This is #41 exactly, reached through the production call path.
+        let refused = RecordingHold {
+            fails: true,
+            ..Default::default()
+        };
+        match hold_step(&handle, &refused, Phase::Holding, &mut sweep) {
+            HoldStep::Applied(Some(_)) => {}
+            HoldStep::Applied(None) => panic!("the hold should have failed"),
+            HoldStep::Stopped => panic!("a live app must reach the hold write"),
+        }
+        sweep.observe(Phase::Holding, Duration::from_secs(3600));
+        assert_eq!(
+            sweep.held_for,
+            Duration::from_secs(60),
+            "a hold that failed held nothing, so the hour after it must not be \
+             counted as held — and no line outside `hold_step` may be what \
+             makes that true"
         );
     }
 
