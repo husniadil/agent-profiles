@@ -347,14 +347,18 @@ pub fn delete_profile(
         .cloned()
         .ok_or_else(|| format!("no profile with id {id}"))?;
     refuse_if_running(&*state.platform, runtime.spec, &profile).map_err(|e| e.to_string())?;
+    store
+        .remove(&id, &runtime.paths)
+        .map_err(|e| e.to_string())?;
+    // Only drop the desktop identity once removal has actually succeeded.
+    // Unregistering first means a failed remove returns early via `?`, the tray
+    // is never rebuilt, and the profile comes back to the list on Linux with no
+    // matching WM_CLASS — a generic icon and no window grouping until restart.
     if runtime.spec.capabilities.desktop_identity {
         let _ = state
             .platform
             .unregister_identity(&wm_class(runtime.spec.id, &profile.id));
     }
-    store
-        .remove(&id, &runtime.paths)
-        .map_err(|e| e.to_string())?;
     drop(store);
     let _ = crate::tray::rebuild(&app);
     Ok(())

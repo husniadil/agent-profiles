@@ -67,7 +67,15 @@ impl ProfileStore {
         if let Some(parent) = file.parent() {
             std::fs::create_dir_all(parent)?;
         }
-        std::fs::write(file, serde_json::to_string_pretty(self)?)?;
+        // Write a complete copy aside, then swap it in with a rename. A bare
+        // write truncates the live registry before it knows whether the bytes
+        // will land — on ENOSPC that leaves profiles.json empty or half-written,
+        // and the next load treats the whole registry as corrupt. rename is
+        // atomic and replaces an existing file on Windows too, so the live file
+        // only ever changes from one complete registry to another.
+        let tmp = file.with_extension("json.tmp");
+        std::fs::write(&tmp, serde_json::to_string_pretty(self)?)?;
+        std::fs::rename(&tmp, &file)?;
         Ok(())
     }
 
@@ -165,7 +173,29 @@ impl ProfileStore {
             return Err(error);
         }
         if removed.path.exists() {
-            std::fs::remove_dir_all(&removed.path)?;
+            if let Err(error) = std::fs::remove_dir_all(&removed.path) {
+                // The directory could not be removed, so the registry has to go
+                // on owning whatever is left of it: an entry beats an orphan
+                // nothing will ever clean up. But remove_dir_all deletes children
+                // as it walks and stops on the first it cannot remove, so this is
+                // routinely a PARTIAL delete — nothing here inspected what
+                // survived, so the message must not promise the data is intact.
+                // It names the path because from here only the user can deal with
+                // it. If putting the entry back fails too, name it all the same.
+                let path = removed.path.clone();
+                self.profiles.insert(idx, removed);
+                if let Err(save_error) = self.save(paths) {
+                    return Err(anyhow!(
+                        "could not remove {}: {error} — and the profile could not be put back in the registry either: {save_error}. Part of its directory may already have been deleted; check {} before relying on it",
+                        path.display(),
+                        path.display()
+                    ));
+                }
+                return Err(anyhow!(
+                    "could not remove {}: {error}. The profile is still listed, but part of its directory may already have been deleted — check it before using it again",
+                    path.display()
+                ));
+            }
         }
         Ok(())
     }
@@ -316,6 +346,45 @@ mod tests {
     }
 
     #[test]
+    fn a_failed_save_does_not_corrupt_the_registry_the_user_still_has() {
+        // A bare write opens, truncates, then writes. If the write cannot finish
+        // — ENOSPC is the realistic cause, and the delete rollback issues a save
+        // precisely when the disk is already misbehaving — the file is left empty
+        // or half-written, and the next load reads invalid JSON, moves the whole
+        // registry aside, and starts over with a lone Default. Writing to a temp
+        // file and renaming means the live registry is only ever replaced by a
+        // complete one: a save that fails leaves it byte for byte as it was.
+        let (_d, paths, def) = fixture();
+        let mut store = ProfileStore::load(&paths, &def).unwrap();
+        store.add("Kerja", &paths).unwrap();
+        let file = paths.profiles_json();
+        let intact = std::fs::read(&file).unwrap();
+
+        // Stand a directory where the temp file has to be written, so the write
+        // step of save fails before it can ever touch the live registry.
+        std::fs::create_dir_all(file.with_extension("json.tmp")).unwrap();
+
+        assert!(store.save(&paths).is_err(), "the save must fail");
+        assert_eq!(
+            std::fs::read(&file).unwrap(),
+            intact,
+            "a failed save must not corrupt the registry the user still has"
+        );
+    }
+
+    #[test]
+    fn a_successful_save_leaves_no_temp_file_behind() {
+        let (_d, paths, def) = fixture();
+        let mut store = ProfileStore::load(&paths, &def).unwrap();
+        store.add("Kerja", &paths).unwrap();
+        store.save(&paths).unwrap();
+        assert!(
+            !paths.profiles_json().with_extension("json.tmp").exists(),
+            "the temp file must be renamed into place, not left lying around"
+        );
+    }
+
+    #[test]
     fn a_registry_that_cannot_be_written_does_not_cost_the_user_their_data() {
         // The whole point of saving before deleting: the user asked to remove a
         // profile, the registry write failed, and their data is still there to
@@ -347,6 +416,52 @@ mod tests {
         assert_eq!(
             leftovers, 0,
             "an orphaned directory is owned by nothing and cleaned up by nobody"
+        );
+    }
+
+    /// Makes the directory removal fail without permission games: a plain file
+    /// standing where the profile directory belongs still `exists()`, and
+    /// `remove_dir_all` refuses it on every platform.
+    fn block_the_directory(path: &Path) {
+        std::fs::remove_dir_all(path).unwrap();
+        std::fs::write(path, b"not a directory").unwrap();
+    }
+
+    #[test]
+    fn a_directory_that_cannot_be_removed_keeps_its_registry_entry() {
+        // The directory holds the profile's credentials. If it survives the
+        // delete, the registry has to go on owning it — an orphaned directory
+        // is owned by nothing and cleaned up by nobody.
+        let (_d, paths, def) = fixture();
+        let mut store = ProfileStore::load(&paths, &def).unwrap();
+        let p = store.add("Kerja", &paths).unwrap();
+        block_the_directory(&p.path);
+
+        let error = store.remove(&p.id, &paths).unwrap_err().to_string();
+        assert!(
+            error.contains(&p.path.display().to_string()),
+            "the error has to name the directory so only-the-user can deal with it, got: {error}"
+        );
+        // remove_dir_all deletes children as it walks and stops on the first it
+        // cannot remove, so a failure is routinely a PARTIAL delete — the message
+        // must not promise the data is intact when nothing inspected what
+        // survived.
+        assert!(
+            !error.contains("still on disk") && !error.contains("still listed and its data"),
+            "the message must not claim the data is intact, got: {error}"
+        );
+        assert!(
+            error.contains("may already have been deleted"),
+            "the message must warn the directory may be partially gone, got: {error}"
+        );
+        assert!(
+            store.get(&p.id).is_some(),
+            "the profile must still be listed, matching what is on disk"
+        );
+        let reloaded = ProfileStore::load(&paths, &def).unwrap();
+        assert!(
+            reloaded.get(&p.id).is_some(),
+            "the committed registry must not have dropped it either"
         );
     }
 
