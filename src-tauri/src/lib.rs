@@ -147,6 +147,7 @@ pub fn run() {
             commands::authorize_keep_awake,
             commands::restore_sleep,
             commands::release_keep_awake_for_update,
+            commands::resume_keep_awake_after_failed_update,
             commands::general_settings,
             commands::set_general_settings,
         ])

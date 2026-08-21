@@ -335,7 +335,8 @@ pub fn release_at_exit(handle: &Handle, platform: &dyn crate::platform::Platform
     platform.hold(&handle.data_root, false)
 }
 
-/// Hands the machine back before an update installs, without stopping the sweep.
+/// Hands the machine back before an update installs, and holds the sweep off
+/// until that install either takes the process or fails.
 ///
 /// Unlike [`release_at_exit`], this does not latch `stopping`. Installing an
 /// update is not the same as exiting: the bundled updater relaunches on success,
@@ -345,29 +346,45 @@ pub fn release_at_exit(handle: &Handle, platform: &dyn crate::platform::Platform
 /// rest of that run with no record, and the sweep's whole promise (hold a working
 /// agent's machine awake) would silently stop being kept until a manual relaunch.
 ///
-/// So it releases the OS hold and leaves the sweep running: a failed install
-/// self-heals, because the next sweep re-arms the hold from the trigger the user
-/// still has set. `release_at_exit` keeps its `stop_sweeping`, because the exit
-/// path really is going away and a re-arm there would strand the Windows lid
-/// action — but that reasoning does not hold for an install that may not exit.
+/// So it pauses instead of stopping. A pause the sweep observes but that does not
+/// end it keeps both properties at once:
 ///
-/// The cost is a narrow window on a *successful* install: between this release
-/// and the process actually ending, a sweep can re-arm the hold. That is
-/// acceptable — the installer relaunches and the next launch's `recover_hold`
-/// hands the machine back — and the alternative (latching `stopping`) breaks the
-/// far more common failed-install case.
+/// * Nothing re-arms during the handoff. The gap between this call and the
+///   installer taking over is easily longer than the fifteen-second [`SWEEP`], so
+///   without the pause a sweep could tick, re-take the hold, and write the Windows
+///   lid-close action back to "do nothing" — undoing the handoff moments before
+///   the NSIS installer's `exit(0)` ends the process with it stuck, with no run
+///   left to fix it. That is the failure this pause exists for, and it is the one
+///   that does not self-heal: on Windows the hold *is* a power-scheme write, so an
+///   install that fails after `exit(0)` (an antivirus block, a disk error, a
+///   killed installer) leaves the lid doing nothing until the user next opens
+///   Agent Profiles.
+/// * A failed install still leaves keep-awake working, because the window clears
+///   the pause in its `catch` — see [`resume_after_failed_update`] — and the very
+///   next sweep re-arms the hold from the trigger the user still has set.
 ///
-/// One case cannot self-heal, and it is Windows-only: the NSIS installer calls
-/// `exit(0)` mid-install, so if the install then fails (an antivirus block, a
-/// disk error, a killed installer) the app is already gone — no sweep runs again
-/// to re-arm, and the lid stays on "do nothing" until the user next opens the
-/// app. This is *not* a regression: before this PR nothing released the hold on
-/// exit at all, so the Windows lid action was left exactly this stuck after any
-/// quit. The split only adds the *successful*-update handoff; it leaves the
-/// failed-after-exit case no worse than the pre-PR baseline. Healing it properly
-/// would need a non-latching pause the sweep could resume, which is deferred.
+/// Pauses before releasing, in that order and for the same reason
+/// [`release_at_exit`] latches before releasing: a sweep that checks the flag
+/// after we release still sees it, whereas the other order leaves a window where
+/// it does not.
+///
+/// If the window is gone before it can clear the pause, the sweep stays paused
+/// for the rest of the run — which is the safe direction. Paused means "did not
+/// re-take the hold": the machine is left free to sleep and the lid works, the
+/// same state the release just put it in.
 pub fn release_for_update(handle: &Handle, platform: &dyn crate::platform::Platform) -> Result<()> {
+    handle.pause_sweeping();
     platform.hold(&handle.data_root, false)
+}
+
+/// Undoes the handoff, for an install that did not take the process with it.
+///
+/// Called from the window's `catch`, which covers every way the install can end
+/// without exiting — including the release itself failing. Deliberately not
+/// conditional on *why* it failed: the app is still running, so keep-awake has to
+/// go on working, and a pause left set would be a feature silently switched off.
+pub fn resume_after_failed_update(handle: &Handle) {
+    handle.resume_sweeping();
 }
 
 /// The one thing a sweep carries forward: how long this stretch of holding has
@@ -552,6 +569,17 @@ pub struct Handle {
     /// (see [`release_for_update`]): an install can fail and leave the app
     /// running, and a latched flag would kill the sweep for the rest of that run.
     stopping: AtomicBool,
+    /// Set while an update install is handing the machine over, and cleared if
+    /// that install fails.
+    ///
+    /// The difference from `stopping` is that this one comes back. The exit path
+    /// really is going away, so latching is right there; an install is only
+    /// *probably* going away — `install()` can throw, and on macOS and Linux the
+    /// app is still running afterwards — so a latch would leave keep-awake dead
+    /// for the rest of that run with nothing on screen saying so. A pause the
+    /// window clears in its `catch` keeps both properties: no re-arm while the
+    /// installer is taking over, and a failed install that still holds.
+    paused: AtomicBool,
 }
 
 impl Handle {
@@ -595,6 +623,7 @@ impl Handle {
             wake: std::sync::Condvar::new(),
             wake_pending: Mutex::new(false),
             stopping: AtomicBool::new(false),
+            paused: AtomicBool::new(false),
         }
     }
 
@@ -611,6 +640,27 @@ impl Handle {
     /// would re-take the hold.
     pub fn is_stopping(&self) -> bool {
         self.stopping.load(Ordering::SeqCst)
+    }
+
+    /// Tells the sweep to stop re-arming the hold, without ending it. Called from
+    /// the update path, where the process is probably about to be replaced but
+    /// may yet survive a failed install.
+    pub fn pause_sweeping(&self) {
+        self.paused.store(true, Ordering::SeqCst);
+    }
+
+    /// Lets the sweep re-arm again, after an install that did not happen. Nudges,
+    /// so a machine the user still has a trigger armed for is held again now
+    /// rather than up to a tick later.
+    pub fn resume_sweeping(&self) {
+        self.paused.store(false, Ordering::SeqCst);
+        self.nudge();
+    }
+
+    /// Whether an update handoff is in progress. Read by the sweep immediately
+    /// before it would re-take the hold.
+    pub fn is_paused(&self) -> bool {
+        self.paused.load(Ordering::SeqCst)
     }
 
     /// Wakes the sweep now instead of at the end of its timer.
@@ -780,6 +830,9 @@ pub enum HoldStep {
     /// The app is on its way out: the step touched nothing, and the sweep must
     /// end rather than run on.
     Stopped,
+    /// An update install is handing the machine over: the step touched nothing,
+    /// and the sweep runs on — the pause is cleared if that install fails.
+    Skipped,
     /// The hold decision was applied through the platform, carrying whatever
     /// error the write returned so the window can report it.
     Applied(Option<String>),
@@ -811,6 +864,14 @@ pub enum HoldStep {
 /// outage, as time the machine was held. Every exit from this function settles,
 /// so there is no path out of the one place that takes a hold which leaves the
 /// clock believing a stale answer.
+///
+/// The update handoff's pause sits *beside* that check rather than replacing it,
+/// and for the same reason: it is the re-arm that must not happen. A paused sweep
+/// must still be allowed to release — the `Trigger::Off` branch in [`watch`] is
+/// unguarded and stays that way, because releasing again is a no-op and can never
+/// strand the lid. The two are separate because they end differently: `stopping`
+/// ends the loop, a pause only skips this step, so the sweep is still there to
+/// re-arm the moment a failed install clears it.
 pub fn hold_step(
     handle: &Handle,
     platform: &dyn crate::platform::Platform,
@@ -822,6 +883,9 @@ pub fn hold_step(
         // machine back — so whatever the phase asked for, nothing is held.
         sweep.settle(Phase::Idle, None);
         return HoldStep::Stopped;
+    }
+    if handle.is_paused() {
+        return HoldStep::Skipped;
     }
 
     // Carried into the status rather than only logged. Whatever the platform's
@@ -948,6 +1012,13 @@ pub fn watch(app: tauri::AppHandle) {
         // line here can be deleted or jumped in a way that leaves `held` stale.
         let hold_error = match hold_step(handle, state.platform.as_ref(), phase, &mut sweep) {
             HoldStep::Stopped => return,
+            // An update install is taking the machine over. Nothing was written
+            // and nothing is published: the status the window last saw is the
+            // one the handoff left, and re-publishing `Holding` here would claim
+            // a hold that `release_for_update` just gave back. If the install
+            // fails the pause is cleared and the very next sweep publishes for
+            // real.
+            HoldStep::Skipped => continue,
             HoldStep::Applied(hold_error) => hold_error,
         };
         handle.publish(phase, roots, power, thermal, sweep.held_for, hold_error);
@@ -1887,8 +1958,8 @@ mod tests {
         let mut sweep = Sweep::default();
         match hold_step(&handle, &platform, Phase::Holding, &mut sweep) {
             HoldStep::Stopped => {}
-            HoldStep::Applied(_) => {
-                panic!("a stopped sweep must not reach the hold write")
+            HoldStep::Skipped | HoldStep::Applied(_) => {
+                panic!("a stopped sweep must end the loop, not reach the hold write")
             }
         }
         assert!(
@@ -2004,6 +2075,78 @@ mod tests {
             !handle.is_stopping(),
             "the update path must not stop the sweep — a failed install leaves \
              the app running and keep-awake must keep working"
+        );
+    }
+
+    #[test]
+    fn a_sweep_cannot_undo_the_update_handoff() {
+        // The handoff is only worth making if it survives the next tick. The
+        // sweep runs every fifteen seconds and the window between
+        // `release_for_update` and the installer's `exit(0)` is easily longer
+        // than that, so a sweep that re-armed here would write the Windows
+        // lid-close action back to "do nothing" and then the process would end
+        // with it stuck — exactly the handoff being undone.
+        let d = tempfile::tempdir().unwrap();
+        let handle = handle_with(
+            Recovery {
+                reclaimed_prior: None,
+                stranded: false,
+            },
+            d.path(),
+        );
+        let platform = RecordingHold::default();
+
+        release_for_update(&handle, &platform).unwrap();
+
+        // Drive the one step of a sweep that can re-take the hold, asking for
+        // the worst case.
+        match hold_step(&handle, &platform, Phase::Holding) {
+            HoldStep::Skipped => {}
+            HoldStep::Stopped => panic!("the handoff must pause the sweep, not end it"),
+            HoldStep::Applied(_) => {
+                panic!("a sweep during the update handoff must not reach the hold write")
+            }
+        }
+        assert_eq!(
+            *platform.calls.lock().unwrap(),
+            vec![false],
+            "no hold call may reach the platform after the update handoff — the \
+             sweep must not re-arm the hold the installer is about to outlive"
+        );
+    }
+
+    #[test]
+    fn a_failed_install_leaves_keep_awake_working() {
+        // The other half, and why this is a pause rather than a stop: the
+        // install can throw after the handoff and on macOS and Linux the app is
+        // still running. A latched stop would leave keep-awake dead for the rest
+        // of the run with nothing on screen saying so, so the window clears the
+        // pause in its `catch` and the very next sweep re-arms.
+        let d = tempfile::tempdir().unwrap();
+        let handle = handle_with(
+            Recovery {
+                reclaimed_prior: None,
+                stranded: false,
+            },
+            d.path(),
+        );
+        let platform = RecordingHold::default();
+
+        release_for_update(&handle, &platform).unwrap();
+        resume_after_failed_update(&handle);
+
+        assert!(
+            !handle.is_stopping(),
+            "a failed install must never leave the sweep stopped"
+        );
+        match hold_step(&handle, &platform, Phase::Holding) {
+            HoldStep::Applied(None) => {}
+            _ => panic!("after a failed install the sweep must re-arm the hold"),
+        }
+        assert_eq!(
+            *platform.calls.lock().unwrap(),
+            vec![false, true],
+            "a failed install has to leave keep-awake able to hold again"
         );
     }
 }
