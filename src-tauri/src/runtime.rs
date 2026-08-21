@@ -72,10 +72,11 @@ impl AppState {
     ///
     /// Resolved on every use rather than cached: an app's binary can come and go
     /// while this runs, so re-checking greys or un-greys its section without a
-    /// restart. This only covers apps `build` already listed. An app whose stock
-    /// data directory was absent at startup has no runtime at all until the next
-    /// launch (see `build`) — on macOS that never happens, on Windows it is the
-    /// not-installed case.
+    /// restart. This only covers apps `build` already listed, which on every
+    /// platform includes an app whose stock data directory does not exist: an
+    /// absent directory is no longer a reason to drop the app (see `build`).
+    /// The one app `build` leaves out is one whose platform cannot name a
+    /// candidate directory at all, and that app has no runtime to ask about.
     pub fn availability(&self, runtime: &AppRuntime) -> Option<String> {
         // Ahead of the binary check, and not merged with it: an installed app
         // whose registry cannot be read is unavailable for a reason the user can
@@ -271,12 +272,16 @@ mod tests {
     }
 
     #[test]
-    fn an_app_with_no_stock_directory_is_skipped_not_fatal() {
-        // The Windows crash: one declared app is not installed, so its stock
-        // directory does not exist. That must skip the app, never abort the
-        // build and take every other app down with it. Modelled by failing
-        // `default_profile_dir` for codex (its default profile is `.codex`)
-        // while claude resolves normally.
+    fn an_app_with_no_candidate_directory_is_skipped_not_fatal() {
+        // The only arm that still skips an app: the platform cannot name a
+        // candidate directory for it at all, so `default_profile_dir` errors.
+        // That must skip the one app, never abort the build and take every
+        // other app down with it. Modelled by failing `default_profile_dir`
+        // for codex (its default profile is `.codex`) while claude resolves
+        // normally. Not the not-installed case — since #22 an app that is
+        // merely absent from disk still resolves to its canonical directory
+        // and gets a runtime; `every_app_declared_for_this_platform_gets_a_runtime`
+        // covers that.
         struct PartialInstall {
             root: PathBuf,
         }
@@ -318,14 +323,14 @@ mod tests {
         let apps = build(&PartialInstall {
             root: d.path().to_path_buf(),
         })
-        .expect("a missing app must not fail the whole build");
+        .expect("one unresolvable app must not fail the whole build");
         assert!(
             apps.iter().any(|r| r.spec.id == "claude"),
-            "the installed app survives"
+            "the app whose directory could be named survives"
         );
         assert!(
             !apps.iter().any(|r| r.spec.id == "codex"),
-            "the uninstalled app is skipped, not present"
+            "the app with no nameable candidate directory is skipped, not present"
         );
     }
 
