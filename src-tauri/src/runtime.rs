@@ -75,8 +75,9 @@ impl AppState {
     /// restart. This only covers apps `build` already listed, which on every
     /// platform includes an app whose stock data directory does not exist: an
     /// absent directory is no longer a reason to drop the app (see `build`).
-    /// The one app `build` leaves out is one whose platform cannot name a
-    /// candidate directory at all, and that app has no runtime to ask about.
+    /// The one *declared* app `build` leaves out is one whose platform cannot
+    /// name a candidate directory at all, and that app has no runtime to ask
+    /// about.
     pub fn availability(&self, runtime: &AppRuntime) -> Option<String> {
         // Ahead of the binary check, and not merged with it: an installed app
         // whose registry cannot be read is unavailable for a reason the user can
@@ -295,7 +296,7 @@ mod tests {
             fn default_profile_dir(&self, locations: &Locations) -> Result<PathBuf> {
                 let default = locations.macos.as_ref().unwrap().default_profile;
                 if default == ".codex" {
-                    return Err(anyhow!("the app's data directory was not found"));
+                    return Err(anyhow!("this app declares no data directory to look in"));
                 }
                 Ok(self.root.join("home").join(default))
             }
