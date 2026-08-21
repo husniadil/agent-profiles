@@ -175,8 +175,15 @@ mod tests {
                 .join("home")
                 .join(locations.macos.as_ref().unwrap().default_profile))
         }
-        fn binary(&self, _locations: &Locations, product: &str) -> Result<PathBuf> {
-            Err(anyhow!("{product} was not found"))
+        /// Fails the way a real platform fails: with the two lengths carried
+        /// as an `Unavailable`, so the downcast in `availability` is what is
+        /// under test rather than a plain string that would pass either way.
+        fn binary(&self, locations: &Locations, product: &str) -> Result<PathBuf> {
+            let bin = locations.macos.as_ref().unwrap().binary;
+            Err(anyhow!(Unavailable::new(
+                format!("{product} is not installed"),
+                format!("{product} was not found at {bin}"),
+            )))
         }
         fn process_marker(&self, locations: &Locations) -> Result<String> {
             Ok(locations.macos.as_ref().unwrap().binary.to_string())
@@ -380,6 +387,18 @@ mod tests {
         assert!(
             reason.summary.contains("ChatGPT"),
             "both lengths name the app, or the short one is unreadable in the tray: {}",
+            reason.summary
+        );
+        // The platform wrote two different lengths; `availability` has to hand
+        // both of them through. Collapsing it to one — flattening the error
+        // instead of recovering the `Unavailable` — makes these two fail.
+        assert_ne!(
+            reason.summary, reason.detail,
+            "the short length was not recovered from the platform's error, so the tray gets the long one"
+        );
+        assert!(
+            !reason.summary.contains('/'),
+            "the tray's length still carries a path, which is what sets the width of every row: {}",
             reason.summary
         );
     }
