@@ -395,8 +395,8 @@ mod tests {
             "no profiles at all — a fabricated Default is the lie this fixes"
         );
         // Carried on the runtime, not merely logged: this is the same channel
-        // an uninstalled app uses, so whatever #11 settles on for showing a
-        // reason instead of dropping the row covers this fault too.
+        // an uninstalled app uses, so the greyed row that names the reason
+        // instead of dropping the app covers this fault too.
         let reason = state.availability(claude).unwrap();
         assert!(
             reason.contains("profile registry"),

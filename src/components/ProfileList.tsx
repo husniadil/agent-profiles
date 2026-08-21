@@ -156,18 +156,38 @@ export function ProfileList({
                 <span aria-hidden="true" className="h-px flex-1 bg-hairline" />
               </div>
             ) : null}
-            <Rows
-              app={app}
-              sizes={sizes}
-              reload={reload}
-              onError={onError}
-              clearError={clearError}
-            />
+            {app.unavailable ? (
+              <Unavailable reason={app.unavailable} />
+            ) : (
+              <Rows
+                app={app}
+                sizes={sizes}
+                reload={reload}
+                onError={onError}
+                clearError={clearError}
+              />
+            )}
           </section>
           ))}
         </div>
       </div>
     </div>
+  );
+}
+
+/// An app this tool knows about but cannot use, saying why.
+///
+/// Greyed rather than hidden: an app that simply disappears is indistinguishable
+/// from one this tool never supported, and the profiles under it are not gone —
+/// they come back the moment the app is installed. The reason comes from the
+/// backend, which is the only side that knows what it looked for and where, so
+/// it arrives already written and is not translated here.
+function Unavailable({ reason }: { reason: string }) {
+  return (
+    // `ink-2`, not the fainter `ink-3`: this row is quiet because it offers
+    // nothing to do, not because it is less worth reading — a sentence set below
+    // the contrast floor is one nobody can act on.
+    <p className="px-2 py-1.5 text-callout text-ink-2">{reason}</p>
   );
 }
 
