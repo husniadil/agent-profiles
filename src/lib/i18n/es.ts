@@ -16,6 +16,10 @@ export const es: Strings = {
   "status.summaryProfiles": "{{count}} perfiles",
   "status.summaryRunning": "{{count}} en ejecución",
   "status.summaryOnDisk": "{{size}} en disco",
+  "status.summaryOnDiskApprox": "al menos {{size}} en disco",
+  "status.sizeAtLeast": "al menos {{size}}",
+  "status.onDiskApproxWhy":
+    "No se pudieron leer algunas carpetas, así que el total real es mayor en una cantidad desconocida.",
   "status.revealFolder": "Mostrar la carpeta de perfiles en el gestor de archivos: {{path}}",
 
   // Start-at-login row, in the General tab

@@ -129,11 +129,16 @@ export function RenamePanel({
 export function DeletePanel({
   label,
   bytes,
+  approximate = false,
   onConfirm,
   onCancel,
 }: {
   label: string;
   bytes: number;
+  /// The walk could not reach every entry, so the folder is at least this big.
+  /// Marked here too: this sentence is the last thing read before a folder stops
+  /// existing, and it should not overstate how well it knows the folder.
+  approximate?: boolean;
   onConfirm: () => void;
   onCancel: () => void;
 }) {
@@ -159,7 +164,20 @@ export function DeletePanel({
               </strong>
             ) : part === "{{bytes}}" ? (
               <strong key={i} className="font-mono font-normal text-ink">
-                {formatBytes(bytes)}
+                {/* The `≥` mark is punctuation a screen reader skips, leaving a
+                    bare figure that sounds exact. When the walk fell short, the
+                    reader hears the lower bound in words instead — the same
+                    direction the visible mark means. */}
+                {approximate ? (
+                  <>
+                    <span aria-hidden="true">{formatBytes(bytes, true)}</span>
+                    <span className="sr-only">
+                      {t("status.sizeAtLeast", { size: formatBytes(bytes) })}
+                    </span>
+                  </>
+                ) : (
+                  formatBytes(bytes)
+                )}
               </strong>
             ) : (
               part

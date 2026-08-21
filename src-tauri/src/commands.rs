@@ -99,12 +99,45 @@ pub(crate) fn refuse_if_running(
     Ok(())
 }
 
-pub(crate) fn directory_size(path: &Path) -> anyhow::Result<u64> {
-    if !path.is_dir() {
-        return Ok(0);
-    }
+/// What a walk of a profile directory found, and what it could not reach.
+///
+/// Two numbers rather than one because the total on its own cannot be read
+/// honestly: 5 bytes is the same 5 whether the walk saw everything or bounced
+/// off a `chmod 000` subtree holding a gigabyte. `skipped` is what tells the
+/// caller which of those it is holding, so a short total can be shown as short
+/// rather than stated as the answer. `du` prints its skips to stderr for
+/// exactly this reason.
+#[derive(Debug, Clone, Copy, Default, serde::Serialize)]
+pub struct DirectorySize {
+    pub bytes: u64,
+    /// Entries the walk could not reach. Not a byte figure and deliberately not
+    /// convertible into one — a skipped subtree is short by an unknown amount,
+    /// which is the whole reason it is counted separately.
+    pub skipped: u64,
+}
 
-    let mut total = 0;
+pub(crate) fn directory_size(path: &Path) -> anyhow::Result<DirectorySize> {
+    // The `is_dir` guard belongs here, on the entry point, and deliberately NOT
+    // on the recursion below. A profile whose folder does not exist yet is a
+    // legitimate 0 bytes, exact — not an error, not a skip.
+    //
+    // `Path::is_dir()` returns false on ANY metadata error, so putting this same
+    // guard on the recursive step would make a *subdirectory* that read_dir
+    // listed and symlink_metadata confirmed, then that vanished before the
+    // recursion reached it, return Ok{0,0} — absorbed into the parent's `Ok(sub)`
+    // arm with `skipped` untouched, a short total handed up as exact. That is the
+    // one asymmetry worth avoiding: a vanished *file* is already counted (its
+    // symlink_metadata fails), so a vanished *directory* must be too. `walk`
+    // carries no guard, so a raced-away subtree fails at its own `read_dir` and
+    // lands in the `Err(_) => skipped += 1` arm — skipped, like the file.
+    if !path.is_dir() {
+        return Ok(DirectorySize::default());
+    }
+    walk(path)
+}
+
+fn walk(path: &Path) -> anyhow::Result<DirectorySize> {
+    let mut total = DirectorySize::default();
     for entry in std::fs::read_dir(path)? {
         // A live profile directory — a Chromium user-data store, a Codex rollout
         // dir — rewrites and deletes files while its app runs, so an entry can
@@ -115,17 +148,33 @@ pub(crate) fn directory_size(path: &Path) -> anyhow::Result<u64> {
         // "on disk" total for the visit; skipping it leaves the total off by at
         // most that one entry. A genuinely unreadable profile root still fails,
         // above, at `read_dir` — that is a failed row, not a mid-walk race.
-        let Ok(entry) = entry else { continue };
+        let Ok(entry) = entry else {
+            total.skipped += 1;
+            continue;
+        };
         // `symlink_metadata` does NOT follow links. Following them would descend
         // into whatever a link points at — counting bytes that live outside this
         // profile, and recursing forever on a link that points back up its own tree.
         let Ok(metadata) = entry.path().symlink_metadata() else {
+            total.skipped += 1;
             continue;
         };
         if metadata.is_dir() {
-            total += directory_size(&entry.path()).unwrap_or(0);
+            // A subtree that cannot be descended into is not one raced entry: it
+            // is an unknown number of bytes. Still not fatal — a total short by a
+            // subtree beats no total at all, which was the original complaint —
+            // but it counts as a skip, and a skip found further down travels up
+            // with it, so a caller two levels above the fault is not told the
+            // total is exact.
+            match walk(&entry.path()) {
+                Ok(sub) => {
+                    total.bytes += sub.bytes;
+                    total.skipped += sub.skipped;
+                }
+                Err(_) => total.skipped += 1,
+            }
         } else {
-            total += metadata.len();
+            total.bytes += metadata.len();
         }
     }
     Ok(total)
@@ -357,7 +406,7 @@ pub fn profile_size_bytes(
     state: tauri::State<AppState>,
     app_id: String,
     id: String,
-) -> Result<u64, String> {
+) -> Result<DirectorySize, String> {
     // Take the path and let the lock go. Walking a profile directory is seconds of
     // I/O on a large account, and the tray rebuild wants this same mutex from the
     // main thread on every hover — holding it across the walk freezes the whole app.
@@ -861,7 +910,7 @@ mod tests {
 
         // Only the profile's own 4 bytes count, plus the link entry itself — never
         // the 4096 bytes living outside the profile.
-        assert!(directory_size(&profile).unwrap() < 100);
+        assert!(directory_size(&profile).unwrap().bytes < 100);
     }
 
     #[test]
@@ -872,7 +921,7 @@ mod tests {
         std::fs::create_dir(&nested).unwrap();
         std::fs::write(nested.join("child.bin"), b"12345").unwrap();
 
-        assert_eq!(directory_size(d.path()).unwrap(), 8);
+        assert_eq!(directory_size(d.path()).unwrap().bytes, 8);
     }
 
     // A live profile dir (a Chromium user-data store, a Codex rollout dir)
@@ -903,10 +952,112 @@ mod tests {
         if readable_as_root {
             return;
         }
+        let measured = measured.unwrap();
         assert_eq!(
-            measured.unwrap(),
-            5,
+            measured.bytes, 5,
             "the readable file still counts; the unreadable directory is skipped, not fatal"
+        );
+        // And the walk says so. `bytes` alone is 5 whether the blocked directory
+        // held ten bytes or ten gigabytes; `skipped` is the difference between a
+        // total worth showing and one that quietly misleads.
+        assert_eq!(
+            measured.skipped, 1,
+            "a subtree the walk could not descend into is reported, not absorbed"
+        );
+    }
+
+    // A walk that reached everything says so, so the caller has something to
+    // test: `skipped == 0` is what lets the exact total be shown as exact. The
+    // byte total is asserted alongside it — `skipped == 0` on its own passes
+    // against a function that hard-codes it, and against every total that
+    // under-reports while still claiming to be exact.
+    #[test]
+    fn a_walk_that_reached_everything_reports_the_full_total_as_exact() {
+        let d = tempfile::tempdir().unwrap();
+        std::fs::write(d.path().join("a.bin"), b"123").unwrap();
+        let nested = d.path().join("nested");
+        std::fs::create_dir(&nested).unwrap();
+        std::fs::write(nested.join("b.bin"), b"45").unwrap();
+
+        let measured = directory_size(d.path()).unwrap();
+        assert_eq!(
+            (measured.bytes, measured.skipped),
+            (5, 0),
+            "every byte was reached, so the exact total is reported as exact",
+        );
+    }
+
+    // The blocking asymmetry: a vanished *file* is counted (its symlink_metadata
+    // fails, landing in a skip arm), but a vanished *directory* used to be
+    // absorbed. `directory_size` opened with an `is_dir` guard that returns
+    // Ok{0,0} on any metadata error, so a subdirectory that read_dir listed and
+    // symlink_metadata confirmed — then that vanished in the window before the
+    // recursion's own read_dir reached it — returned an empty, exact size. The
+    // parent's `Ok(sub)` arm added zero to both bytes and `skipped`, and the
+    // short total was handed up as exact. A live Chromium store deleting `Cache/`
+    // mid-walk is the common case, not a corner.
+    //
+    // The race cannot be reproduced by a black-box walk of a directory: a subtree
+    // that contributes zero bytes reads identically whether it was correctly
+    // skipped or wrongly absorbed, and a deletion that lands before the parent's
+    // read_dir even listed the entry is a legitimate zero. So the guarantee is
+    // pinned at the seam where it lives. `walk` is the recursion the parent
+    // descends through, and it carries no `is_dir` guard: a subtree it cannot read
+    // fails at read_dir and returns Err — which the parent's `Err(_) => skipped
+    // += 1` arm turns into a skip, exactly as a vanished file is skipped — rather
+    // than Ok(empty), which the parent absorbs. The guard stays on the public
+    // `directory_size` entry point, where a profile with no folder at all is a
+    // legitimate, exact zero rather than an error.
+    #[test]
+    fn a_subtree_the_recursion_cannot_read_is_an_error_not_a_silent_zero() {
+        let d = tempfile::tempdir().unwrap();
+        // Never created: it stands in for a subdirectory the parent listed and
+        // confirmed, then that vanished before the recursion reached it.
+        let vanished = d.path().join("listed-then-gone");
+        assert!(
+            walk(&vanished).is_err(),
+            "the recursion must report a subtree it cannot read as an error the \
+             parent records as a skip — not Ok(empty), which is absorbed and the \
+             short total handed up as exact",
+        );
+        // The guard the recursion sheds still lives on the entry point: a profile
+        // with no folder is a legitimate, exact zero, not an error and not a skip.
+        let entry = directory_size(&vanished).unwrap();
+        assert_eq!((entry.bytes, entry.skipped), (0, 0));
+    }
+
+    // A skip deep in the tree is still a skip at the top. The count is summed up
+    // the recursion rather than reset at each level, or a caller two directories
+    // above the fault would be told the total is exact. The readable bytes
+    // alongside the blocked subtree are asserted too, so the test pins that the
+    // walk still counts what it could reach while flagging what it could not.
+    #[cfg(unix)]
+    #[test]
+    fn a_skip_deep_in_the_tree_reaches_the_top_of_the_walk() {
+        use std::os::unix::fs::PermissionsExt;
+        let d = tempfile::tempdir().unwrap();
+        std::fs::write(d.path().join("seen.bin"), b"1234").unwrap();
+        let middle = d.path().join("middle");
+        std::fs::create_dir(&middle).unwrap();
+        std::fs::write(middle.join("also-seen.bin"), b"567").unwrap();
+        let blocked = middle.join("blocked");
+        std::fs::create_dir(&blocked).unwrap();
+        std::fs::write(blocked.join("hidden.bin"), b"9999999999").unwrap();
+        std::fs::set_permissions(&blocked, std::fs::Permissions::from_mode(0o000)).unwrap();
+
+        let readable_as_root = std::fs::read_dir(&blocked).is_ok();
+        let measured = directory_size(d.path());
+        std::fs::set_permissions(&blocked, std::fs::Permissions::from_mode(0o755)).unwrap();
+
+        if readable_as_root {
+            return;
+        }
+        let measured = measured.unwrap();
+        assert_eq!(
+            (measured.bytes, measured.skipped),
+            (7, 1),
+            "the seven readable bytes count; the blocked subtree two levels down is \
+             one skip that reaches the top, not absorbed and not fatal",
         );
     }
 }

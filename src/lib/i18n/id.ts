@@ -18,6 +18,10 @@ export const id: Strings = {
   "status.summaryProfiles": "{{count}} profil",
   "status.summaryRunning": "{{count}} berjalan",
   "status.summaryOnDisk": "{{size}} di disk",
+  "status.summaryOnDiskApprox": "setidaknya {{size}} di disk",
+  "status.sizeAtLeast": "setidaknya {{size}}",
+  "status.onDiskApproxWhy":
+    "Ada folder yang tidak bisa dibaca, jadi totalnya sebenarnya lebih besar sebanyak jumlah yang tidak diketahui.",
   "status.revealFolder": "Tampilkan folder profil di pengelola berkas: {{path}}",
 
   // Start-at-login row, in the General tab

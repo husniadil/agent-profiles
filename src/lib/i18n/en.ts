@@ -26,6 +26,13 @@ export const en = {
   "status.summaryProfiles": "{{count}} profiles",
   "status.summaryRunning": "{{count}} running",
   "status.summaryOnDisk": "{{size}} on disk",
+  "status.summaryOnDiskApprox": "at least {{size}} on disk",
+  // The spoken form of the `≥` mark, for the row and the delete panel where the
+  // glyph reaches the eye but not a screen reader. Says the same direction the
+  // glyph does — a lower bound — in words a reader hears.
+  "status.sizeAtLeast": "at least {{size}}",
+  "status.onDiskApproxWhy":
+    "Some folders could not be read, so the real total is larger than this by an unknown amount.",
   "status.revealFolder": "Show the profiles folder in the file manager: {{path}}",
 
   // Start-at-login row, in the General tab

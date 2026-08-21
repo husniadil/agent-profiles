@@ -216,6 +216,7 @@ function Rows({
           <ProfileRow
             profile={profile}
             bytes={sizes.byKey[key]}
+            sizeApproximate={sizes.approximate.has(key)}
             sizeFailed={sizes.failed.has(key)}
             reload={reload}
             onError={onError}

@@ -2,6 +2,7 @@ import { useState } from "react";
 import { ExternalLink, Pencil, Trash2 } from "lucide-react";
 
 import { ByteCount, PendingSize } from "@/components/Counters";
+import { formatBytes } from "@/format";
 import { IdentityChip } from "@/components/IdentityChip";
 import { Button } from "@/components/motion/button/base";
 import { PathText } from "@/components/PathText";
@@ -12,7 +13,10 @@ import type { ProfileView } from "@/lib/api";
 import { useT } from "@/lib/i18n";
 import { cn } from "@/lib/utils";
 
-type Panel = { kind: "none" } | { kind: "rename" } | { kind: "delete"; bytes: number };
+type Panel =
+  | { kind: "none" }
+  | { kind: "rename" }
+  | { kind: "delete"; bytes: number; approximate: boolean };
 
 // A control whose whole face is a picture, so its name has to reach a screen
 // reader some other way. `title` covers the pointer; `aria-label` covers
@@ -28,6 +32,7 @@ const TRAILING = "w-[88px]";
 export function ProfileRow({
   profile,
   bytes,
+  sizeApproximate,
   sizeFailed,
   reload,
   onError,
@@ -35,6 +40,9 @@ export function ProfileRow({
 }: {
   profile: ProfileView;
   bytes: number | undefined;
+  /// This row's walk reached a number but not every entry, so what it reports is
+  /// short by an unknown amount and is marked rather than stated flat.
+  sizeApproximate: boolean;
   /// This row's walk threw. Together with `bytes`, the three states the size
   /// slot can be in: a number, a walk still running, a walk that came back
   /// empty-handed.
@@ -63,7 +71,7 @@ export function ProfileRow({
     // this sentence is about a folder that is about to stop existing.
     try {
       const size = await api.profileSizeBytes(profile.app_id, profile.id);
-      setPanel({ kind: "delete", bytes: size });
+      setPanel({ kind: "delete", bytes: size.bytes, approximate: size.skipped > 0 });
     } catch (cause) {
       onError(cause);
     }
@@ -110,6 +118,7 @@ export function ProfileRow({
             <DeletePanel
               label={profile.label}
               bytes={panel.bytes}
+              approximate={panel.approximate}
               onCancel={() => setPanel({ kind: "none" })}
               onConfirm={() => void act(api.deleteProfile(profile.app_id, profile.id))}
             />
@@ -126,18 +135,28 @@ export function ProfileRow({
             floored at its content's min-content width, so the action row would
             widen the track past the box and push the size text out of line. */}
         <div className={cn("grid shrink-0 grid-cols-[minmax(0,1fr)] justify-items-end", TRAILING)}>
+          {/* The `≥` mark reaches the eye but not a screen reader, which skips it
+              as punctuation and hears a bare, exact-sounding figure. So when the
+              walk fell short the visible number is hidden from the reader and the
+              lower bound is spoken in words instead — the same direction the mark
+              means. An exact figure is left to speak for itself. */}
           <span
-            aria-hidden={bytes === undefined}
+            aria-hidden={bytes === undefined || sizeApproximate}
             className="col-start-1 row-start-1 self-center font-mono text-sub text-ink-2 transition-opacity duration-150 ease-out group-hover:opacity-0 group-focus-within:opacity-0"
           >
             {bytes !== undefined ? (
-              <ByteCount bytes={bytes} />
+              <ByteCount bytes={bytes} approximate={sizeApproximate} />
             ) : sizeFailed ? (
               "—"
             ) : (
               <PendingSize />
             )}
           </span>
+          {bytes !== undefined && sizeApproximate ? (
+            <span className="sr-only col-start-1 row-start-1">
+              {t("status.sizeAtLeast", { size: formatBytes(bytes) })}
+            </span>
+          ) : null}
           <div className="col-start-1 row-start-1 flex items-center gap-0.5 self-center opacity-0 transition-opacity duration-150 ease-out group-hover:opacity-100 group-focus-within:opacity-100">
             <Button
               variant="ghost"

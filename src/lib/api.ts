@@ -33,8 +33,13 @@ export type AutostartState = { offered: boolean; enabled: boolean };
 
 export const listApps = () => invoke<AppView[]>("list_apps");
 export const dataRoot = () => invoke<string>("data_root");
+/// A directory walk's answer: what it added up, and how many entries it could
+/// not reach. `skipped` is non-zero when the total is short by an unknown
+/// amount, which is a different thing to say than the total alone.
+export type ProfileSize = { bytes: number; skipped: number };
+
 export const profileSizeBytes = (appId: string, id: string) =>
-  invoke<number>("profile_size_bytes", { appId, id });
+  invoke<ProfileSize>("profile_size_bytes", { appId, id });
 export const openProfile = (appId: string, id: string) => invoke("open_profile", { appId, id });
 export const renameProfile = (appId: string, id: string, label: string) =>
   invoke("rename_profile", { appId, id, label });

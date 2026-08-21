@@ -16,6 +16,10 @@ export const pt: Strings = {
   "status.summaryProfiles": "{{count}} perfis",
   "status.summaryRunning": "{{count}} em execução",
   "status.summaryOnDisk": "{{size}} no disco",
+  "status.summaryOnDiskApprox": "pelo menos {{size}} no disco",
+  "status.sizeAtLeast": "pelo menos {{size}}",
+  "status.onDiskApproxWhy":
+    "Algumas pastas não puderam ser lidas, então o total real é maior por uma quantidade desconhecida.",
   "status.revealFolder": "Mostrar a pasta de perfis no gerenciador de arquivos: {{path}}",
 
   // Start-at-login row, in the General tab

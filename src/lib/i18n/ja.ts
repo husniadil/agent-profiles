@@ -18,6 +18,10 @@ export const ja: Strings = {
   "status.summaryProfiles": "{{count}} 件のプロファイル",
   "status.summaryRunning": "実行中 {{count}} 件",
   "status.summaryOnDisk": "ディスク使用量 {{size}}",
+  "status.summaryOnDiskApprox": "ディスク使用量 {{size}} 以上",
+  "status.sizeAtLeast": "{{size}} 以上",
+  "status.onDiskApproxWhy":
+    "読み取れなかったフォルダーがあるため、実際の使用量はこれより不明な分だけ大きくなります。",
   "status.revealFolder": "ファイルマネージャーでプロファイルフォルダを表示: {{path}}",
 
   // Start-at-login row, in the General tab
