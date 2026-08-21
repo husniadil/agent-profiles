@@ -633,16 +633,32 @@ pub fn restore_sleep(state: tauri::State<AppState>) -> Result<crate::keep_awake:
 /// quitting for an update is not "turn Keep Awake off" — the trigger is left as
 /// the user set it, only the OS-level hold goes back.
 ///
-/// Not `release_at_exit` either: that stops the sweep, which is right when the
-/// app is going away but wrong here. An update install can fail — download and
-/// release succeed, then `install()` throws — and on macOS and Linux the app
-/// survives that. Stopping the sweep would leave keep-awake dead until a manual
-/// relaunch. `release_for_update` hands the OS hold back but leaves the sweep
-/// running, so a failed install self-heals when the next sweep re-arms the hold.
+/// Not `release_at_exit` either: that stops the sweep for good, which is right
+/// when the app is going away but wrong here. An update install can fail —
+/// download and release succeed, then `install()` throws — and on macOS and Linux
+/// the app survives that. Stopping the sweep would leave keep-awake dead until a
+/// manual relaunch. `release_for_update` hands the OS hold back and *pauses* the
+/// sweep, so nothing re-arms the hold in the fifteen-second gap before the
+/// installer takes over, and [`resume_keep_awake_after_failed_update`] brings it
+/// back if the install never does.
 #[tauri::command]
 pub fn release_keep_awake_for_update(state: tauri::State<AppState>) -> Result<(), String> {
     crate::keep_awake::release_for_update(&state.keep_awake, state.platform.as_ref())
         .map_err(|e| e.to_string())
+}
+
+/// Puts the sweep back after an install that did not take the process with it.
+///
+/// The other half of `release_keep_awake_for_update`, and the reason that one can
+/// pause at all: the window calls this from the `catch` around the install, so an
+/// install that throws — or a release that failed before it — leaves keep-awake
+/// working rather than silently switched off for the rest of the run. Infallible
+/// on purpose: it clears a flag and nudges the sweep, and there is nothing here a
+/// caller could usefully do about a failure. The window calls it on the error
+/// path, where a second error would have nowhere to go.
+#[tauri::command]
+pub fn resume_keep_awake_after_failed_update(state: tauri::State<AppState>) {
+    crate::keep_awake::resume_after_failed_update(&state.keep_awake);
 }
 
 #[cfg(test)]
