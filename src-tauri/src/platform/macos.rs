@@ -31,7 +31,10 @@ fn check_binary(bin: &Path, product: &str) -> Result<()> {
     if meta.permissions().mode() & 0o111 == 0 {
         return Err(anyhow!(Unavailable::new(
             format!("{product} is installed but cannot be run"),
-            format!("{} is not executable", bin.display()),
+            format!(
+                "{product} is installed but {} is not executable",
+                bin.display()
+            ),
         )));
     }
     Ok(())
