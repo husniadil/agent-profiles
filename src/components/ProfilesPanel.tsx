@@ -47,8 +47,11 @@ export function ProfilesPanel({
       {available.length === 0 ? (
         <EmptyState apps={apps} />
       ) : (
+        // Every app the tool knows about, not only the usable ones: an app that
+        // is not installed is drawn greyed with its reason rather than dropped,
+        // so a missing app reads as missing rather than as forgotten.
         <ProfileList
-          apps={available}
+          apps={apps}
           sizes={sizes}
           reload={reload}
           onError={fail}

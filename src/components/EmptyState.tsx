@@ -41,6 +41,20 @@ export function EmptyState({ apps }: { apps: AppView[] }) {
       <p className="mt-3 font-mono text-sub text-ink-2">
         {t("empty.appsSupported", { count: apps.length })}
       </p>
+      {/* What was looked for, and where. The same reasons the tray shows: with
+          nothing installed, "install one of these" is only actionable once the
+          reader knows which of them this machine already failed to find. Written
+          by the backend, which is the side that did the looking, so it is not
+          translated here. */}
+      {apps.some((app) => app.unavailable) ? (
+        <ul className="mx-auto mt-2 max-w-[46ch] space-y-1 text-left text-sub text-ink-2">
+          {apps
+            .filter((app) => app.unavailable)
+            .map((app) => (
+              <li key={app.id}>{app.unavailable}</li>
+            ))}
+        </ul>
+      ) : null}
     </div>
   );
 }

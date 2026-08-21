@@ -121,10 +121,10 @@ pub struct MenuRow {
 pub struct AppSection {
     pub spec: &'static AppSpec,
     pub profiles: Vec<Profile>,
-    /// Why this app cannot be used, if it cannot. An app that is simply not
-    /// installed contributes nothing to the menu rather than a row of greyed-out
-    /// noise — someone with one app installed sees exactly what they saw before
-    /// the second one existed.
+    /// Why this app cannot be used, if it cannot. It contributes no profile rows
+    /// — there is nothing to launch — but it does contribute one greyed row
+    /// carrying this reason, so an app the tool knows about is never silently
+    /// missing from the menu.
     pub unavailable: Option<String>,
 }
 
@@ -225,18 +225,19 @@ pub fn menu_rows(
         }
     }
 
-    // Only worth explaining when nothing at all can be launched. With one app
-    // working, the other's absence is not an error — it is simply not installed.
-    if available.is_empty() {
-        for section in sections {
-            if let Some(reason) = &section.unavailable {
-                rows.push(MenuRow {
-                    id: format!("error:{}", section.spec.id),
-                    text: reason.clone(),
-                    enabled: false,
-                    running: false,
-                });
-            }
+    // An app that cannot be used says so, always — beside a working app as much
+    // as alone. Dropping the row left someone who expected two apps with no way
+    // to tell "not installed" from "this tool forgot about it", and it is the
+    // absence itself that is worth naming, not an error. The row is disabled and
+    // dotless: it is a sentence about the app, with nothing to click.
+    for section in sections {
+        if let Some(reason) = &section.unavailable {
+            rows.push(MenuRow {
+                id: format!("error:{}", section.spec.id),
+                text: reason.clone(),
+                enabled: false,
+                running: false,
+            });
         }
     }
 
@@ -586,15 +587,23 @@ mod tests {
     }
 
     #[test]
-    fn an_app_that_is_not_installed_contributes_no_rows() {
+    fn an_app_that_is_not_installed_is_greyed_with_its_reason_beside_a_working_one() {
         let sections = vec![
             section(&app_spec::CLAUDE, profiles(&["Kerja"])),
             missing(&app_spec::CODEX),
         ];
         let rows = menu_rows(&sections, &[], None, crate::general::Locale::En);
+        let row = rows
+            .iter()
+            .find(|r| r.id == "error:codex")
+            .expect("an uninstalled app says why, it does not vanish");
+        assert!(!row.enabled, "the reason is a label, not an action");
+        assert!(row.text.contains("ChatGPT"));
+        assert!(!row.running, "an app that cannot launch carries no dot");
+        // Naming it is the whole of what it offers: nothing about it is clickable.
         assert!(rows.iter().all(|r| !r.id.contains(":codex:")));
-        // ...and its absence is not reported as an error either.
-        assert!(rows.iter().all(|r| !r.id.starts_with("error")));
+        // The app that does work is untouched by the other's absence.
+        assert!(rows.iter().any(|r| r.id == "launch:claude:id0"));
     }
 
     #[test]
