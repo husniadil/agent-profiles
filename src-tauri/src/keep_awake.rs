@@ -7,7 +7,7 @@ use serde::{Deserialize, Serialize};
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Mutex;
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 /// What arms the hold.
 #[derive(Serialize, Deserialize, Clone, Copy, PartialEq, Eq, Debug, Default)]
@@ -242,6 +242,38 @@ pub fn effective_phase(decided: Phase, awaiting_authorization: bool) -> Phase {
 /// outlives the agent that asked for it.
 const SWEEP: Duration = Duration::from_secs(15);
 
+/// How long the sweep will stand aside for an update handoff before deciding the
+/// install is never reporting back.
+///
+/// The pause exists because the fifteen-second sweep is faster than the gap
+/// between handing the machine over and the installer taking the process, and a
+/// sweep that re-armed in that gap would put the Windows lid-close action back to
+/// "do nothing" and then the process would end with it stuck. But the only thing
+/// that clears the pause is the window's `catch`, and a webview that dies — or an
+/// `install()` that never settles — never reaches it. Without a deadline that
+/// leaves keep-awake switched off for the life of the process, with no log line
+/// and no banner: exactly the state `release_for_update` refuses to latch
+/// `stopping` in order to avoid.
+///
+/// Ten minutes, chosen from what the two mistakes cost rather than from a round
+/// number:
+///
+/// * Expiring too early re-arms mid-install, which is the defect the pause is
+///   for. The bundle is already downloaded by the time the handoff starts, so
+///   what has to fit inside this is `install()` plus `relaunch()` — seconds,
+///   minutes at the outside with an antivirus scanning the bundle. Ten minutes is
+///   an order of magnitude clear of that.
+/// * Expiring too late leaves the feature dead. On a *successful* install the
+///   process is gone long before the deadline can matter, so this only ever fires
+///   on a handoff that already failed to take the process — and on Windows, the
+///   one platform where a re-arm is destructive, the NSIS `exit(0)` arrives
+///   within seconds of `install()`, so a ten-minute-old pause on a process that
+///   is still alive means the installer is not coming back for it.
+///
+/// It is a backstop, not a schedule: [`resume_after_failed_update`] still clears
+/// the pause in seconds on every path the window survives.
+const UPDATE_HANDOFF: Duration = Duration::from_secs(10 * 60);
+
 /// Creates or removes the flag the root loop watches.
 ///
 /// Empty on purpose. The loop tests only for existence, and a flag with contents
@@ -374,7 +406,16 @@ pub fn release_at_exit(handle: &Handle, platform: &dyn crate::platform::Platform
 /// same state the release just put it in.
 pub fn release_for_update(handle: &Handle, platform: &dyn crate::platform::Platform) -> Result<()> {
     handle.pause_sweeping();
-    platform.hold(&handle.data_root, false)
+    let released = platform.hold(&handle.data_root, false);
+    // `publish` is the only writer of the phase, the held clock and the hold
+    // error, and the paused sweep does not reach it — so without this the window
+    // would go on showing `Holding` and "held 42m" for the whole install, for a
+    // machine that is free to sleep. Re-publishing `Holding` from the sweep would
+    // be the same lie one tick later; the truth is said here, where it becomes
+    // true. If the release itself failed, that is what gets published, exactly as
+    // the `Trigger::Off` branch of the sweep does.
+    handle.publish_released(released.as_ref().err().map(|error| error.to_string()));
+    released
 }
 
 /// Undoes the handoff, for an install that did not take the process with it.
@@ -569,17 +610,22 @@ pub struct Handle {
     /// (see [`release_for_update`]): an install can fail and leave the app
     /// running, and a latched flag would kill the sweep for the rest of that run.
     stopping: AtomicBool,
-    /// Set while an update install is handing the machine over, and cleared if
-    /// that install fails.
+    /// When the update handoff currently in progress runs out of patience, if one
+    /// is in progress at all.
     ///
-    /// The difference from `stopping` is that this one comes back. The exit path
-    /// really is going away, so latching is right there; an install is only
-    /// *probably* going away — `install()` can throw, and on macOS and Linux the
-    /// app is still running afterwards — so a latch would leave keep-awake dead
-    /// for the rest of that run with nothing on screen saying so. A pause the
-    /// window clears in its `catch` keeps both properties: no re-arm while the
-    /// installer is taking over, and a failed install that still holds.
-    paused: AtomicBool,
+    /// The difference from `stopping` is that this one comes back — twice over.
+    /// The exit path really is going away, so latching is right there; an install
+    /// is only *probably* going away — `install()` can throw, and on macOS and
+    /// Linux the app is still running afterwards — so a latch would leave
+    /// keep-awake dead for the rest of that run with nothing on screen saying so.
+    /// The window clears it in its `catch`, and if the window never gets that far
+    /// the deadline clears it anyway: a pause is a promise that an installer is
+    /// about to take this process, and after [`UPDATE_HANDOFF`] that promise is
+    /// no longer credible.
+    ///
+    /// A deadline rather than a flag plus a timestamp, so there is one thing to
+    /// read and no way for the two to disagree.
+    handoff_until: Mutex<Option<Instant>>,
 }
 
 impl Handle {
@@ -623,7 +669,7 @@ impl Handle {
             wake: std::sync::Condvar::new(),
             wake_pending: Mutex::new(false),
             stopping: AtomicBool::new(false),
-            paused: AtomicBool::new(false),
+            handoff_until: Mutex::new(None),
         }
     }
 
@@ -646,21 +692,54 @@ impl Handle {
     /// the update path, where the process is probably about to be replaced but
     /// may yet survive a failed install.
     pub fn pause_sweeping(&self) {
-        self.paused.store(true, Ordering::SeqCst);
+        self.pause_sweeping_for(UPDATE_HANDOFF);
+    }
+
+    /// The same pause, with the budget named. Production always takes
+    /// [`UPDATE_HANDOFF`]; this exists so the expiry can be driven at any age
+    /// without a test sleeping through ten minutes of it.
+    pub fn pause_sweeping_for(&self, budget: Duration) {
+        if let Ok(mut until) = self.handoff_until.lock() {
+            *until = Some(Instant::now() + budget);
+        }
     }
 
     /// Lets the sweep re-arm again, after an install that did not happen. Nudges,
     /// so a machine the user still has a trigger armed for is held again now
     /// rather than up to a tick later.
     pub fn resume_sweeping(&self) {
-        self.paused.store(false, Ordering::SeqCst);
+        if let Ok(mut until) = self.handoff_until.lock() {
+            *until = None;
+        }
         self.nudge();
     }
 
-    /// Whether an update handoff is in progress. Read by the sweep immediately
-    /// before it would re-take the hold.
+    /// Whether an update handoff is in progress *and still credible*. Read by the
+    /// sweep immediately before it would re-take the hold.
+    ///
+    /// Clears an expired handoff rather than merely reporting it expired, so the
+    /// line below is printed once, when the sweep is given back, and not every
+    /// fifteen seconds for the rest of the run. That makes this a read with a
+    /// side effect, which is why the only caller is [`hold_step`] — the one place
+    /// that acts on the answer.
     pub fn is_paused(&self) -> bool {
-        self.paused.load(Ordering::SeqCst)
+        let Ok(mut until) = self.handoff_until.lock() else {
+            return false;
+        };
+        let Some(deadline) = *until else {
+            return false;
+        };
+        if Instant::now() < deadline {
+            return true;
+        }
+        *until = None;
+        eprintln!(
+            "update install has not reported back in {}s: holding the machine \
+             awake again rather than leaving keep-awake off for the rest of \
+             this run",
+            UPDATE_HANDOFF.as_secs()
+        );
+        false
     }
 
     /// Wakes the sweep now instead of at the end of its timer.
@@ -758,6 +837,21 @@ impl Handle {
     pub fn mark_restored(&self) {
         if let Ok(mut status) = self.status.lock() {
             status.stranded = false;
+        }
+    }
+
+    /// Says the one thing that just became true — the machine is no longer being
+    /// held — without inventing the readings only a sweep can take.
+    ///
+    /// The battery, thermal and root readings are left exactly as the last sweep
+    /// left them: this is not a sweep and has nothing fresh to say about them.
+    /// What it must not leave standing is `Holding` and a running "held …", for a
+    /// machine whose lid is working again.
+    fn publish_released(&self, hold_error: Option<String>) {
+        if let Ok(mut status) = self.status.lock() {
+            status.phase = Phase::Idle;
+            status.held_for_secs = 0;
+            status.hold_error = hold_error;
         }
     }
 
@@ -885,6 +979,13 @@ pub fn hold_step(
         return HoldStep::Stopped;
     }
     if handle.is_paused() {
+        // Nothing was written and `release_for_update` has already handed the
+        // machine back, so nothing is held — and the clock has to be told, or the
+        // whole install is credited to the next sweep as time the machine was
+        // awake. This is #48: settling in `watch` put the line where a `continue`
+        // could jump it, and settling here means the only way out of this branch
+        // goes through it.
+        sweep.settle(Phase::Idle, None);
         return HoldStep::Skipped;
     }
 
@@ -1012,13 +1113,18 @@ pub fn watch(app: tauri::AppHandle) {
         // line here can be deleted or jumped in a way that leaves `held` stale.
         let hold_error = match hold_step(handle, state.platform.as_ref(), phase, &mut sweep) {
             HoldStep::Stopped => return,
-            // An update install is taking the machine over. Nothing was written
-            // and nothing is published: the status the window last saw is the
-            // one the handoff left, and re-publishing `Holding` here would claim
-            // a hold that `release_for_update` just gave back. If the install
-            // fails the pause is cleared and the very next sweep publishes for
-            // real.
-            HoldStep::Skipped => continue,
+            // An update install is taking the machine over. Nothing was
+            // written, so nothing is being held — and that is what gets
+            // published. Re-publishing `Holding` would claim a hold
+            // `release_for_update` gave back; publishing nothing leaves the same
+            // claim standing, because it is what the window last saw. `Idle`
+            // with a zero clock is the true statement, and the readings around
+            // it are still this sweep's own. If the install fails the pause
+            // clears and the next sweep publishes a real hold again.
+            HoldStep::Skipped => {
+                handle.publish(Phase::Idle, roots, power, thermal, Duration::ZERO, None);
+                continue;
+            }
             HoldStep::Applied(hold_error) => hold_error,
         };
         handle.publish(phase, roots, power, thermal, sweep.held_for, hold_error);
@@ -2008,7 +2114,9 @@ mod tests {
         match hold_step(&handle, &taken, Phase::Holding, &mut sweep) {
             HoldStep::Applied(None) => {}
             HoldStep::Applied(Some(error)) => panic!("the hold should have taken: {error}"),
-            HoldStep::Stopped => panic!("a live app must reach the hold write"),
+            HoldStep::Stopped | HoldStep::Skipped => {
+                panic!("a live, unpaused app must reach the hold write")
+            }
         }
         sweep.observe(Phase::Holding, Duration::from_secs(60));
         assert_eq!(
@@ -2029,7 +2137,9 @@ mod tests {
         match hold_step(&handle, &refused, Phase::Holding, &mut sweep) {
             HoldStep::Applied(Some(_)) => {}
             HoldStep::Applied(None) => panic!("the hold should have failed"),
-            HoldStep::Stopped => panic!("a live app must reach the hold write"),
+            HoldStep::Stopped | HoldStep::Skipped => {
+                panic!("a live, unpaused app must reach the hold write")
+            }
         }
         sweep.observe(Phase::Holding, Duration::from_secs(3600));
         assert_eq!(
@@ -2100,7 +2210,8 @@ mod tests {
 
         // Drive the one step of a sweep that can re-take the hold, asking for
         // the worst case.
-        match hold_step(&handle, &platform, Phase::Holding) {
+        let mut sweep = Sweep::default();
+        match hold_step(&handle, &platform, Phase::Holding, &mut sweep) {
             HoldStep::Skipped => {}
             HoldStep::Stopped => panic!("the handoff must pause the sweep, not end it"),
             HoldStep::Applied(_) => {
@@ -2112,6 +2223,176 @@ mod tests {
             vec![false],
             "no hold call may reach the platform after the update handoff — the \
              sweep must not re-arm the hold the installer is about to outlive"
+        );
+    }
+
+    #[test]
+    fn the_handoff_is_not_banked_as_time_the_machine_was_held() {
+        // #48. `release_for_update` hands the OS hold back and then the sweep
+        // skips. Every skipped tick used to be credited to `held_for` anyway —
+        // by two different routes, one from each of the PRs that met here — so
+        // an `install()` that ran ninety seconds and threw left the window
+        // saying "held 21m" for a machine that spent three of those minutes
+        // free to sleep. Same class of lie as #41, and invisible, because
+        // nothing publishes until the pause clears.
+        //
+        // Driven in the order `watch` runs: observe the interval just lived,
+        // then take the step that decides and settles.
+        let d = tempfile::tempdir().unwrap();
+        let handle = handle_with(
+            Recovery {
+                reclaimed_prior: None,
+                stranded: false,
+            },
+            d.path(),
+        );
+        let platform = RecordingHold::default();
+        let mut sweep = Sweep::default();
+
+        // Twenty minutes of genuine holding first, so the assertion below is
+        // about what the handoff adds rather than about a clock at zero.
+        match hold_step(&handle, &platform, Phase::Holding, &mut sweep) {
+            HoldStep::Applied(None) => {}
+            _ => panic!("a live app must take the hold"),
+        }
+        sweep.observe(Phase::Holding, Duration::from_secs(20 * 60));
+        match hold_step(&handle, &platform, Phase::Holding, &mut sweep) {
+            HoldStep::Applied(None) => {}
+            _ => panic!("a live app must take the hold"),
+        }
+        assert_eq!(sweep.held_for, Duration::from_secs(20 * 60));
+
+        // The update starts: the hold goes back and the sweep is paused.
+        release_for_update(&handle, &platform).unwrap();
+
+        // Six sweeps pass while `install()` runs — ninety seconds.
+        for tick in 0..6 {
+            sweep.observe(Phase::Holding, SWEEP);
+            match hold_step(&handle, &platform, Phase::Holding, &mut sweep) {
+                HoldStep::Skipped => {}
+                _ => panic!("sweep {tick} during the handoff must skip the hold write"),
+            }
+        }
+
+        // Only the first of those ticks counts, and only because the interval it
+        // covers began while the hold was still in place — the release happened
+        // somewhere inside it. That is the same boundary the thermal and battery
+        // pauses already have, and it is bounded by one `SWEEP`. Every tick
+        // after it adds nothing, because the machine is genuinely free to sleep.
+        assert_eq!(
+            sweep.held_for,
+            Duration::from_secs(20 * 60) + SWEEP,
+            "the update handoff gave the OS hold back, so the install must not \
+             be banked as time the machine was held — at most the one tick the \
+             release happened inside"
+        );
+    }
+
+    #[test]
+    fn the_handoff_stops_the_window_claiming_a_hold_it_gave_back() {
+        // While the sweep is skipping, nothing publishes, and `publish` is the
+        // only writer of `phase`, `held_for_secs` and `hold_error`. So the Keep
+        // Awake tab went on showing `Holding` and "held 42m" for the whole
+        // install, for a machine whose lid was working normally.
+        //
+        // Re-publishing `Holding` would be the same lie. Saying nothing
+        // preserves it. The truth is said at the moment it becomes true — in
+        // `release_for_update`, not one sweep later.
+        let d = tempfile::tempdir().unwrap();
+        let handle = handle_with(
+            Recovery {
+                reclaimed_prior: None,
+                stranded: false,
+            },
+            d.path(),
+        );
+        let platform = RecordingHold::default();
+
+        handle.publish(
+            Phase::Holding,
+            Vec::new(),
+            Power {
+                percent: Some(80),
+                external: true,
+            },
+            crate::platform::Thermal::Unknown,
+            Duration::from_secs(42 * 60),
+            None,
+        );
+        assert_eq!(handle.status().phase, Phase::Holding);
+        assert_eq!(handle.status().held_for_secs, 42 * 60);
+
+        release_for_update(&handle, &platform).unwrap();
+
+        let status = handle.status();
+        assert_eq!(
+            status.phase,
+            Phase::Idle,
+            "the handoff gave the hold back, so the window must not go on \
+             saying the machine is being held"
+        );
+        assert_eq!(
+            status.held_for_secs, 0,
+            "a stretch of holding that has ended cannot go on being reported as \
+             running"
+        );
+        // The readings the sweep owns are left alone: this says one true thing
+        // about the hold, it does not fabricate a battery or thermal reading.
+        assert_eq!(status.battery_percent, Some(80));
+        assert!(status.on_external_power);
+    }
+
+    #[test]
+    fn a_handoff_that_never_reports_back_gives_the_sweep_up_rather_than_keeps_it() {
+        // The pause is cleared from exactly one production place: the `catch` in
+        // `useUpdater`. If the webview dies, or `install()` never settles, that
+        // `catch` never runs and the pause is set for the life of the process —
+        // every sweep skips, the machine is never held again, and there is no
+        // log line and no banner. That is keep-awake silently switched off for
+        // the rest of the run, which is the state the non-latching design exists
+        // to prevent.
+        //
+        // So the pause carries a deadline. Driven by taking the same pause with
+        // no time left on it, rather than by sleeping through `UPDATE_HANDOFF`.
+        let d = tempfile::tempdir().unwrap();
+        let handle = handle_with(
+            Recovery {
+                reclaimed_prior: None,
+                stranded: false,
+            },
+            d.path(),
+        );
+        let platform = RecordingHold::default();
+        let mut sweep = Sweep::default();
+
+        release_for_update(&handle, &platform).unwrap();
+        match hold_step(&handle, &platform, Phase::Holding, &mut sweep) {
+            HoldStep::Skipped => {}
+            _ => panic!("a fresh handoff still owns the sweep"),
+        }
+
+        // The same handoff, out of time. Nothing resumed it — no `catch` ran,
+        // no command came back.
+        handle.pause_sweeping_for(Duration::ZERO);
+
+        match hold_step(&handle, &platform, Phase::Holding, &mut sweep) {
+            HoldStep::Applied(None) => {}
+            HoldStep::Skipped => panic!(
+                "an update handoff that never reported back must not keep the \
+                 sweep off for the rest of the process"
+            ),
+            HoldStep::Stopped => panic!("the handoff must never stop the sweep"),
+            HoldStep::Applied(Some(error)) => panic!("the hold should have taken: {error}"),
+        }
+        assert_eq!(
+            *platform.calls.lock().unwrap(),
+            vec![false, true],
+            "once the handoff is out of time the sweep has to hold the machine \
+             again, from the trigger the user still has set"
+        );
+        assert!(
+            !handle.is_paused(),
+            "an expired handoff must clear itself, not be re-tested every sweep"
         );
     }
 
@@ -2139,7 +2420,8 @@ mod tests {
             !handle.is_stopping(),
             "a failed install must never leave the sweep stopped"
         );
-        match hold_step(&handle, &platform, Phase::Holding) {
+        let mut sweep = Sweep::default();
+        match hold_step(&handle, &platform, Phase::Holding, &mut sweep) {
             HoldStep::Applied(None) => {}
             _ => panic!("after a failed install the sweep must re-arm the hold"),
         }
