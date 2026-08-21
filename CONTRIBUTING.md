@@ -23,7 +23,7 @@ pnpm install
 pnpm start
 ```
 
-Start the app with `pnpm start`, not by running the binary from `target/debug`. A development build loads its interface from the Vite dev server, so a bare binary opens a blank management window.
+Start the app with `pnpm start`, not by running the binary from `target/debug`. A development build loads its interface from the Vite dev server, so a bare binary opens a blank management window — the app is fine, it simply has nothing to show.
 
 Create an unsigned local bundle for the current platform:
 
@@ -81,8 +81,7 @@ docker run --rm -v "$PWD:/src:ro" ubuntu:22.04 bash -c '
 
 Ubuntu 22.04 is the distribution CI pins, and the container is architecture-native, so on Apple Silicon this is an arm64 Linux rather than the amd64 one CI uses. That difference has never mattered for this code, which contains nothing architecture-specific — but it is a difference, and a container is still not a desktop. It proves the code builds and its tests pass on Linux. It proves nothing about the tray, the window, or `xdotool`.
 
-One command, so there is no chance of running a weaker check than CI does: it is the frontend build, `cargo fmt --check`, `cargo clippy --all-targets -- -D warnings` and `cargo test`, stopping at the first failure. The build is expected to be warning-free. If your change adds a warning, resolve it rather than leaving it for someone else to wonder about.
-
+One command, so there is no chance of running a weaker check than CI does: it is the frontend build, `cargo fmt --check`, `cargo clippy --all-targets -- -D warnings` and `cargo test`, stopping at the first failure. CI runs them as separate steps so a failure names itself in the job log; locally one command is enough. The build is expected to be warning-free. If your change adds a warning, resolve it rather than leaving it for someone else to wonder about.
 
 ## Adding another app
 
