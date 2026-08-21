@@ -321,13 +321,14 @@ pub struct Sweep {
 impl Sweep {
     /// Only the trigger going quiet starts a fresh stretch. A pause for heat or
     /// battery interrupts one rather than ending it, so plugging in or cooling
-    /// down resumes the same figure instead of restarting it.
+    /// down resumes the same figure instead of restarting it — but the pause
+    /// itself adds nothing, because the same sweep releases the hold and a
+    /// machine free to sleep is not being held.
     pub fn observe(&mut self, phase: Phase, elapsed: Duration) {
         match phase {
             Phase::Off | Phase::Idle => self.held_for = Duration::ZERO,
-            Phase::Holding | Phase::PausedLowBattery | Phase::PausedTooHot => {
-                self.held_for = self.held_for.saturating_add(elapsed)
-            }
+            Phase::Holding => self.held_for = self.held_for.saturating_add(elapsed),
+            Phase::PausedLowBattery | Phase::PausedTooHot => {}
         }
     }
 }
@@ -1142,23 +1143,25 @@ mod tests {
     }
 
     #[test]
-    fn a_battery_pause_keeps_the_clock_running() {
-        // The cap measures how long the machine has been kept from sleeping in
-        // one stretch. A pause for low battery does not restart that stretch —
-        // plugging in resumes it rather than granting a fresh four hours.
+    fn a_pause_freezes_the_clock_without_resetting_it() {
+        // The window shows this figure as "held", so a pause — which drops the
+        // hold — must not add to it. It must not reset it either: plugging in
+        // resumes the same stretch rather than starting a fresh one.
         let mut sweep = Sweep::default();
         sweep.observe(Phase::Holding, Duration::from_secs(3600));
         let before = sweep.held_for;
         sweep.observe(Phase::PausedLowBattery, Duration::from_secs(15));
-        assert!(
-            sweep.held_for >= before,
-            "a battery pause must not reset the clock"
+        assert_eq!(
+            sweep.held_for, before,
+            "a battery pause holds nothing, so it must not count as held"
         );
-        let before = sweep.held_for;
         sweep.observe(Phase::PausedTooHot, Duration::from_secs(15));
-        assert!(
-            sweep.held_for >= before,
-            "a heat pause must not reset the clock either"
+        assert_eq!(sweep.held_for, before, "a heat pause holds nothing either");
+        sweep.observe(Phase::Holding, Duration::from_secs(15));
+        assert_eq!(
+            sweep.held_for,
+            before + Duration::from_secs(15),
+            "coming back from a pause resumes the same stretch"
         );
     }
 
