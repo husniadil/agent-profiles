@@ -1,5 +1,5 @@
 use crate::app_spec::AppSpec;
-use crate::platform::{find_for, wm_class, RunningProcess, ScanTarget};
+use crate::platform::{find_for, wm_class, RunningProcess, ScanTarget, Unavailable};
 use crate::profile_store::{Profile, ProfileStore};
 use crate::runtime::AppState;
 use anyhow::{anyhow, Result};
@@ -124,8 +124,9 @@ pub struct AppSection {
     /// Why this app cannot be used, if it cannot. It contributes no profile rows
     /// — there is nothing to launch — but it does contribute one greyed row
     /// carrying this reason, so an app the tool knows about is never silently
-    /// missing from the menu.
-    pub unavailable: Option<String>,
+    /// missing from the menu. The menu takes the short form of it; see
+    /// [`Unavailable`].
+    pub unavailable: Option<Unavailable>,
 }
 
 /// A tray row id, `action:app:profile`. The app id is in the middle because the
@@ -230,11 +231,17 @@ pub fn menu_rows(
     // to tell "not installed" from "this tool forgot about it", and it is the
     // absence itself that is worth naming, not an error. The row is disabled and
     // dotless: it is a sentence about the app, with nothing to click.
+    //
+    // The short form, never the detail: a menu is as wide as its widest row, so
+    // one stock path here sets the width of every profile row above it, and on
+    // macOS a user with one of the seven declared apps installed would get six
+    // of them. The path is not lost — the window shows it, where the width is
+    // not shared with anything.
     for section in sections {
         if let Some(reason) = &section.unavailable {
             rows.push(MenuRow {
                 id: format!("error:{}", section.spec.id),
-                text: reason.clone(),
+                text: reason.summary.clone(),
                 enabled: false,
                 running: false,
             });
@@ -475,11 +482,20 @@ mod tests {
         }
     }
 
+    /// The reason a real platform hands back, path and all — `macos.rs` reports
+    /// `"{product} was not found at {path}"`. A short stand-in here would have
+    /// hidden the width the menu actually takes.
     fn missing(spec: &'static AppSpec) -> AppSection {
         AppSection {
             spec,
             profiles: profiles(&[]),
-            unavailable: Some(format!("{} was not found", spec.product)),
+            unavailable: Some(Unavailable::new(
+                format!("{} is not installed", spec.product),
+                format!(
+                    "{} was not found at /Applications/{}.app/Contents/MacOS/{}",
+                    spec.product, spec.product, spec.product
+                ),
+            )),
         }
     }
 
@@ -584,6 +600,36 @@ mod tests {
         let rows = menu_rows(&sections, &[], None, crate::general::Locale::En);
         assert!(rows.iter().all(|r| !r.id.starts_with("header:")));
         assert!(rows.iter().all(|r| !r.text.starts_with(' ')));
+    }
+
+    /// An NSMenu is as wide as its widest row, so the reason a tray row carries
+    /// sets the width of every profile row above it. A macOS user with one of
+    /// the seven declared apps installed gets six of these rows, and the longest
+    /// stock path among them runs to 96 characters — enough to stretch the menu
+    /// to roughly 700px and push the profile labels away from the pointer. The
+    /// tray names the product and stops; the window, which is not
+    /// width-constrained, keeps the path.
+    #[test]
+    fn the_tray_reason_names_the_product_and_leaves_the_path_to_the_window() {
+        let sections = vec![
+            section(&app_spec::CLAUDE, profiles(&["Kerja"])),
+            missing(&app_spec::CODEX),
+        ];
+        let rows = menu_rows(&sections, &[], None, crate::general::Locale::En);
+        let row = rows
+            .iter()
+            .find(|r| r.id == "error:codex")
+            .expect("an uninstalled app says why, it does not vanish");
+        assert!(
+            row.text.contains(app_spec::CODEX.product),
+            "the row is useless if it does not say which app it is about: {}",
+            row.text
+        );
+        assert!(
+            !row.text.contains('/'),
+            "a filesystem path in a tray row widens every other row: {}",
+            row.text
+        );
     }
 
     #[test]

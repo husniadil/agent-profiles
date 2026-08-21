@@ -51,6 +51,7 @@ export const ja: Strings = {
 
   // A profile row
   "profiles.empty": "プロファイルはまだありません。",
+  "profiles.unavailable": "利用できません: {{reason}}",
   "row.running": "実行中",
   "row.sharedSignIn": "サインインを共有",
   "row.open": "{{name}} を開く",
