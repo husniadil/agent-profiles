@@ -2,6 +2,23 @@
 
 Notable changes, newest first. This project follows [Semantic Versioning](https://semver.org).
 
+## [0.6.1] — 2026-08-21
+
+Six fixes. Two of them stop the app telling you something it never checked, and one hands your Mac back on the way out.
+
+### Fixed
+
+- **A folder the app could not fully measure is no longer reported as if it had been.** A profile directory rewrites and deletes files while its app runs, and 0.6.0 already skipped an entry it could not reach rather than withholding the whole total. What it did not do was say so, and a subdirectory that vanished mid-walk was absorbed silently — a total short by an arbitrary amount, presented as the answer. The walk now counts what it had to skip, and a figure that is known to be short is marked `≥` on the row and in the status line, reads "at least X on disk" to a screen reader, and says so in the delete confirmation, which is the last sentence anyone reads before a folder stops existing.
+- **A delete that fails no longer removes the profile from the registry anyway.** The registry was written before the directory was removed, which is the right order, but a failed removal left the entry gone while the directory — credentials and all — stayed on disk, owned by nothing and cleaned up by nobody. The registry is rolled back now, so what you see and what is on disk agree again. The error also stops claiming the data is intact: `remove_dir_all` deletes as it walks and stops at the first thing it cannot delete, so a failure often means part of the profile is already gone, and the message says that instead of guessing.
+- **The registry is written atomically.** It was a plain truncate-and-write, which meant a disk that filled up mid-write left `profiles.json` empty or half-finished, and the next launch read that as corruption and fell back to a single profile. It is written aside and renamed into place now, so the live file only ever moves from one complete registry to another.
+- **Quitting hands the machine back.** Nothing ran on the way out, so quitting while Keep Awake held the machine never released the hold. macOS and Linux survived that by accident of how they hold; Windows did not, because its hold is a power-scheme write that outlives the process — so a quit left the lid-close action on "do nothing" until the next launch happened to notice. The release now runs on quit, on a Windows session end (a restart or an update reboot, which never reaches the ordinary exit path), and before an update installs itself. The trigger you set is left alone: quitting is not switching Keep Awake off.
+- **The "held" clock stops counting while a hold is paused.** A pause on low battery or heat released the machine but kept adding to the figure beside it, so the window could report "held 1h 10m" for a machine that had been free to sleep for most of it. The figure freezes instead, and resumes from where it stopped rather than restarting.
+- **The security notes no longer promise something the app stopped doing in 0.5.0.** `SECURITY.md` said this app makes no network requests of its own. That has been false since auto-update shipped: it is on by default and checks GitHub once per launch, and if a release is advertised it downloads, installs and relaunches without asking. The note now says so, and says where the update's signature actually comes from.
+
+### Corrections to the 0.6.0 notes
+
+- The 0.6.0 entry said an app that is not installed **"appears greyed with the reason, rather than vanishing"**. Half of that shipped and half did not. An uninstalled app is now resolvable — it is listed and counted when nothing at all is installed, and it becomes usable the moment you install it, with no relaunch. But no greyed row with a reason is rendered anywhere: alongside a working app, an uninstalled one is still filtered out of both the tray and the window. Whether to build that row or to keep the current behaviour and say so plainly is open in [#36](https://github.com/husniadil/agent-profiles/issues/36).
+
 ## [0.6.0] — 2026-08-20
 
 Five fixes, two of which stop a readable registry being set aside and the profiles it named going quiet.
