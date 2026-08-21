@@ -109,9 +109,9 @@ pub fn build(platform: &dyn Platform) -> Result<Vec<AppRuntime>> {
         .iter()
         .filter(|spec| platform.declared_here(&spec.locations))
     {
-        // Not installed: no stock directory to adopt as Default. Skip it — this
-        // is the difference between "you don't have ChatGPT" and "Agent Profiles
-        // won't start", and only the first is acceptable.
+        // No candidate directory to name at all — not "not installed", which
+        // gets a runtime and shows up greyed. Skipping this one app still beats
+        // refusing to start every other one.
         let Ok(default_dir) = platform.default_profile_dir(&spec.locations) else {
             continue;
         };
