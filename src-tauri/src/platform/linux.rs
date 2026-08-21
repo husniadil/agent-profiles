@@ -183,7 +183,9 @@ pub fn data_root_from(xdg_config_home: Option<&str>, home: &str) -> PathBuf {
 mod imp {
     use super::*;
     use crate::app_spec::{AppSpec, Locations};
-    use crate::platform::{unix_ps, FocusHint, FocusOutcome, Platform, RunningProcess, ScanTarget};
+    use crate::platform::{
+        unix_ps, FocusHint, FocusOutcome, Platform, RunningProcess, ScanTarget, Unavailable,
+    };
     use anyhow::{anyhow, Result};
     use std::process::Command;
 
@@ -267,9 +269,10 @@ mod imp {
             let output = Command::new("which").arg(command).output()?;
             let path = String::from_utf8_lossy(&output.stdout).trim().to_string();
             if !output.status.success() || path.is_empty() {
-                return Err(anyhow!(
-                    "{product} was not found on PATH as `{command}`. {hint}"
-                ));
+                return Err(anyhow!(Unavailable::new(
+                    format!("{product} is not installed"),
+                    format!("{product} was not found on PATH as `{command}`. {hint}"),
+                )));
             }
             Ok(PathBuf::from(path))
         }

@@ -6,11 +6,11 @@ import { systemNames } from "@/lib/system";
 
 /// The window with nothing to manage.
 ///
-/// Nothing installed is the only case worth explaining. With one app working,
-/// the other's absence is not an error — it is simply not installed. The apps
-/// are named from what the backend actually looked for rather than from a fixed
-/// list here, so this sentence cannot come to describe a different set of apps
-/// than the one the app supports.
+/// This is the screen for a machine with none of the supported apps installed;
+/// with one of them working, `ProfileList` takes over and the missing ones are
+/// greyed rows inside it. The apps are named from what the backend actually
+/// looked for rather than from a fixed list here, so this sentence cannot come
+/// to describe a different set of apps than the one the app supports.
 export function EmptyState({ apps }: { apps: AppView[] }) {
   const t = useT();
   const names = apps.map((app) => app.label).join(", ");
@@ -41,6 +41,23 @@ export function EmptyState({ apps }: { apps: AppView[] }) {
       <p className="mt-3 font-mono text-sub text-ink-2">
         {t("empty.appsSupported", { count: apps.length })}
       </p>
+      {/* What was looked for, and where. With nothing installed, "install one of
+          these" is only actionable once the reader knows which of them this
+          machine already failed to find. The reasons are the backend's words,
+          because it is the side that did the looking — but they sit under three
+          translated sentences, so each one is framed by a translated line rather
+          than dropped in as bare English. */}
+      {apps.some((app) => app.unavailable) ? (
+        <ul className="mx-auto mt-2 max-w-[46ch] space-y-1 text-left text-sub text-ink-2">
+          {apps
+            .filter((app) => app.unavailable)
+            .map((app) => (
+              <li key={app.id}>
+                {t("profiles.unavailable", { reason: app.unavailable! })}
+              </li>
+            ))}
+        </ul>
+      ) : null}
     </div>
   );
 }

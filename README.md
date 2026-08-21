@@ -27,7 +27,7 @@ Agent Profiles is a menu bar and system tray app for running several accounts of
 
 Every one of these was confirmed against a real installation by the probe described below, never declared from inspection alone.
 
-**Platforms** lists where an app has actually been checked. Where it has not, the app is simply absent — no tray section, no directory, no error row — because a user has no way of knowing this build was never tried on their system, and a row that can only fail is worse than no row. The same is true of an app that is not installed: someone with one app sees exactly the flat menu they would have seen if the others never existed.
+**Platforms** lists where an app has actually been checked. Where it has not, the app is simply absent — no tray section, no directory, no error row — because a user has no way of knowing this build was never tried on their system, and a row that can only fail is worse than no row. An app that is checked here but not installed is the opposite case: it is named, greyed, and says it is not installed, because someone who knows they have it needs to be able to tell "not installed" from "this tool forgot about it". It contributes no profiles and nothing to click.
 
 `Shared file` is empty where no file has an obvious claim to being shared between an app's profiles. For the VS Code family `User/settings.json` is a plausible candidate, but that is a product decision rather than something a probe can establish, so nothing is shared until someone decides.
 

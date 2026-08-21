@@ -1,6 +1,7 @@
 use crate::app_spec::{AppSpec, Locations};
 use crate::platform::{
-    unix_ps, FocusHint, FocusOutcome, Platform, Power, RunningProcess, ScanTarget, DATA_DIR_NAME,
+    unix_ps, FocusHint, FocusOutcome, Platform, Power, RunningProcess, ScanTarget, Unavailable,
+    DATA_DIR_NAME,
 };
 use anyhow::{anyhow, Result};
 use std::path::{Path, PathBuf};
@@ -21,10 +22,20 @@ fn data_root_in(home: &Path) -> PathBuf {
 
 fn check_binary(bin: &Path, product: &str) -> Result<()> {
     use std::os::unix::fs::PermissionsExt;
-    let meta = std::fs::metadata(bin)
-        .map_err(|_| anyhow!("{product} was not found at {}", bin.display()))?;
+    let meta = std::fs::metadata(bin).map_err(|_| {
+        anyhow!(Unavailable::new(
+            format!("{product} is not installed"),
+            format!("{product} was not found at {}", bin.display()),
+        ))
+    })?;
     if meta.permissions().mode() & 0o111 == 0 {
-        return Err(anyhow!("{} is not executable", bin.display()));
+        return Err(anyhow!(Unavailable::new(
+            format!("{product} is installed but cannot be run"),
+            format!(
+                "{product} is installed but {} is not executable",
+                bin.display()
+            ),
+        )));
     }
     Ok(())
 }

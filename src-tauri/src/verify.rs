@@ -80,7 +80,10 @@ fn report_what_the_tray_would_show() {
         let unavailable = platform
             .binary(&rt.spec.locations, rt.spec.product)
             .err()
-            .map(|e| e.to_string());
+            .map(|e| match e.downcast_ref::<crate::platform::Unavailable>() {
+                Some(unavailable) => unavailable.clone(),
+                None => crate::platform::Unavailable::flat(e.to_string()),
+            });
         println!(
             "app {:<8} available={:<5} stock={}",
             rt.spec.id,

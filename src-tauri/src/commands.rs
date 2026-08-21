@@ -251,7 +251,11 @@ pub fn list_apps(state: tauri::State<AppState>) -> Result<Vec<AppView>, String> 
             Ok(AppView {
                 id: runtime.spec.id.to_string(),
                 label: runtime.spec.label.to_string(),
-                unavailable,
+                // The detail, not the summary the tray takes: this window is
+                // not width-constrained, and the path we looked at is the
+                // fastest way for someone who has the app to see why it is not
+                // being found.
+                unavailable: unavailable.map(|reason| reason.detail),
                 profiles: to_views(runtime.spec, &store, &processes),
             })
         })

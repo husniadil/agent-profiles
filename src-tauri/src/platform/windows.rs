@@ -147,7 +147,8 @@ mod imp {
     use super::*;
     use crate::app_spec::Locations;
     use crate::platform::{
-        win_proc, FocusHint, FocusOutcome, Platform, RunningProcess, ScanTarget, DATA_DIR_NAME,
+        win_proc, FocusHint, FocusOutcome, Platform, RunningProcess, ScanTarget, Unavailable,
+        DATA_DIR_NAME,
     };
 
     pub struct Windows;
@@ -212,10 +213,13 @@ mod imp {
             let (local, roaming) = roots()?;
             let candidates = expand(here(locations, product)?.binaries, &local, &roaming);
             pick_binary(&candidates).ok_or_else(|| {
-                anyhow!(
-                    "{product} was not found. Looked in: {}",
-                    looked_in(&candidates)
-                )
+                anyhow!(Unavailable::new(
+                    format!("{product} is not installed"),
+                    format!(
+                        "{product} was not found. Looked in: {}",
+                        looked_in(&candidates)
+                    ),
+                ))
             })
         }
 
