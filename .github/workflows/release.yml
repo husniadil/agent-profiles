@@ -104,7 +104,7 @@ jobs:
 
             Only trust builds downloaded from this page.
 
-            **Windows and Linux are unverified**: see the platform checklists in the README. Reports from those platforms are very welcome.
+            **Windows and Linux are unverified**: see the platform checklists in `docs/platform-status.md`. Reports from those platforms are very welcome.
           releaseDraft: true
           prerelease: false
           args: ${{ matrix.args }}
