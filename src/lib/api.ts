@@ -110,6 +110,12 @@ export const setKeepAwake = (settings: KeepAwakeSettings) =>
 export const authorizeKeepAwake = () => invoke<KeepAwakeStatus>("authorize_keep_awake");
 export const restoreSleep = () => invoke<KeepAwakeStatus>("restore_sleep");
 
+/// Hands the OS-level hold back on the way into an update install, leaving the
+/// trigger armed for the relaunched app. The updater exits the process itself —
+/// on Windows without reaching either exit event — so the window calls this
+/// before installing, while our own code still runs. See `useUpdater`.
+export const releaseKeepAwakeForUpdate = () => invoke("release_keep_awake_for_update");
+
 /// Kept in the same order as `Locale::ALL` in `general.rs`, which is the order
 /// the picker offers them in.
 export type Locale = "en" | "id" | "ja" | "de" | "es" | "pt";

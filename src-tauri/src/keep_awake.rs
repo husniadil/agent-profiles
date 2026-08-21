@@ -5,6 +5,7 @@ use crate::platform::{Power, Thermal};
 use anyhow::Result;
 use serde::{Deserialize, Serialize};
 use std::path::{Path, PathBuf};
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Mutex;
 use std::time::Duration;
 
@@ -307,6 +308,68 @@ pub fn restore(handle: &Handle, platform: &dyn crate::platform::Platform) -> Res
     Ok(())
 }
 
+/// Hands the machine back on the way out.
+///
+/// Two of the three backends survive a quit without this: macOS's root loop
+/// watches our pid and puts `disablesleep` back within one poll, and Linux's
+/// inhibitor lock dies with the pipe it was spawned on. Windows does not — its
+/// hold *is* a power-scheme write, so a quit while holding leaves the lid-close
+/// action on "do nothing" until the next launch runs `recover_hold`. That is a
+/// laptop that goes in a bag awake, and the app that owns the way back is the
+/// one that just exited.
+///
+/// Not `restore`: quitting is not "turn Keep Awake off". The trigger is left
+/// exactly as the user set it, so the next launch holds again if it should —
+/// only the hold itself goes back.
+///
+/// Stops the sweep before releasing, not after: the sweep is a detached loop
+/// that runs until the process ends, and on a tray Quit it can be part-way
+/// through an iteration whose final act is a `hold(true)`. Releasing without
+/// stopping it first would let that iteration re-take the hold — writing the
+/// Windows lid action back to "do nothing" — one instant after we handed the
+/// machine back, and then the process would end with it stuck. Order matters:
+/// the flag is set first so a sweep that checks it after we release still sees
+/// the stop.
+pub fn release_at_exit(handle: &Handle, platform: &dyn crate::platform::Platform) -> Result<()> {
+    handle.stop_sweeping();
+    platform.hold(&handle.data_root, false)
+}
+
+/// Hands the machine back before an update installs, without stopping the sweep.
+///
+/// Unlike [`release_at_exit`], this does not latch `stopping`. Installing an
+/// update is not the same as exiting: the bundled updater relaunches on success,
+/// but `install()` can fail — the download and this release both succeed, then
+/// the install itself throws — and on macOS and Linux the app is still running
+/// afterwards. If this release killed the sweep, keep-awake would be dead for the
+/// rest of that run with no record, and the sweep's whole promise (hold a working
+/// agent's machine awake) would silently stop being kept until a manual relaunch.
+///
+/// So it releases the OS hold and leaves the sweep running: a failed install
+/// self-heals, because the next sweep re-arms the hold from the trigger the user
+/// still has set. `release_at_exit` keeps its `stop_sweeping`, because the exit
+/// path really is going away and a re-arm there would strand the Windows lid
+/// action — but that reasoning does not hold for an install that may not exit.
+///
+/// The cost is a narrow window on a *successful* install: between this release
+/// and the process actually ending, a sweep can re-arm the hold. That is
+/// acceptable — the installer relaunches and the next launch's `recover_hold`
+/// hands the machine back — and the alternative (latching `stopping`) breaks the
+/// far more common failed-install case.
+///
+/// One case cannot self-heal, and it is Windows-only: the NSIS installer calls
+/// `exit(0)` mid-install, so if the install then fails (an antivirus block, a
+/// disk error, a killed installer) the app is already gone — no sweep runs again
+/// to re-arm, and the lid stays on "do nothing" until the user next opens the
+/// app. This is *not* a regression: before this PR nothing released the hold on
+/// exit at all, so the Windows lid action was left exactly this stuck after any
+/// quit. The split only adds the *successful*-update handoff; it leaves the
+/// failed-after-exit case no worse than the pre-PR baseline. Healing it properly
+/// would need a non-latching pause the sweep could resume, which is deferred.
+pub fn release_for_update(handle: &Handle, platform: &dyn crate::platform::Platform) -> Result<()> {
+    platform.hold(&handle.data_root, false)
+}
+
 /// The one thing a sweep carries forward: how long this stretch of holding has
 /// run, which the window reports as "held 15m".
 ///
@@ -455,6 +518,17 @@ pub struct Handle {
     /// computing rather than waiting, which a bare `notify` would drop.
     wake: std::sync::Condvar,
     wake_pending: Mutex<bool>,
+    /// Set once, when the app is handing the machine back on its way out via
+    /// [`release_at_exit`]. The sweep is an unconditional loop that outlives every
+    /// quit path bar the process ending, so a release on the exit path could be
+    /// undone by a sweep still mid-iteration — on Windows the hold is a
+    /// power-scheme write that stands until the next launch. The sweep reads this
+    /// immediately before it would re-arm, and stops instead. One-way: nothing
+    /// clears it, because the only thing that sets it is the exit path, where the
+    /// app really is going away. The update path deliberately does *not* latch it
+    /// (see [`release_for_update`]): an install can fail and leave the app
+    /// running, and a latched flag would kill the sweep for the rest of that run.
+    stopping: AtomicBool,
 }
 
 impl Handle {
@@ -497,7 +571,23 @@ impl Handle {
             reclaimed_prior: Mutex::new(recovery.reclaimed_prior),
             wake: std::sync::Condvar::new(),
             wake_pending: Mutex::new(false),
+            stopping: AtomicBool::new(false),
         }
+    }
+
+    /// Tells the sweep to stop before it next touches the hold. Called from the
+    /// exit path so a release cannot be re-armed by a sweep this process did not
+    /// wait for. Wakes the sweep as well, so a thread parked on its timer sees
+    /// the flag now rather than up to a tick later.
+    pub fn stop_sweeping(&self) {
+        self.stopping.store(true, Ordering::SeqCst);
+        self.nudge();
+    }
+
+    /// Whether the app is on its way out. Read by the sweep immediately before it
+    /// would re-take the hold.
+    pub fn is_stopping(&self) -> bool {
+        self.stopping.load(Ordering::SeqCst)
     }
 
     /// Wakes the sweep now instead of at the end of its timer.
@@ -662,6 +752,63 @@ fn roots_for(state: &crate::runtime::AppState, home: &Path) -> Vec<crate::agent_
     roots
 }
 
+/// What the one re-arming step of a sweep iteration decided to do.
+pub enum HoldStep {
+    /// The app is on its way out: the step touched nothing, and the sweep must
+    /// end rather than run on.
+    Stopped,
+    /// The hold decision was applied through the platform, carrying whatever
+    /// error the write returned so the window can report it.
+    Applied(Option<String>),
+}
+
+/// The one step of a sweep iteration that can re-arm the hold, pulled out of
+/// [`watch`] so the re-arm guard can be exercised on its own.
+///
+/// The `is_stopping` check lives *here*, immediately before the only `hold`
+/// write that can *take or re-arm* a hold, and not at the top of the loop: the
+/// race being closed is a sweep already mid-iteration when [`release_at_exit`]
+/// ran, which would rewrite the Windows lid action to "do nothing" one instant
+/// after the exit path handed the machine back, then end the process with it
+/// stuck. The sweep makes one other `hold` write — the `Trigger::Off` branch in
+/// [`watch`] — but that one only ever *releases*, so a stop landing there needs
+/// no guard: releasing again is a no-op, and it can never re-arm the lid action.
+/// (A future change that let that branch re-arm would have to move the guard, or
+/// duplicate it, rather than lean on this one.) `watch`
+/// calls this in the same order it used to run inline, so runtime behaviour is
+/// unchanged — extracting it only makes the guard testable, which it was not
+/// before: a suite could delete this check and stay green.
+pub fn hold_step(
+    handle: &Handle,
+    platform: &dyn crate::platform::Platform,
+    phase: Phase,
+) -> HoldStep {
+    if handle.is_stopping() {
+        return HoldStep::Stopped;
+    }
+
+    // Carried into the status rather than only logged. Whatever the platform's
+    // channel is — a flag file the root loop watches, an inhibitor lock, a power
+    // scheme — a failure here means the machine is not being held no matter what
+    // the phase says, and a window that goes on claiming otherwise is the one
+    // failure this feature cannot afford.
+    let hold_error = platform
+        .hold(&handle.data_root, phase.holds())
+        .err()
+        .map(|error| {
+            eprintln!(
+                "could not {}: {error}",
+                if phase.holds() {
+                    "hold the machine awake"
+                } else {
+                    "release the machine"
+                }
+            );
+            error.to_string()
+        });
+    HoldStep::Applied(hold_error)
+}
+
 /// The sweep, forever.
 ///
 /// One thread for the life of the app rather than one started and stopped with
@@ -692,6 +839,14 @@ pub fn watch(app: tauri::AppHandle) {
         // Wait out the tick, but return the moment a settings change nudges us,
         // so a toggled trigger is re-decided now instead of up to a tick later.
         handle.wait_for_sweep(SWEEP);
+        // The app is on its way out and `release_at_exit` has handed the machine
+        // back. Stop the whole loop rather than run another iteration: on the
+        // parked-thread case this is what actually ends the sweep. The narrower
+        // case — a release that lands while this iteration is already past here
+        // — is caught by the second check, just before the hold itself.
+        if handle.is_stopping() {
+            return;
+        }
         let elapsed = last.elapsed();
         last = std::time::Instant::now();
 
@@ -743,26 +898,15 @@ pub fn watch(app: tauri::AppHandle) {
         let phase = effective_phase(decided, handle.awaiting_authorization());
         sweep.observe(phase, elapsed);
 
-        // Carried into the status rather than only logged. Whatever the
-        // platform's channel is — a flag file the root loop watches, an
-        // inhibitor lock, a power scheme — a failure here means the machine is
-        // not being held no matter what the phase says, and a window that goes
-        // on claiming otherwise is the one failure this feature cannot afford.
-        let hold_error = state
-            .platform
-            .hold(&handle.data_root, phase.holds())
-            .err()
-            .map(|error| {
-                eprintln!(
-                    "could not {}: {error}",
-                    if phase.holds() {
-                        "hold the machine awake"
-                    } else {
-                        "release the machine"
-                    }
-                );
-                error.to_string()
-            });
+        // The app may be handing the machine back on its way out. The stopping
+        // check and the hold write are one extracted step — `hold_step` — so the
+        // re-arm guard can be tested; the check sits immediately before the only
+        // call that re-takes the hold, because the race being closed is exactly a
+        // sweep already mid-iteration when `release_at_exit` ran.
+        let hold_error = match hold_step(handle, state.platform.as_ref(), phase) {
+            HoldStep::Stopped => return,
+            HoldStep::Applied(hold_error) => hold_error,
+        };
         handle.publish(phase, roots, power, thermal, sweep.held_for, hold_error);
     }
 }
@@ -1493,5 +1637,194 @@ mod tests {
 
         let loaded = Settings::load(&partial);
         assert_eq!(loaded.trigger, Trigger::Always);
+    }
+
+    /// A platform whose only job is to record the `hold` calls made through it.
+    ///
+    /// The default `Platform::hold` writes the flag file, and so does
+    /// `shared_config::tests_support::FakePlatform` — but the one backend this
+    /// fix is *for*, Windows, overrides `hold` and never touches that flag.
+    /// Asserting a flag disappeared therefore proves the wrong backend released,
+    /// on a platform where the leak never happened. This records the calls
+    /// instead, so a test can assert the release actually went through the
+    /// `Platform` contract every backend implements.
+    #[derive(Default)]
+    struct RecordingHold {
+        calls: Mutex<Vec<bool>>,
+    }
+
+    impl crate::platform::Platform for RecordingHold {
+        fn declared_here(&self, _locations: &crate::app_spec::Locations) -> bool {
+            true
+        }
+        fn data_root(&self) -> Result<PathBuf> {
+            unimplemented!()
+        }
+        fn default_profile_dir(&self, _locations: &crate::app_spec::Locations) -> Result<PathBuf> {
+            unimplemented!()
+        }
+        fn binary(
+            &self,
+            _locations: &crate::app_spec::Locations,
+            _product: &str,
+        ) -> Result<PathBuf> {
+            unimplemented!()
+        }
+        fn process_marker(&self, _locations: &crate::app_spec::Locations) -> Result<String> {
+            unimplemented!()
+        }
+        fn scan(
+            &self,
+            _targets: &[crate::platform::ScanTarget],
+        ) -> Result<Vec<crate::platform::RunningProcess>> {
+            unimplemented!()
+        }
+        fn link(&self, _source: &Path, _target: &Path) -> Result<()> {
+            unimplemented!()
+        }
+        fn focus(
+            &self,
+            _pid: i32,
+            _hint: &crate::platform::FocusHint,
+        ) -> Result<crate::platform::FocusOutcome> {
+            unimplemented!()
+        }
+        fn quit(&self, _pid: i32) -> Result<()> {
+            unimplemented!()
+        }
+        fn hold(&self, _data_root: &Path, on: bool) -> Result<()> {
+            self.calls.lock().unwrap().push(on);
+            Ok(())
+        }
+    }
+
+    #[test]
+    fn quitting_hands_the_machine_back_but_keeps_the_trigger_armed() {
+        // Windows holds by writing the lid-close action into the power scheme,
+        // and that write outlives the process: without a release on the exit
+        // path a quit leaves the lid doing nothing until the next launch.
+        let d = tempfile::tempdir().unwrap();
+        let handle = handle_with(
+            Recovery {
+                reclaimed_prior: None,
+                stranded: false,
+            },
+            d.path(),
+        );
+        handle
+            .set_settings(Settings {
+                trigger: Trigger::Always,
+                ..Settings::default()
+            })
+            .unwrap();
+
+        let platform = RecordingHold::default();
+        release_at_exit(&handle, &platform).unwrap();
+
+        // The release went through the platform's own `hold`, not a flag file
+        // some backends never write — this is the call every backend, Windows
+        // included, implements, and it must have been asked to let go.
+        assert_eq!(
+            *platform.calls.lock().unwrap(),
+            vec![false],
+            "quitting has to release the hold through the platform itself"
+        );
+        // And the sweep is told to stop first, so a still-running iteration
+        // cannot re-take the hold one tick after we handed the machine back —
+        // the tray-Quit race the flag-file version of this test could not see.
+        assert!(
+            handle.is_stopping(),
+            "the sweep must be stopped before release, or it re-arms the hold"
+        );
+        // Quitting is not "turn Keep Awake off": the next launch honours the
+        // trigger the user chose, and only the OS-level hold is handed back.
+        assert_eq!(handle.settings().trigger, Trigger::Always);
+        assert_eq!(
+            Settings::load(&crate::paths::keep_awake_settings(d.path())).trigger,
+            Trigger::Always,
+            "the armed trigger has to outlive the process, or the next launch \
+             starts with the feature off"
+        );
+    }
+
+    #[test]
+    fn a_stopped_sweep_will_not_re_arm_a_released_hold() {
+        // The guard that actually closes the exit-path re-arm race, driven end to
+        // end rather than by poking the flag. A sweep can be mid-iteration when
+        // `release_at_exit` stops it, and its next act would be a `hold(true)`
+        // that rewrites the Windows lid action to "do nothing" one instant after
+        // the exit path handed the machine back. `hold_step` is that act, with
+        // the `is_stopping` guard immediately before the write — so a stopped
+        // sweep must reach the platform's `hold` not at all.
+        //
+        // This asserts on the calls that reach the platform, not on the flag's
+        // getter: the previous version of this test only checked
+        // `stop_sweeping()` set `is_stopping()`, so deleting the in-loop guard
+        // left it green while the race it names was wide open.
+        let d = tempfile::tempdir().unwrap();
+        let handle = handle_with(
+            Recovery {
+                reclaimed_prior: None,
+                stranded: false,
+            },
+            d.path(),
+        );
+        let platform = RecordingHold::default();
+        assert!(!handle.is_stopping(), "a live app must let the sweep run");
+
+        handle.stop_sweeping();
+        assert!(handle.is_stopping(), "the sweep must see the stop");
+
+        // Drive the extracted step exactly as the sweep would, asking to hold —
+        // the worst case, the one that re-arms. The guard must turn it into a
+        // no-op that ends the loop instead.
+        match hold_step(&handle, &platform, Phase::Holding) {
+            HoldStep::Stopped => {}
+            HoldStep::Applied(_) => {
+                panic!("a stopped sweep must not reach the hold write")
+            }
+        }
+        assert!(
+            platform.calls.lock().unwrap().is_empty(),
+            "no hold call may reach the platform after stop_sweeping — the sweep \
+             must not re-arm the hold the exit path just released"
+        );
+    }
+
+    #[test]
+    fn releasing_for_an_update_hands_the_machine_back_without_stopping_the_sweep() {
+        // An update install is not necessarily an exit: the download and this
+        // release can both succeed and then `install()` throw, and on macOS and
+        // Linux the app is still running afterwards. `release_at_exit` would have
+        // latched `stopping` and killed the sweep, leaving keep-awake dead until
+        // a manual relaunch with nothing on screen saying so. `release_for_update`
+        // hands the OS hold back but leaves the sweep alive, so a failed install
+        // self-heals — the next sweep re-arms the hold from the trigger the user
+        // still has set.
+        let d = tempfile::tempdir().unwrap();
+        let handle = handle_with(
+            Recovery {
+                reclaimed_prior: None,
+                stranded: false,
+            },
+            d.path(),
+        );
+        let platform = RecordingHold::default();
+
+        release_for_update(&handle, &platform).unwrap();
+
+        // The OS hold went back through the platform every backend implements.
+        assert_eq!(
+            *platform.calls.lock().unwrap(),
+            vec![false],
+            "the update path has to hand the OS hold back"
+        );
+        // But the sweep is untouched: a failed install must leave it able to
+        // re-arm, which a latched `stopping` would forbid for the rest of the run.
+        assert!(
+            !handle.is_stopping(),
+            "the update path must not stop the sweep — a failed install leaves \
+             the app running and keep-awake must keep working"
+        );
     }
 }

@@ -146,6 +146,7 @@ pub fn run() {
             commands::set_keep_awake,
             commands::authorize_keep_awake,
             commands::restore_sleep,
+            commands::release_keep_awake_for_update,
             commands::general_settings,
             commands::set_general_settings,
         ])
@@ -245,10 +246,42 @@ pub fn run() {
         .build(tauri::generate_context!());
 
     match app {
-        Ok(app) => app.run(|_app, event| {
-            if let tauri::RunEvent::ExitRequested { api, code, .. } = &event {
-                if exit_should_be_prevented(*code) {
-                    api.prevent_exit();
+        Ok(app) => app.run(|app, event| {
+            let exiting = match &event {
+                tauri::RunEvent::ExitRequested { api, code, .. } => {
+                    // `None` is a person closing the last window — the tray lives
+                    // on and must NOT release. Only our own `app.exit()` (the
+                    // Quit row) carries a code, and that really is leaving.
+                    if exit_should_be_prevented(*code) {
+                        api.prevent_exit();
+                        false
+                    } else {
+                        true
+                    }
+                }
+                // Windows ends a session (Restart, shutdown, a Windows Update
+                // reboot) with `WM_ENDSESSION`, which `tao` handles in
+                // `loop_destroyed` and `tauri-runtime-wry` maps to `Exit` —
+                // never `ExitRequested`. Without this arm that path leaves the
+                // lid-close action on "do nothing", surviving the reboot. `Exit`
+                // also fires after a normal `ExitRequested` quit, so both paths
+                // converge here; releasing twice is a no-op on every backend.
+                tauri::RunEvent::Exit => true,
+                _ => false,
+            };
+            if exiting {
+                // The last moment anything of ours runs. Nothing else hands the
+                // hold back: the sweep thread is an unconditional loop that is
+                // still alive here, so `release_at_exit` first tells it to stop
+                // (or it would re-take the hold a tick later) and then releases.
+                // On Windows the hold is a power-scheme write that would
+                // otherwise stand until the next launch.
+                if let Some(state) = app.try_state::<AppState>() {
+                    if let Err(error) =
+                        keep_awake::release_at_exit(&state.keep_awake, &*state.platform)
+                    {
+                        eprintln!("could not release the keep-awake hold on exit: {error}");
+                    }
                 }
             }
         }),

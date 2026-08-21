@@ -623,6 +623,28 @@ pub fn restore_sleep(state: tauri::State<AppState>) -> Result<crate::keep_awake:
     Ok(state.keep_awake.status())
 }
 
+/// Hands the machine back on the way into an update install.
+///
+/// The bundled updater exits the process itself — on Windows it hands off to the
+/// NSIS installer and calls `std::process::exit(0)`, which reaches neither
+/// `RunEvent::ExitRequested` nor `RunEvent::Exit`, so the release wired into
+/// `App::run` never fires. The window calls this the moment before it installs,
+/// the last point at which our own code still runs. Not `restore_sleep`:
+/// quitting for an update is not "turn Keep Awake off" — the trigger is left as
+/// the user set it, only the OS-level hold goes back.
+///
+/// Not `release_at_exit` either: that stops the sweep, which is right when the
+/// app is going away but wrong here. An update install can fail — download and
+/// release succeed, then `install()` throws — and on macOS and Linux the app
+/// survives that. Stopping the sweep would leave keep-awake dead until a manual
+/// relaunch. `release_for_update` hands the OS hold back but leaves the sweep
+/// running, so a failed install self-heals when the next sweep re-arms the hold.
+#[tauri::command]
+pub fn release_keep_awake_for_update(state: tauri::State<AppState>) -> Result<(), String> {
+    crate::keep_awake::release_for_update(&state.keep_awake, state.platform.as_ref())
+        .map_err(|e| e.to_string())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
