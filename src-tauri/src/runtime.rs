@@ -1,6 +1,6 @@
 use crate::app_spec::{self, AppSpec};
 use crate::paths::Paths;
-use crate::platform::Platform;
+use crate::platform::{Platform, Unavailable};
 use crate::profile_store::{Profile, ProfileStore};
 use crate::tray::MenuSignature;
 use anyhow::{anyhow, Result};
@@ -17,7 +17,7 @@ pub struct AppRuntime {
     /// whole point: the store beside this is empty, so nothing offers to launch
     /// or delete a profile it never saw, and [`AppRuntime::writable`] refuses
     /// the one operation that could write over the file anyway.
-    pub unreadable_registry: Option<String>,
+    pub unreadable_registry: Option<crate::platform::Unavailable>,
 }
 
 impl AppRuntime {
@@ -29,7 +29,7 @@ impl AppRuntime {
     /// empty store; this is the one that does not.
     pub fn writable(&self) -> Result<()> {
         match &self.unreadable_registry {
-            Some(reason) => Err(anyhow!("{reason}")),
+            Some(reason) => Err(anyhow!("{}", reason.detail)),
             None => Ok(()),
         }
     }
@@ -78,7 +78,7 @@ impl AppState {
     /// The one *declared* app `build` leaves out is one whose platform cannot
     /// name a candidate directory at all, and that app has no runtime to ask
     /// about.
-    pub fn availability(&self, runtime: &AppRuntime) -> Option<String> {
+    pub fn availability(&self, runtime: &AppRuntime) -> Option<Unavailable> {
         // Ahead of the binary check, and not merged with it: an installed app
         // whose registry cannot be read is unavailable for a reason the user can
         // actually act on, and naming the binary instead would send them looking
@@ -86,10 +86,17 @@ impl AppState {
         if let Some(reason) = &runtime.unreadable_registry {
             return Some(reason.clone());
         }
+        // The two lengths are the platform's to write — it is the side that
+        // knows which part of its sentence is the path. An error that arrived
+        // without them is carried at one length rather than trimmed here by
+        // guesswork.
         self.platform
             .binary(&runtime.spec.locations, runtime.spec.product)
             .err()
-            .map(|error| error.to_string())
+            .map(|error| match error.downcast_ref::<Unavailable>() {
+                Some(unavailable) => unavailable.clone(),
+                None => Unavailable::flat(error.to_string()),
+            })
     }
 }
 
@@ -125,9 +132,12 @@ pub fn build(platform: &dyn Platform) -> Result<Vec<AppRuntime>> {
             Ok(store) => (store, None),
             Err(error) => (
                 ProfileStore::default(),
-                Some(format!(
-                    "{}'s profile registry could not be read: {error}",
-                    spec.product
+                Some(Unavailable::new(
+                    format!("{}'s profile registry could not be read", spec.product),
+                    format!(
+                        "{}'s profile registry could not be read: {error}",
+                        spec.product
+                    ),
                 )),
             ),
         };
@@ -167,8 +177,15 @@ mod tests {
                 .join("home")
                 .join(locations.macos.as_ref().unwrap().default_profile))
         }
-        fn binary(&self, _locations: &Locations, product: &str) -> Result<PathBuf> {
-            Err(anyhow!("{product} was not found"))
+        /// Fails the way a real platform fails: with the two lengths carried
+        /// as an `Unavailable`, so the downcast in `availability` is what is
+        /// under test rather than a plain string that would pass either way.
+        fn binary(&self, locations: &Locations, product: &str) -> Result<PathBuf> {
+            let bin = locations.macos.as_ref().unwrap().binary;
+            Err(anyhow!(Unavailable::new(
+                format!("{product} is not installed"),
+                format!("{product} was not found at {bin}"),
+            )))
         }
         fn process_marker(&self, locations: &Locations) -> Result<String> {
             Ok(locations.macos.as_ref().unwrap().binary.to_string())
@@ -372,7 +389,24 @@ mod tests {
         let d = tempfile::tempdir().unwrap();
         let state = state(d.path());
         let reason = state.availability(state.app("codex").unwrap()).unwrap();
-        assert!(reason.contains("ChatGPT"), "got: {reason}");
+        assert!(reason.detail.contains("ChatGPT"), "got: {reason}");
+        assert!(
+            reason.summary.contains("ChatGPT"),
+            "both lengths name the app, or the short one is unreadable in the tray: {}",
+            reason.summary
+        );
+        // The platform wrote two different lengths; `availability` has to hand
+        // both of them through. Collapsing it to one — flattening the error
+        // instead of recovering the `Unavailable` — makes these two fail.
+        assert_ne!(
+            reason.summary, reason.detail,
+            "the short length was not recovered from the platform's error, so the tray gets the long one"
+        );
+        assert!(
+            !reason.summary.contains('/'),
+            "the tray's length still carries a path, which is what sets the width of every row: {}",
+            reason.summary
+        );
     }
 
     /// A registry in place before the first build, and unreadable — a directory
@@ -395,12 +429,26 @@ mod tests {
             "no profiles at all — a fabricated Default is the lie this fixes"
         );
         // Carried on the runtime, not merely logged: this is the same channel
-        // an uninstalled app uses, so whatever #11 settles on for showing a
-        // reason instead of dropping the row covers this fault too.
+        // an uninstalled app uses, so the greyed row that names the reason
+        // instead of dropping the app covers this fault too.
         let reason = state.availability(claude).unwrap();
         assert!(
-            reason.contains("profile registry"),
+            reason.detail.contains("profile registry"),
             "the reason names the registry rather than the binary: {reason}"
+        );
+        // The tray takes the short length, and what it drops here is the
+        // underlying io error — which names a path. What is left still says
+        // which app and which file, which is the whole of what a menu row can
+        // carry.
+        assert!(
+            reason.summary.contains("profile registry"),
+            "the short length still names the registry: {}",
+            reason.summary
+        );
+        assert!(
+            reason.summary.len() < reason.detail.len(),
+            "the short length dropped nothing: {}",
+            reason.summary
         );
     }
 

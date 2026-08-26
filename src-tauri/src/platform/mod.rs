@@ -31,6 +31,53 @@ pub const DATA_DIR_NAME: &str = "Agent Profiles";
 /// Our own directory name, where a slug is conventional (Linux, window classes).
 pub const DATA_DIR_SLUG: &str = "agent-profiles";
 
+/// Why an app cannot be used, at the two lengths the two surfaces can afford.
+///
+/// The same fact, told twice. `detail` is the whole of it, path included, and is
+/// what the window shows: the path we looked at is the fastest way for someone
+/// who *has* the app to see why it is not being found. `summary` drops the path
+/// and is what the tray shows, because a menu is as wide as its widest row —
+/// seven declared apps on macOS means a stock path of up to 96 characters
+/// setting the width of every profile row above it.
+///
+/// Carried as an error so the shape survives `Result`: `Display` renders
+/// `detail`, so every caller that only launches and reports still says exactly
+/// what it said before, and only the callers that ask *why* have to know there
+/// are two lengths.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Unavailable {
+    pub summary: String,
+    pub detail: String,
+}
+
+impl Unavailable {
+    pub fn new(summary: impl Into<String>, detail: impl Into<String>) -> Self {
+        Self {
+            summary: summary.into(),
+            detail: detail.into(),
+        }
+    }
+
+    /// The same at both lengths, for a reason with no path to drop — and for one
+    /// that arrived as a plain error, where guessing at a shorter form would be
+    /// inventing text nobody wrote.
+    pub fn flat(text: impl Into<String>) -> Self {
+        let text = text.into();
+        Self {
+            summary: text.clone(),
+            detail: text,
+        }
+    }
+}
+
+impl std::fmt::Display for Unavailable {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str(&self.detail)
+    }
+}
+
+impl std::error::Error for Unavailable {}
+
 /// One live process, already attributed to the app that owns it.
 #[derive(Debug, Clone, PartialEq)]
 pub struct RunningProcess {

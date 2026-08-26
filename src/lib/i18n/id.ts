@@ -51,6 +51,7 @@ export const id: Strings = {
 
   // A profile row
   "profiles.empty": "Belum ada profil.",
+  "profiles.unavailable": "Tidak tersedia: {{reason}}",
   "row.running": "Berjalan",
   "row.sharedSignIn": "Masuk bersama",
   "row.open": "Buka {{name}}",

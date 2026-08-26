@@ -2,6 +2,12 @@
 
 Notable changes, newest first. This project follows [Semantic Versioning](https://semver.org).
 
+## [Unreleased]
+
+### Fixed
+
+- **An app that is not installed is now shown greyed with the reason, rather than vanishing.** This is the half of the 0.6.0 note that never shipped, and the correction printed under 0.6.1 no longer applies. Beside a working app, an uninstalled one was filtered out of both the tray and the window, so it was indistinguishable from an app this tool had never heard of. Both surfaces now keep it, at the length each can afford: the tray gives it one disabled row naming the product and saying it is not installed, and the window — which is not as wide as its widest row the way a menu is — says the same thing with the path that was looked at. The screen shown when nothing at all is installed lists those reasons too. Nothing about the row is clickable — there is still nothing to launch — and it returns to a normal list the moment the app is installed, with no relaunch.
+
 ## [0.6.1] — 2026-08-21
 
 Six fixes. Two of them stop the app telling you something it never checked, and one hands your Mac back on the way out.
