@@ -116,6 +116,11 @@ export const restoreSleep = () => invoke<KeepAwakeStatus>("restore_sleep");
 /// before installing, while our own code still runs. See `useUpdater`.
 export const releaseKeepAwakeForUpdate = () => invoke("release_keep_awake_for_update");
 
+/// Puts the sweep back after an install that never happened, so keep-awake is not
+/// left switched off for the rest of a run the failed install did not end.
+export const resumeKeepAwakeAfterFailedUpdate = () =>
+  invoke("resume_keep_awake_after_failed_update");
+
 /// Kept in the same order as `Locale::ALL` in `general.rs`, which is the order
 /// the picker offers them in.
 export type Locale = "en" | "id" | "ja" | "de" | "es" | "pt";
