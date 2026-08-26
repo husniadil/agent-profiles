@@ -2,10 +2,13 @@
 
 Notable changes, newest first. This project follows [Semantic Versioning](https://semver.org).
 
-## [Unreleased]
+## [0.6.2] — 2026-08-26
+
+Three fixes. One of them stops an update taking the machine back after it had already been handed over, and one finally renders the row 0.6.0 promised.
 
 ### Fixed
 
+- **An update can no longer take back the hold it just gave up.** Installing an update releases the machine first, then hands off to the installer, but the Keep Awake sweep went on running in that gap — fifteen seconds is easily longer than the handoff, so a tick could re-take the hold and, on Windows, write the lid-close action back to "do nothing" behind the installer's back. The sweep is paused for the handoff now instead of stopped, so an install that fails without ending the app resumes Keep Awake rather than leaving it dead for the rest of the run. An install that disappears without reporting back leaves the sweep paused, which is the safe direction: the machine is left free to sleep.
 - **The security notes now say what the update signature does not cover.** They described a bundle verified against the key baked into the app, which is true, and left the impression that a verified update is therefore the update this project intended. The manifest that names which bundle to fetch is trusted on TLS alone, so the note now says so, and says what someone able to serve that response could and could not do with it.
 - **An app that is not installed is now shown greyed with the reason, rather than vanishing.** This is the half of the 0.6.0 note that never shipped, and the correction printed under 0.6.1 no longer applies. Beside a working app, an uninstalled one was filtered out of both the tray and the window, so it was indistinguishable from an app this tool had never heard of. Both surfaces now keep it, at the length each can afford: the tray gives it one disabled row naming the product and saying it is not installed, and the window — which is not as wide as its widest row the way a menu is — says the same thing with the path that was looked at. The screen shown when nothing at all is installed lists those reasons too. Nothing about the row is clickable — there is still nothing to launch — and it returns to a normal list the moment the app is installed, with no relaunch.
 
