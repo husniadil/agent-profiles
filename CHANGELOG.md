@@ -6,6 +6,7 @@ Notable changes, newest first. This project follows [Semantic Versioning](https:
 
 ### Fixed
 
+- **The security notes now say what the update signature does not cover.** They described a bundle verified against the key baked into the app, which is true, and left the impression that a verified update is therefore the update this project intended. The manifest that names which bundle to fetch is trusted on TLS alone, so the note now says so, and says what someone able to serve that response could and could not do with it.
 - **An app that is not installed is now shown greyed with the reason, rather than vanishing.** This is the half of the 0.6.0 note that never shipped, and the correction printed under 0.6.1 no longer applies. Beside a working app, an uninstalled one was filtered out of both the tray and the window, so it was indistinguishable from an app this tool had never heard of. Both surfaces now keep it, at the length each can afford: the tray gives it one disabled row naming the product and saying it is not installed, and the window — which is not as wide as its widest row the way a menu is — says the same thing with the path that was looked at. The screen shown when nothing at all is installed lists those reasons too. Nothing about the row is clickable — there is still nothing to launch — and it returns to a normal list the moment the app is installed, with no relaunch.
 
 ## [0.6.1] — 2026-08-21
