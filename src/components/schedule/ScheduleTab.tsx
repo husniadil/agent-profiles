@@ -177,10 +177,12 @@ export function ScheduleTab({ schedule }: { schedule: Schedule }) {
             />
           </div>
 
-          {/* Editable whether or not the master switch is on: set the days, times
-              and app first (this only persists — no wake is installed and no
-              password is asked while the switch is off), then flip it on once. */}
-          <div className={CARD}>
+          {/* Gated on the master switch: a day or an app picked while it is off
+              would be scheduled the moment it comes on, before anyone meant to
+              arm it. `inert` — not a `disabled` threaded through every control
+              this vendored block owns — turns the whole section unfocusable and
+              unclickable in one native step. */}
+          <div className={`${CARD} ${s.enabled ? "" : "opacity-50"}`} inert={!s.enabled}>
             <p className="mb-1 text-callout font-medium">
               {t("schedule.days.legend")}
             </p>
@@ -192,7 +194,10 @@ export function ScheduleTab({ schedule }: { schedule: Schedule }) {
             />
           </div>
 
-          <div className={`flex items-center justify-between gap-2 ${CARD}`}>
+          <div
+            className={`flex items-center justify-between gap-2 ${CARD} ${s.enabled ? "" : "opacity-50"}`}
+            inert={!s.enabled}
+          >
             <span className="shrink-0 text-callout font-medium">
               {t("schedule.app.name")}
             </span>

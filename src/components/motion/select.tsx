@@ -1,10 +1,10 @@
 "use client";
 // beui.dev/components/motion/select
 //
-// LOCALLY MODIFIED — not byte-identical to beui.dev. Two changes, each noted
+// LOCALLY MODIFIED — not byte-identical to beui.dev. Three changes, each noted
 // beside the code: the panel's *closing* transition no longer waits before it
-// collapses, and opening a panel brings the chosen option into view. The opening
-// choreography is otherwise untouched.
+// collapses, opening a panel brings the chosen option into view, and the
+// per-item entrance stagger is much tighter for long lists.
 
 import { Check, ChevronDown } from "lucide-react";
 import {
@@ -34,13 +34,26 @@ const INSTANT_TRANSITION: Transition = { duration: 0 };
 // content choreograph it (see SelectContent). Mirrors bouncy-accordion's feel.
 const CHEVRON_TRANSITION: Transition = { type: "spring", duration: 0.4, bounce: 0.3 };
 
+// LOCALLY MODIFIED: the original per-item stagger (0.035s, 0.05s delay before
+// the first) is fine for the half-dozen items beui.dev built it for, but the
+// schedule tab's time field holds 144 of them — the stagger is keyed to each
+// item's position in the full list, not its position on screen, so an option
+// past the fold (including the selected one this panel scrolls to) could sit
+// blurred and invisible for seconds after the panel opened. Capped low enough
+// that even the last of 144 items starts its own (equally shortened) transition
+// well under 200ms in.
 const LIST_VARIANTS: Variants = {
   hidden: {},
-  show: { transition: { staggerChildren: 0.035, delayChildren: 0.05 } },
+  show: { transition: { staggerChildren: 0.001, delayChildren: 0 } },
 };
 const ITEM_VARIANTS: Variants = {
   hidden: { opacity: 0, y: -6, filter: "blur(3px)" },
-  show: { opacity: 1, y: 0, filter: "blur(0px)" },
+  show: {
+    opacity: 1,
+    y: 0,
+    filter: "blur(0px)",
+    transition: { duration: 0.08, ease: EASE_OUT },
+  },
 };
 
 type Placement = "bottom" | "top";
