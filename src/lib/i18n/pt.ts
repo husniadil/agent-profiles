@@ -209,7 +209,7 @@ export const pt: Strings = {
   "schedule.app.searchPlaceholder": "Buscar apps…",
   "schedule.app.empty": "Nenhum app encontrado",
   "schedule.caveat":
-    "Acorda o Mac e abre o app no horário de cada dia, apenas se você estiver conectado — ele acorda cerca de um minuto antes e precisa de energia CA. Os despertares são agendados com algumas semanas de antecedência, então abra o Agent Profiles de vez em quando para mantê-los.",
+    "Acorda um Mac adormecido e abre o app no horário de cada dia, apenas se você estiver conectado — ele acorda cerca de um minuto antes e funciona na bateria, mas um Mac totalmente desligado permanece desligado, e com a tampa fechada o app precisa de uma tela externa para realmente abrir. Os despertares são agendados com algumas semanas de antecedência, então abra o Agent Profiles de vez em quando para mantê-los.",
   "schedule.copy.tooltip": "Copiar horários",
   "schedule.copy.aria": "Copiar horários de {{day}} para outros dias",
   "schedule.copy.heading": "Copiar horários para",

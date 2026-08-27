@@ -367,6 +367,14 @@ fn run_osascript(applescript: &str) -> Result<()> {
 /// The single shell command that cancels one batch of one-off wakes and arms
 /// another, or `None` when there is nothing to do.
 ///
+/// `wake`, not `wakeorpoweron`: the `poweron` half only ever mattered for a Mac
+/// that had been fully shut down, and it needs AC to fire at all — Apple Silicon
+/// drops it even on AC. `wake` covers a merely-sleeping Mac, which keeps its RTC
+/// powered from the battery, so this is what actually fires unplugged. The
+/// tradeoff is explicit, not accidental: a Mac that is shut down at the
+/// scheduled time now simply stays off, where it previously made an unreliable
+/// attempt to power on.
+///
 /// A free function so the batching and quoting can be asserted without a running
 /// `pmset` or a password prompt: every cancel comes first, every arm after, all
 /// joined with `; ` so one elevation runs the lot. Each datetime is one of our
@@ -379,10 +387,10 @@ fn pmset_batch_command(cancel: &[String], schedule: &[String]) -> Option<String>
     }
     let mut commands = Vec::with_capacity(cancel.len() + schedule.len());
     for dt in cancel {
-        commands.push(format!("pmset schedule cancel wakeorpoweron \"{dt}\""));
+        commands.push(format!("pmset schedule cancel wake \"{dt}\""));
     }
     for dt in schedule {
-        commands.push(format!("pmset schedule wakeorpoweron \"{dt}\""));
+        commands.push(format!("pmset schedule wake \"{dt}\""));
     }
     Some(commands.join("; "))
 }
@@ -918,14 +926,14 @@ mod tests {
         let command = pmset_batch_command(&cancel, &schedule).unwrap();
         assert_eq!(
             command,
-            "pmset schedule cancel wakeorpoweron \"01/07/26 17:30:00\"; \
-             pmset schedule wakeorpoweron \"01/12/26 09:00:00\"; \
-             pmset schedule wakeorpoweron \"01/14/26 17:30:00\""
+            "pmset schedule cancel wake \"01/07/26 17:30:00\"; \
+             pmset schedule wake \"01/12/26 09:00:00\"; \
+             pmset schedule wake \"01/14/26 17:30:00\""
         );
         // The cancel must come before either arm, so a re-armed datetime is not
         // cancelled straight back off.
         let cancel_at = command.find("cancel").unwrap();
-        let first_arm = command.find("wakeorpoweron \"01/12").unwrap();
+        let first_arm = command.find("wake \"01/12").unwrap();
         assert!(
             cancel_at < first_arm,
             "cancels must precede arms: {command}"

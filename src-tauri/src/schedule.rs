@@ -11,9 +11,15 @@
 //! Why one-off wakes rather than a single repeat: `pmset repeat` holds exactly
 //! one wake time, so a distinct time per weekday cannot be expressed as a repeat.
 //! Instead each upcoming occurrence in the next [`WAKE_HORIZON_DAYS`] is armed as
-//! its own `pmset schedule wakeorpoweron` event, and [`coverage_is_low`] decides
-//! when the buffer has run low enough to re-arm — which is the only thing that
-//! costs the administrator password, and then only every several weeks.
+//! its own `pmset schedule wake` event, and [`coverage_is_low`] decides when the
+//! buffer has run low enough to re-arm — which is the only thing that costs the
+//! administrator password, and then only every several weeks.
+//!
+//! `wake`, not `wakeorpoweron`: a merely-sleeping Mac keeps its RTC powered from
+//! the battery, so `wake` fires unplugged. `poweron` — waking from a full
+//! shutdown — needs AC even to attempt, and is unreliable on Apple Silicon even
+//! then, so this schedule no longer tries it. A Mac that is shut down at the
+//! scheduled time stays off.
 
 use anyhow::Result;
 use chrono::{DateTime, Datelike, Duration, Local, Weekday};

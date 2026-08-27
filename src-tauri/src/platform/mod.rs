@@ -269,10 +269,10 @@ pub trait Platform: Send + Sync {
     ///
     /// `cancel` is every wake datetime we last installed and `schedule` is every
     /// one to arm now, both formatted for `pmset schedule`. The macOS backend runs
-    /// a `pmset schedule cancel wakeorpoweron "<dt>"` for each `cancel` and a
-    /// `pmset schedule wakeorpoweron "<dt>"` for each `schedule`, joined into one
-    /// elevated shell command. Both slices empty is a no-op. The default is the
-    /// honest answer for a platform with no such mechanism.
+    /// a `pmset schedule cancel wake "<dt>"` for each `cancel` and a
+    /// `pmset schedule wake "<dt>"` for each `schedule`, joined into one elevated
+    /// shell command. Both slices empty is a no-op. The default is the honest
+    /// answer for a platform with no such mechanism.
     fn set_wakes(&self, _cancel: &[String], _schedule: &[String]) -> Result<()> {
         anyhow::bail!("this platform cannot schedule a wake")
     }
