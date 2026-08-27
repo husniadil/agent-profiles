@@ -35,6 +35,13 @@ const DAY_ORDER: DayKey[] = ["mon", "tue", "wed", "thu", "fri", "sat", "sun"];
 const DEFAULT_START = "09:00";
 const DEFAULT_END = "17:00";
 
+/// The same bordered shell Keep Awake and the compose card use, so a container
+/// on this tab is the same object as a container on the others. A border on its
+/// own left these sections unfilled, showing the darker page through them while
+/// every other tab sits on a raised surface.
+const CARD =
+  "shrink-0 rounded-xl border border-hairline bg-surface shadow-card p-2.5";
+
 /// Backend days → the block's week shape. Ids are derived from the day key so
 /// they stay stable across re-renders and the rows never remount.
 function toWeek(days: DayWake[]): WeekAvailability {
@@ -159,7 +166,7 @@ export function ScheduleTab({ schedule }: { schedule: Schedule }) {
         </div>
       ) : (
         <>
-          <div className="flex items-center justify-between gap-2 rounded-lg border border-hairline p-2.5">
+          <div className={`flex items-center justify-between gap-2 ${CARD}`}>
             <span className="text-callout font-medium">{t("schedule.enable.name")}</span>
             <Switch
               className={`shrink-0 ${SWITCH}`}
@@ -173,7 +180,7 @@ export function ScheduleTab({ schedule }: { schedule: Schedule }) {
           {/* Editable whether or not the master switch is on: set the days, times
               and app first (this only persists — no wake is installed and no
               password is asked while the switch is off), then flip it on once. */}
-          <div className="rounded-lg border border-hairline p-2.5">
+          <div className={CARD}>
             <p className="mb-1 text-callout font-medium">
               {t("schedule.days.legend")}
             </p>
@@ -185,7 +192,7 @@ export function ScheduleTab({ schedule }: { schedule: Schedule }) {
             />
           </div>
 
-          <div className="flex items-center justify-between gap-2 rounded-lg border border-hairline p-2.5">
+          <div className={`flex items-center justify-between gap-2 ${CARD}`}>
             <span className="shrink-0 text-callout font-medium">
               {t("schedule.app.name")}
             </span>
@@ -194,7 +201,7 @@ export function ScheduleTab({ schedule }: { schedule: Schedule }) {
               onValueChange={(next) => write({ app_path: next })}
               className="w-56 shrink-0"
             >
-              <ComboboxTrigger className="h-8 min-w-0 rounded-lg px-2.5">
+              <ComboboxTrigger className="h-8 min-w-0 rounded-lg border-hairline px-2.5">
                 <span className="flex min-w-0 items-center gap-2">
                   {selectedIcon ? (
                     <img
