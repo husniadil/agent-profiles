@@ -11,6 +11,7 @@ mod platform;
 mod probe;
 mod profile_store;
 mod runtime;
+mod schedule;
 mod shared_config;
 mod tray;
 #[cfg(test)]
@@ -150,6 +151,10 @@ pub fn run() {
             commands::resume_keep_awake_after_failed_update,
             commands::general_settings,
             commands::set_general_settings,
+            commands::get_schedule,
+            commands::set_schedule,
+            commands::clear_schedule,
+            commands::list_applications,
         ])
         .on_menu_event(|app, event| {
             let id = event.id().as_ref();
@@ -212,6 +217,7 @@ pub fn run() {
                     .unwrap_or_default(),
             );
             let general = general::Handle::new(data_root.clone(), general::system_locale());
+            let schedule = schedule::Handle::new(data_root.clone());
             let keep_awake = keep_awake::Handle::new(
                 data_root,
                 home,
@@ -229,6 +235,7 @@ pub fn run() {
                 last_menu: std::sync::Mutex::new(None),
                 keep_awake,
                 general,
+                schedule,
             });
 
             // The sweep the guards depend on. Nothing else in this app runs on a
@@ -240,6 +247,12 @@ pub fn run() {
 
             if let Some(state) = app.try_state::<AppState>() {
                 tray::sync_identities(&state);
+                // Keep the one-off wakes from lapsing. A per-weekday schedule is
+                // armed as a horizon of individual `pmset` events; this re-arms the
+                // next horizon once the buffer has run low, which is the only thing
+                // that asks for the password — and then only every several weeks,
+                // never on an ordinary launch.
+                commands::rearm_if_due(&state);
             }
             tray::rebuild(app.handle())?;
             Ok(())

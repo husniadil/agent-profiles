@@ -135,6 +135,64 @@ impl Platform for MacOs {
         true
     }
 
+    fn can_schedule_wake(&self) -> bool {
+        true
+    }
+
+    fn app_icon(&self, path: &str) -> Option<String> {
+        let png = render_app_icon_png(path)?;
+        Some(format!(
+            "data:image/png;base64,{}",
+            crate::schedule::base64_encode(&png)
+        ))
+    }
+
+    fn set_wakes(&self, cancel: &[String], schedule: &[String]) -> Result<()> {
+        // Nothing to cancel and nothing to arm: no privileged step, no prompt.
+        // The caller reaches here only when the wake set actually changed, so an
+        // app-only edit or a no-op save never gets this far.
+        let Some(command) = pmset_batch_command(cancel, schedule) else {
+            return Ok(());
+        };
+        // Root, waited-for, and reported: a silent failure here would leave the
+        // window claiming a schedule the machine will not honour. `privileged_now`
+        // is the same one-shot elevation `restore_sleep` uses.
+        run_osascript(&privileged_now(&command))
+    }
+
+    fn refresh_launch_agent(&self, plan: &crate::schedule::WakePlan) -> Result<()> {
+        // The launchd half needs no root. Replace any existing agent: write the
+        // plist, then bootout-and-bootstrap so a changed schedule takes effect now
+        // rather than at the next login.
+        if let Some(parent) = plan.plist_path.parent() {
+            std::fs::create_dir_all(parent)?;
+        }
+        std::fs::write(&plan.plist_path, plan.plist_xml.as_bytes())?;
+        let domain = launchd_gui_domain()?;
+        // A bootout of an agent that is not loaded errors; ignore it — the point
+        // is only that nothing stale remains before the bootstrap.
+        let _ = launchctl(&[
+            "bootout",
+            &format!("{domain}/{}", plist_label(&plan.plist_path)),
+        ]);
+        launchctl(&["bootstrap", &domain, &plan.plist_path.display().to_string()])
+    }
+
+    fn remove_launch_agent(&self) -> Result<()> {
+        // No root: the LaunchAgent is the user's own. `bootout` and the unlink are
+        // both best-effort — a disable must not fail because an agent the user
+        // already removed by hand is missing. The one-off wakes are cancelled
+        // separately, by `set_wakes`, which is the half that needs the password.
+        let home = home()?;
+        let plist = crate::paths::launch_agent_plist(&home, BUNDLE_ID);
+        if plist.exists() {
+            let domain = launchd_gui_domain()?;
+            let _ = launchctl(&["bootout", &format!("{domain}/{}", plist_label(&plist))]);
+            let _ = std::fs::remove_file(&plist);
+        }
+        Ok(())
+    }
+
     fn needs_authorization(&self) -> bool {
         // `pmset -a disablesleep` is root's, and nothing short of root can set
         // it. The hold is a flag file precisely so the password is asked once
@@ -304,6 +362,131 @@ fn run_osascript(applescript: &str) -> Result<()> {
         anyhow::bail!("the administrator password prompt was cancelled");
     }
     anyhow::bail!("could not start the keep-awake helper: {}", stderr.trim())
+}
+
+/// The single shell command that cancels one batch of one-off wakes and arms
+/// another, or `None` when there is nothing to do.
+///
+/// A free function so the batching and quoting can be asserted without a running
+/// `pmset` or a password prompt: every cancel comes first, every arm after, all
+/// joined with `; ` so one elevation runs the lot. Each datetime is one of our
+/// own formatted strings (`MM/dd/yy HH:mm:ss`) carrying no quote or backslash, so
+/// the surrounding double quotes are the whole of the quoting needed — the space
+/// is all that has to be protected.
+fn pmset_batch_command(cancel: &[String], schedule: &[String]) -> Option<String> {
+    if cancel.is_empty() && schedule.is_empty() {
+        return None;
+    }
+    let mut commands = Vec::with_capacity(cancel.len() + schedule.len());
+    for dt in cancel {
+        commands.push(format!("pmset schedule cancel wakeorpoweron \"{dt}\""));
+    }
+    for dt in schedule {
+        commands.push(format!("pmset schedule wakeorpoweron \"{dt}\""));
+    }
+    Some(commands.join("; "))
+}
+
+/// Must match `identifier` in `tauri.conf.json`. Named here rather than read from
+/// the running app so the platform layer stays free of a `tauri::AppHandle`.
+const BUNDLE_ID: &str = "com.husniadil.agent-profiles";
+
+/// The LaunchAgent label is the plist file stem, i.e. `<bundle-id>.schedule`.
+fn plist_label(plist: &Path) -> String {
+    plist
+        .file_stem()
+        .and_then(|s| s.to_str())
+        .unwrap_or("")
+        .to_string()
+}
+
+/// The launchd domain the user's own agents live in: `gui/<uid>`.
+fn launchd_gui_domain() -> Result<String> {
+    // getuid never fails and returns the real user's id, which is the domain a
+    // per-user LaunchAgent is bootstrapped into.
+    let uid = unsafe { libc::getuid() };
+    Ok(format!("gui/{uid}"))
+}
+
+/// One `launchctl` invocation as the user. argv, never a shell — the plist path
+/// is a single element, so no quoting of the home directory is involved.
+fn launchctl(args: &[&str]) -> Result<()> {
+    let out = std::process::Command::new("launchctl")
+        .args(args)
+        .output()?;
+    if out.status.success() {
+        return Ok(());
+    }
+    anyhow::bail!(
+        "launchctl {} failed: {}",
+        args.first().copied().unwrap_or_default(),
+        String::from_utf8_lossy(&out.stderr).trim()
+    )
+}
+
+/// The application at `path`'s icon, scaled to a small fixed square and encoded
+/// as PNG, or `None` if any step of the AppKit pipeline comes back empty.
+///
+/// `NSWorkspace::iconForFile` hands back the multi-representation `NSImage`
+/// LaunchServices already has cached, so this is a lookup rather than a disk
+/// read. It is drawn once into an offscreen bitmap of the target size — the
+/// picker shows a thumbnail, not the 512-point original — and re-encoded to PNG
+/// for a `data:` URI.
+///
+/// The whole traversal runs inside an autorelease pool: every `Retained` AppKit
+/// object built here is temporary, and without a pool they would pile up until
+/// the thread's outermost pool drains.
+///
+/// Offscreen `NSImage` drawing via `lockFocus`/`unlockFocus` does not require the
+/// main thread — it renders into a private bitmap context this call owns and
+/// never installs into a view — so this is safe to run on the Tauri command
+/// worker `list_applications` calls it from.
+// `lockFocus`/`unlockFocus` are deprecated in favour of resolution-independent
+// block drawing, which matters for vector art rendered at unknown scale. This
+// draws a system icon into a fixed 36-point thumbnail once, so the concern does
+// not apply and the two calls remain the simplest offscreen route; the raster
+// output is re-encoded straight to PNG.
+#[allow(deprecated)]
+fn render_app_icon_png(path: &str) -> Option<Vec<u8>> {
+    use objc2::rc::autoreleasepool;
+    use objc2::AnyThread;
+    use objc2_app_kit::{
+        NSBitmapImageFileType, NSBitmapImageRep, NSCompositingOperation, NSImage, NSWorkspace,
+    };
+    use objc2_foundation::{NSDictionary, NSPoint, NSRect, NSSize, NSString};
+
+    /// The square the icon is scaled into. Matches the picker's row height, so a
+    /// Retina display still gets a crisp thumbnail from a modest payload.
+    const ICON_POINTS: f64 = 36.0;
+
+    autoreleasepool(|_| {
+        let source = NSWorkspace::sharedWorkspace().iconForFile(&NSString::from_str(path));
+
+        let size = NSSize::new(ICON_POINTS, ICON_POINTS);
+        let scaled = NSImage::initWithSize(NSImage::alloc(), size);
+        let dest = NSRect::new(NSPoint::new(0.0, 0.0), size);
+        // A zero source rect means "the whole image", which lets AppKit choose
+        // the representation that best fits the destination square.
+        let whole = NSRect::new(NSPoint::new(0.0, 0.0), NSSize::new(0.0, 0.0));
+
+        scaled.lockFocus();
+        source.drawInRect_fromRect_operation_fraction(
+            dest,
+            whole,
+            NSCompositingOperation::SourceOver,
+            1.0,
+        );
+        scaled.unlockFocus();
+
+        let tiff = scaled.TIFFRepresentation()?;
+        let rep = NSBitmapImageRep::imageRepWithData(&tiff)?;
+        // SAFETY: the properties dictionary is empty, so it trivially satisfies
+        // the "values of the correct type" requirement the binding documents.
+        let png = unsafe {
+            rep.representationUsingType_properties(NSBitmapImageFileType::PNG, &NSDictionary::new())
+        }?;
+        Some(png.to_vec())
+    })
 }
 
 /// Sets the profile rows of a tray menu one step below the menu's own type size.
@@ -716,5 +899,120 @@ mod tests {
 
         std::fs::set_permissions(&bin, std::fs::Permissions::from_mode(0o755)).unwrap();
         assert!(check_binary(&bin, "Claude Desktop").is_ok());
+    }
+
+    #[test]
+    fn macos_reports_it_can_schedule_a_wake() {
+        assert!(MacOs.can_schedule_wake());
+    }
+
+    #[test]
+    fn a_wake_batch_cancels_then_arms_in_one_command() {
+        // The whole point of batching: cancels first, arms after, joined with
+        // `; ` so a single elevation runs the lot and the password is asked once.
+        let cancel = vec!["01/07/26 17:30:00".to_string()];
+        let schedule = vec![
+            "01/12/26 09:00:00".to_string(),
+            "01/14/26 17:30:00".to_string(),
+        ];
+        let command = pmset_batch_command(&cancel, &schedule).unwrap();
+        assert_eq!(
+            command,
+            "pmset schedule cancel wakeorpoweron \"01/07/26 17:30:00\"; \
+             pmset schedule wakeorpoweron \"01/12/26 09:00:00\"; \
+             pmset schedule wakeorpoweron \"01/14/26 17:30:00\""
+        );
+        // The cancel must come before either arm, so a re-armed datetime is not
+        // cancelled straight back off.
+        let cancel_at = command.find("cancel").unwrap();
+        let first_arm = command.find("wakeorpoweron \"01/12").unwrap();
+        assert!(
+            cancel_at < first_arm,
+            "cancels must precede arms: {command}"
+        );
+    }
+
+    #[test]
+    fn a_wake_batch_with_nothing_to_do_is_no_command_at_all() {
+        // Both slices empty means no privileged step and no prompt.
+        assert!(pmset_batch_command(&[], &[]).is_none());
+    }
+
+    #[test]
+    fn an_installed_app_icon_becomes_a_real_png_data_uri() {
+        // The one thing no test that cannot see the picker can otherwise prove:
+        // that the AppKit pipeline (iconForFile → offscreen draw → PNG →
+        // base64) actually produces decodable image bytes. A mistake anywhere in
+        // it would compile, pass every pure test, and silently ship blank icons.
+        //
+        // Uses whatever real `.app` this machine has, preferring the two that
+        // ship on every Mac and falling back to the first the scan finds, so it
+        // runs on a developer laptop and on bare CI alike.
+        let candidates = [
+            "/System/Applications/Utilities/Terminal.app",
+            "/System/Applications/System Settings.app",
+            "/System/Library/CoreServices/Finder.app",
+        ];
+        let scanned = crate::schedule::scan_applications(&crate::schedule::application_dirs());
+        let path = candidates
+            .iter()
+            .find(|p| std::path::Path::new(p).exists())
+            .map(|p| p.to_string())
+            .or_else(|| scanned.first().map(|app| app.path.clone()));
+
+        let Some(path) = path else {
+            // No application on this machine at all — nothing to render. A bare
+            // CI runner is allowed to have none rather than fail here.
+            return;
+        };
+
+        let uri = MacOs
+            .app_icon(&path)
+            .unwrap_or_else(|| panic!("no icon produced for {path}"));
+        let prefix = "data:image/png;base64,";
+        assert!(
+            uri.starts_with(prefix),
+            "icon must be a PNG data URI, got: {}",
+            &uri[..uri.len().min(64)]
+        );
+
+        // Decode the payload inline and check the PNG magic bytes, so this pins a
+        // real image rather than just a long-enough string.
+        let payload = decode_base64(&uri[prefix.len()..]);
+        assert!(
+            payload.starts_with(&[0x89, b'P', b'N', b'G']),
+            "the decoded icon must begin with the PNG signature, got {:?}",
+            &payload[..payload.len().min(8)]
+        );
+    }
+
+    /// A minimal standard-alphabet base64 decoder, local to this test so the
+    /// PNG-magic assertion above decodes what `schedule::base64_encode` wrote
+    /// without either side borrowing the other's implementation.
+    #[cfg(target_os = "macos")]
+    fn decode_base64(s: &str) -> Vec<u8> {
+        fn val(c: u8) -> Option<u32> {
+            match c {
+                b'A'..=b'Z' => Some((c - b'A') as u32),
+                b'a'..=b'z' => Some((c - b'a' + 26) as u32),
+                b'0'..=b'9' => Some((c - b'0' + 52) as u32),
+                b'+' => Some(62),
+                b'/' => Some(63),
+                _ => None,
+            }
+        }
+        let mut out = Vec::new();
+        let mut acc = 0u32;
+        let mut bits = 0u32;
+        for &c in s.as_bytes() {
+            let Some(v) = val(c) else { continue }; // skip '=' padding
+            acc = (acc << 6) | v;
+            bits += 6;
+            if bits >= 8 {
+                bits -= 8;
+                out.push((acc >> bits) as u8);
+            }
+        }
+        out
     }
 }

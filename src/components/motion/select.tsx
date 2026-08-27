@@ -1,5 +1,10 @@
 "use client";
 // beui.dev/components/motion/select
+//
+// LOCALLY MODIFIED — not byte-identical to beui.dev. Two changes, each noted
+// beside the code: the panel's *closing* transition no longer waits before it
+// collapses, and opening a panel brings the chosen option into view. The opening
+// choreography is otherwise untouched.
 
 import { Check, ChevronDown } from "lucide-react";
 import {
@@ -68,6 +73,20 @@ export interface SelectProps {
   value?: string;
   defaultValue?: string;
   onValueChange?: (value: string) => void;
+  /**
+   * Controlled open state of the panel. A layout that stacks selects can hold
+   * this to keep exactly one panel open — the panel is absolutely positioned
+   * inside its field, so two open at once paint over each other's options.
+   */
+  open?: boolean;
+  /** Uncontrolled initial open state. Default false. */
+  defaultOpen?: boolean;
+  /**
+   * Fires whenever the panel opens or closes. The panel is absolutely
+   * positioned inside the field, so a layout that stacks selects has to know
+   * which one is open to paint it above its neighbours.
+   */
+  onOpenChange?: (open: boolean) => void;
   disabled?: boolean;
   className?: string;
   children: ReactNode;
@@ -77,6 +96,9 @@ export function Select({
   value,
   defaultValue,
   onValueChange,
+  open: openProp,
+  defaultOpen = false,
+  onOpenChange,
   disabled = false,
   className,
   children,
@@ -84,13 +106,23 @@ export function Select({
   const reduce = useReducedMotion() ?? false;
   const baseId = useId();
   const rootRef = useRef<HTMLDivElement>(null);
-  const [open, setOpen] = useState(false);
+  const [internalOpen, setInternalOpen] = useState(defaultOpen);
   const [internal, setInternal] = useState(defaultValue);
   const [labels, setLabels] = useState<Map<string, string>>(new Map());
   const [placement, setPlacement] = useState<Placement>("bottom");
 
   const controlled = value !== undefined;
   const current = controlled ? value : internal;
+  const openControlled = openProp !== undefined;
+  const open = openControlled ? openProp : internalOpen;
+
+  const setOpen = useCallback(
+    (next: boolean) => {
+      if (!openControlled) setInternalOpen(next);
+      onOpenChange?.(next);
+    },
+    [onOpenChange, openControlled],
+  );
 
   const select = useCallback(
     (next: string) => {
@@ -98,7 +130,7 @@ export function Select({
       onValueChange?.(next);
       setOpen(false);
     },
-    [controlled, onValueChange],
+    [controlled, onValueChange, setOpen],
   );
 
   const register = useCallback((v: string, label: string) => {
@@ -127,7 +159,7 @@ export function Select({
       window.removeEventListener("keydown", onKey);
       window.removeEventListener("pointerdown", onPointer);
     };
-  }, [open]);
+  }, [open, setOpen]);
 
   const ctx = useMemo<SelectContextValue>(
     () => ({
@@ -148,6 +180,7 @@ export function Select({
     [
       current,
       open,
+      setOpen,
       select,
       register,
       unregister,
@@ -280,6 +313,38 @@ export function SelectContent({ className, children }: SelectContentProps) {
     setPlacement(below < h + 16 && above > below ? "top" : "bottom");
   }, [open, ctx.triggerId, setPlacement]);
 
+  // LOCALLY MODIFIED: bring the chosen option into view when the panel opens.
+  //
+  // A caller that caps its list scrolls it — the schedule tab's time field holds
+  // 144 options — and the panel otherwise always opened at the top, so choosing
+  // 09:20 meant scrolling past most of the morning every time. Centred rather
+  // than merely scrolled to, so the neighbouring times are visible too.
+  //
+  // Written against whatever element actually scrolls (the caller supplies it,
+  // inside `children`) rather than assuming one, so a short list that needs no
+  // scrolling finds none and this does nothing.
+  useLayoutEffect(() => {
+    if (!open) return;
+    const node = innerRef.current;
+    const selected = node?.querySelector<HTMLElement>(
+      '[role="option"][aria-selected="true"]',
+    );
+    if (!node || !selected) return;
+
+    let scroller: HTMLElement | null = selected.parentElement;
+    while (scroller) {
+      if (scroller.scrollHeight > scroller.clientHeight + 1) break;
+      if (scroller === node) return;
+      scroller = scroller.parentElement;
+    }
+    if (!scroller) return;
+
+    const box = scroller.getBoundingClientRect();
+    const option = selected.getBoundingClientRect();
+    scroller.scrollTop +=
+      option.top - box.top - (box.height - option.height) / 2;
+  }, [open]);
+
   // Specify EVERY corner + both margins each render. The near edge (facing the
   // trigger) animates flat->round and the gap opens on that side; the far edge
   // stays rounded and its margin pinned to 0. Setting all of them avoids a
@@ -326,12 +391,17 @@ export function SelectContent({ className, children }: SelectContentProps) {
         ctx.reduce
           ? { duration: 0.12 }
           : {
-              opacity: open
-                ? { duration: 0.18 }
-                : { duration: 0.16, delay: 0.12 },
+              // LOCALLY MODIFIED: the closing panel used to wait (`delay: 0.12`
+              // / `0.14`) before collapsing, so for ~0.3s it still covered its
+              // neighbours. Where selects are stacked one per row — the schedule
+              // tab's seven days — moving between two of them left the old panel
+              // hanging over the rows while the new one opened, which reads as
+              // two dropdowns at once rather than as one closing. Closing now
+              // starts immediately; opening keeps the original choreography.
+              opacity: open ? { duration: 0.18 } : { duration: 0.12 },
               height: open
                 ? { type: "spring", duration: 0.42, bounce: 0.14 }
-                : { duration: 0.26, ease: EASE_OUT, delay: 0.14 },
+                : { duration: 0.16, ease: EASE_OUT },
               marginTop: isTop ? INSTANT_TRANSITION : gapT,
               marginBottom: isTop ? gapT : INSTANT_TRANSITION,
               borderTopLeftRadius: isTop ? INSTANT_TRANSITION : radiusT,

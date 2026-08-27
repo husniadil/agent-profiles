@@ -14,6 +14,7 @@ export const en = {
   // Tabs
   "tab.profiles": "Agent Profiles",
   "tab.keepAwake": "Keep Awake",
+  "tab.schedule": "Schedule",
   "tab.general": "General",
 
   // Status strip and its tooltip
@@ -206,4 +207,31 @@ export const en = {
   "general.update.installing": "Installing, then restarting…",
   "general.update.failed": "Could not update: {{reason}}",
   "general.update.disabled": "Turned off — no release is checked for.",
+
+  // Schedule
+  "schedule.band.unavailable": "Not available here",
+  "schedule.unsupported.generic": "Scheduled wake is only available on macOS.",
+  "schedule.enable.name": "Wake up the computer",
+  "schedule.days.legend": "Days & times",
+  "schedule.day.mon": "Monday",
+  "schedule.day.tue": "Tuesday",
+  "schedule.day.wed": "Wednesday",
+  "schedule.day.thu": "Thursday",
+  "schedule.day.fri": "Friday",
+  "schedule.day.sat": "Saturday",
+  "schedule.day.sun": "Sunday",
+  "schedule.day.off": "Off",
+  "schedule.day.toggleAria": "Toggle {{day}}",
+  "schedule.time.name": "Time",
+  "schedule.app.name": "App to launch",
+  "schedule.app.placeholder": "Choose an app",
+  "schedule.app.searchPlaceholder": "Search apps…",
+  "schedule.app.empty": "No apps found",
+  "schedule.caveat":
+    "Wakes the Mac and opens the app at each day's time, only if you're logged in — it wakes about a minute early and needs AC power. Wakes are scheduled a few weeks ahead, so open Agent Profiles now and then to keep them going.",
+  "schedule.copy.tooltip": "Copy times",
+  "schedule.copy.aria": "Copy {{day}} times to other days",
+  "schedule.copy.heading": "Copy times to",
+  "schedule.copy.everyDay": "Every day",
+  "schedule.copy.apply": "Apply",
 } as const;

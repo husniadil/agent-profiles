@@ -45,6 +45,7 @@ pub struct AppState {
     /// platform; inert where [`Platform::can_hold_awake`] is false.
     pub keep_awake: crate::keep_awake::Handle,
     pub general: crate::general::Handle,
+    pub schedule: crate::schedule::Handle,
 }
 
 impl AppState {
@@ -229,6 +230,7 @@ mod tests {
                 },
             ),
             general: crate::general::Handle::new(root.join("data"), None),
+            schedule: crate::schedule::Handle::new(root.join("data")),
         }
     }
 

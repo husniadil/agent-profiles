@@ -6,6 +6,7 @@ export const ja: Strings = {
   // Tabs
   "tab.profiles": "エージェントプロファイル",
   "tab.keepAwake": "スリープ防止",
+  "tab.schedule": "スケジュール",
   "tab.general": "一般",
 
   // Status strip and its tooltip
@@ -190,4 +191,31 @@ export const ja: Strings = {
   "general.update.installing": "インストール中、その後再起動します…",
   "general.update.failed": "更新できませんでした: {{reason}}",
   "general.update.disabled": "オフになっています — リリースは確認されません。",
+
+  // Schedule
+  "schedule.band.unavailable": "ここでは利用できません",
+  "schedule.unsupported.generic": "スケジュール起動は macOS でのみ利用できます。",
+  "schedule.enable.name": "コンピュータを復帰",
+  "schedule.days.legend": "曜日と時刻",
+  "schedule.day.mon": "月曜日",
+  "schedule.day.tue": "火曜日",
+  "schedule.day.wed": "水曜日",
+  "schedule.day.thu": "木曜日",
+  "schedule.day.fri": "金曜日",
+  "schedule.day.sat": "土曜日",
+  "schedule.day.sun": "日曜日",
+  "schedule.day.off": "オフ",
+  "schedule.day.toggleAria": "{{day}}を切り替え",
+  "schedule.time.name": "時刻",
+  "schedule.app.name": "起動するアプリ",
+  "schedule.app.placeholder": "アプリを選択",
+  "schedule.app.searchPlaceholder": "アプリを検索…",
+  "schedule.app.empty": "アプリが見つかりません",
+  "schedule.caveat":
+    "各曜日の時刻に Mac を復帰させ、ログイン中の場合のみアプリを起動します。約1分前に復帰し、AC電源が必要です。復帰は数週間先まで予約されるため、継続させるには時々 Agent Profiles を開いてください。",
+  "schedule.copy.tooltip": "時刻をコピー",
+  "schedule.copy.aria": "{{day}}の時刻を他の曜日にコピー",
+  "schedule.copy.heading": "時刻のコピー先",
+  "schedule.copy.everyDay": "毎日",
+  "schedule.copy.apply": "適用",
 } as const;

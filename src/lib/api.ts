@@ -121,6 +121,43 @@ export const releaseKeepAwakeForUpdate = () => invoke("release_keep_awake_for_up
 export const resumeKeepAwakeAfterFailedUpdate = () =>
   invoke("resume_keep_awake_after_failed_update");
 
+/// One weekday the schedule is turned on for, with its own launch time.
+/// `weekday` is Monday-first (0 = Monday … 6 = Sunday); `time` is a local
+/// "HH:MM". The Mac wakes one minute earlier than the time shown.
+export type DayWake = {
+  weekday: number;
+  time: string;
+};
+
+export type ScheduleSettings = {
+  enabled: boolean;
+  /// Only the weekdays the user turned on, each carrying its own time.
+  days: DayWake[];
+  /// Absolute .app path to open at the scheduled time (e.g. /Applications/Slack.app).
+  app_path: string;
+};
+
+export type ScheduleStatus = {
+  supported: boolean;
+  refusal: string | null;
+  settings: ScheduleSettings;
+};
+
+/// One installed application the schedule picker can choose. `icon` is a
+/// `data:image/png;base64,…` URI when the backend could read one, else null —
+/// the picker renders a fallback glyph in its place.
+export type InstalledApp = {
+  name: string;
+  path: string;
+  icon: string | null;
+};
+
+export const getSchedule = () => invoke<ScheduleStatus>("get_schedule");
+export const setSchedule = (settings: ScheduleSettings) =>
+  invoke<ScheduleStatus>("set_schedule", { settings });
+export const clearSchedule = () => invoke<ScheduleStatus>("clear_schedule");
+export const listApplications = () => invoke<InstalledApp[]>("list_applications");
+
 /// Kept in the same order as `Locale::ALL` in `general.rs`, which is the order
 /// the picker offers them in.
 export type Locale = "en" | "id" | "ja" | "de" | "es" | "pt";

@@ -4,6 +4,7 @@ export const es: Strings = {
   // Tabs
   "tab.profiles": "Perfiles de agente",
   "tab.keepAwake": "Mantener activo",
+  "tab.schedule": "Programación",
   "tab.general": "General",
 
   // Status strip and its tooltip
@@ -188,4 +189,31 @@ export const es: Strings = {
   "general.update.installing": "Instalando y reiniciando…",
   "general.update.failed": "No se pudo actualizar: {{reason}}",
   "general.update.disabled": "Desactivado — no se busca ninguna versión.",
+
+  // Schedule
+  "schedule.band.unavailable": "No disponible aquí",
+  "schedule.unsupported.generic": "La activación programada solo está disponible en macOS.",
+  "schedule.enable.name": "Despertar el equipo",
+  "schedule.days.legend": "Días y horas",
+  "schedule.day.mon": "Lunes",
+  "schedule.day.tue": "Martes",
+  "schedule.day.wed": "Miércoles",
+  "schedule.day.thu": "Jueves",
+  "schedule.day.fri": "Viernes",
+  "schedule.day.sat": "Sábado",
+  "schedule.day.sun": "Domingo",
+  "schedule.day.off": "Desactivado",
+  "schedule.day.toggleAria": "Alternar {{day}}",
+  "schedule.time.name": "Hora",
+  "schedule.app.name": "App a iniciar",
+  "schedule.app.placeholder": "Elige una app",
+  "schedule.app.searchPlaceholder": "Buscar apps…",
+  "schedule.app.empty": "No se encontraron apps",
+  "schedule.caveat":
+    "Despierta el Mac y abre la app a la hora de cada día, solo si has iniciado sesión: despierta aproximadamente un minuto antes y necesita corriente alterna. Las activaciones se programan con unas semanas de antelación, así que abre Agent Profiles de vez en cuando para mantenerlas.",
+  "schedule.copy.tooltip": "Copiar horas",
+  "schedule.copy.aria": "Copiar las horas de {{day}} a otros días",
+  "schedule.copy.heading": "Copiar horas a",
+  "schedule.copy.everyDay": "Todos los días",
+  "schedule.copy.apply": "Aplicar",
 } as const;
