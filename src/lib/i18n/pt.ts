@@ -50,7 +50,6 @@ export const pt: Strings = {
 
   // A profile row
   "profiles.empty": "Nenhum perfil ainda.",
-  "profiles.unavailable": "Não disponível: {{reason}}",
   "row.running": "Em execução",
   "row.sharedSignIn": "Login compartilhado",
   "row.open": "Abrir {{name}}",

@@ -63,12 +63,6 @@ export const en = {
 
   // A profile row
   "profiles.empty": "No profiles yet.",
-  // The frame around a reason the backend wrote. Only the frame is translated:
-  // the reason names a path or a command that differs by platform and by cause,
-  // and the side that did the looking is the only one that can say what it
-  // looked for. Without the frame this row would be the one English sentence in
-  // a translated list — it sits directly beside `profiles.empty`.
-  "profiles.unavailable": "Not available: {{reason}}",
   "row.running": "Running",
   "row.sharedSignIn": "Shared sign-in",
   "row.open": "Open {{name}}",
