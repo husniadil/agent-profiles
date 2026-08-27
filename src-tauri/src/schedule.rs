@@ -177,6 +177,12 @@ pub fn scan_applications(dirs: &[PathBuf]) -> Vec<InstalledApp> {
 /// Every three input bytes become four output characters; a final group of one
 /// or two bytes is padded with `=` in the usual way, so the output length is
 /// always a multiple of four. No line wrapping — a `data:` URI is a single run.
+///
+/// Only the macOS backend renders an icon to encode, so elsewhere this is unused
+/// by design rather than by mistake — hence the narrowed allow. It is still
+/// compiled and still tested on every platform, which is the point: the encoder
+/// is the half a mistake would hide in.
+#[cfg_attr(not(target_os = "macos"), allow(dead_code))]
 pub(crate) fn base64_encode(bytes: &[u8]) -> String {
     const ALPHABET: &[u8; 64] = b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
     let mut out = String::with_capacity(bytes.len().div_ceil(3) * 4);
@@ -222,7 +228,13 @@ pub struct WakePlan {
     /// own formatted datetimes — so they need no shell quoting beyond the double
     /// quotes the batch wraps them in.
     pub wake_datetimes: Vec<String>,
+    /// The LaunchAgent this plan installs. Only the macOS backend writes one —
+    /// everywhere else `refresh_launch_agent` is the defaulted refusal and never
+    /// reaches these, which is correct rather than an oversight, so the allow is
+    /// narrowed to the platforms where going unread is the honest outcome.
+    #[cfg_attr(not(target_os = "macos"), allow(dead_code))]
     pub plist_path: PathBuf,
+    #[cfg_attr(not(target_os = "macos"), allow(dead_code))]
     pub plist_xml: String,
 }
 
