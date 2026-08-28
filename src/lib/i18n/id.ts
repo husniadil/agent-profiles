@@ -195,6 +195,8 @@ export const id: Strings = {
   "schedule.band.unavailable": "Tidak tersedia di sini",
   "schedule.unsupported.generic": "Bangun terjadwal hanya tersedia di macOS.",
   "schedule.enable.name": "Bangunkan komputer",
+  "schedule.enable.hint":
+    "Membangunkan Mac yang tidur, baik dengan daya AC maupun baterai. Mac yang benar-benar dimatikan akan tetap mati — menyalakannya kembali tidak dapat diandalkan bahkan saat tercolok, jadi ini tidak mencobanya.",
   "schedule.days.legend": "Hari & waktu",
   "schedule.day.mon": "Senin",
   "schedule.day.tue": "Selasa",

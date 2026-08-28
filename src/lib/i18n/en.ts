@@ -206,6 +206,8 @@ export const en = {
   "schedule.band.unavailable": "Not available here",
   "schedule.unsupported.generic": "Scheduled wake is only available on macOS.",
   "schedule.enable.name": "Wake up the computer",
+  "schedule.enable.hint":
+    "Wakes a sleeping Mac on AC power or battery. A fully shut-down Mac stays off — powering one back on isn't reliable even plugged in, so this doesn't attempt it.",
   "schedule.days.legend": "Days & times",
   "schedule.day.mon": "Monday",
   "schedule.day.tue": "Tuesday",

@@ -193,6 +193,8 @@ export const es: Strings = {
   "schedule.band.unavailable": "No disponible aquí",
   "schedule.unsupported.generic": "La activación programada solo está disponible en macOS.",
   "schedule.enable.name": "Despertar el equipo",
+  "schedule.enable.hint":
+    "Despierta un Mac dormido, ya sea con corriente alterna o con batería. Un Mac completamente apagado permanece apagado: encenderlo de nuevo no es fiable ni siquiera enchufado, así que no se intenta.",
   "schedule.days.legend": "Días y horas",
   "schedule.day.mon": "Lunes",
   "schedule.day.tue": "Martes",

@@ -193,6 +193,8 @@ export const de: Strings = {
   "schedule.band.unavailable": "Hier nicht verfügbar",
   "schedule.unsupported.generic": "Geplantes Aufwecken ist nur unter macOS verfügbar.",
   "schedule.enable.name": "Computer aufwecken",
+  "schedule.enable.hint":
+    "Weckt einen schlafenden Mac auf, im Netzbetrieb wie im Akkubetrieb. Ein vollständig heruntergefahrener Mac bleibt aus — ihn wieder einzuschalten ist selbst am Netzteil nicht zuverlässig, daher wird es nicht versucht.",
   "schedule.days.legend": "Tage & Zeiten",
   "schedule.day.mon": "Montag",
   "schedule.day.tue": "Dienstag",

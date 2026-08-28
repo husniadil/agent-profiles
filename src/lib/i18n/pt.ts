@@ -193,6 +193,8 @@ export const pt: Strings = {
   "schedule.band.unavailable": "Não disponível aqui",
   "schedule.unsupported.generic": "A ativação agendada só está disponível no macOS.",
   "schedule.enable.name": "Despertar o computador",
+  "schedule.enable.hint":
+    "Acorda um Mac adormecido, seja na energia CA ou na bateria. Um Mac totalmente desligado permanece desligado — ligá-lo de novo não é confiável mesmo conectado, então isso não é tentado.",
   "schedule.days.legend": "Dias e horários",
   "schedule.day.mon": "Segunda",
   "schedule.day.tue": "Terça",

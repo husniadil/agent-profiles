@@ -195,6 +195,8 @@ export const ja: Strings = {
   "schedule.band.unavailable": "ここでは利用できません",
   "schedule.unsupported.generic": "スケジュール起動は macOS でのみ利用できます。",
   "schedule.enable.name": "コンピュータを復帰",
+  "schedule.enable.hint":
+    "スリープ中の Mac を、AC電源でもバッテリーでも復帰させます。完全にシャットダウンした Mac はそのまま起動しません — 電源につないでいても再起動は信頼できないため、試みません。",
   "schedule.days.legend": "曜日と時刻",
   "schedule.day.mon": "月曜日",
   "schedule.day.tue": "火曜日",

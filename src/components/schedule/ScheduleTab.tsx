@@ -166,15 +166,24 @@ export function ScheduleTab({ schedule }: { schedule: Schedule }) {
         </div>
       ) : (
         <>
-          <div className={`flex items-center justify-between gap-2 ${CARD}`}>
-            <span className="text-callout font-medium">{t("schedule.enable.name")}</span>
-            <Switch
-              className={`shrink-0 ${SWITCH}`}
-              checked={s.enabled}
-              disabled={schedule.busy}
-              onCheckedChange={(next) => write({ enabled: next })}
-              ariaLabel={t("schedule.enable.name")}
-            />
+          <div className={CARD}>
+            <div className="flex items-center justify-between gap-2">
+              <span className="text-callout font-medium">{t("schedule.enable.name")}</span>
+              <Switch
+                className={`shrink-0 ${SWITCH}`}
+                checked={s.enabled}
+                disabled={schedule.busy}
+                onCheckedChange={(next) => write({ enabled: next })}
+                ariaLabel={t("schedule.enable.name")}
+              />
+            </div>
+            {/* Right under the switch it turns on, not only in the caveat at the
+                foot of the tab: whether AC or battery is enough to wake the Mac,
+                versus a shutdown neither can recover from, is the thing someone
+                decides this switch on. */}
+            <p className="mt-1 text-sub text-ink-2">
+              {t("schedule.enable.hint")}
+            </p>
           </div>
 
           {/* Gated on the master switch: a day or an app picked while it is off
