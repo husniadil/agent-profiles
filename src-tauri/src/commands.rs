@@ -6,6 +6,7 @@ use crate::profile_store::{Profile, ProfileStore};
 use crate::runtime::{AppRuntime, AppState};
 use serde::Serialize;
 use std::path::Path;
+use tauri::Manager;
 
 /// Matches `identifier` in `tauri.conf.json`; used to name the LaunchAgent.
 const BUNDLE_ID: &str = "com.husniadil.agent-profiles";
@@ -566,21 +567,48 @@ pub fn get_schedule(state: tauri::State<AppState>) -> crate::schedule::Status {
 
 #[tauri::command]
 pub fn set_schedule(
+    app: tauri::AppHandle,
     state: tauri::State<AppState>,
     settings: crate::schedule::Settings,
 ) -> Result<crate::schedule::Status, String> {
-    apply_schedule(&state, settings).map_err(|e| e.to_string())?;
+    let result = apply_schedule(&state, settings).map_err(|e| e.to_string());
+    refocus_main_window(&app);
+    result?;
     Ok(schedule_status(&state))
 }
 
 #[tauri::command]
-pub fn clear_schedule(state: tauri::State<AppState>) -> Result<crate::schedule::Status, String> {
+pub fn clear_schedule(
+    app: tauri::AppHandle,
+    state: tauri::State<AppState>,
+) -> Result<crate::schedule::Status, String> {
     // Persist a disabled schedule and tear down the OS side. Reuses the same
     // path `set_schedule` takes with `enabled = false`.
     let mut off = state.schedule.settings();
     off.enabled = false;
-    apply_schedule(&state, off).map_err(|e| e.to_string())?;
+    let result = apply_schedule(&state, off).map_err(|e| e.to_string());
+    refocus_main_window(&app);
+    result?;
     Ok(schedule_status(&state))
+}
+
+/// Brings the settings window back in front of whatever was there before, after
+/// a command that may have shown the OS administrator-password prompt.
+///
+/// `osascript`'s `with administrator privileges` dialog belongs to a different
+/// process, and this app runs as an accessory (no Dock icon, see
+/// `ActivationPolicy::Accessory` in `lib.rs`) — when that dialog closes, macOS
+/// does not reliably hand focus back to an accessory app the way it would a
+/// regular one, so the window that asked for the password can end up sitting
+/// behind whatever was frontmost before it appeared. Called unconditionally
+/// rather than only on the branches that actually prompt: the settings window is
+/// already focused the rest of the time, so re-asserting it is a no-op there,
+/// and that is far simpler than threading "did this actually prompt" out of
+/// every caller.
+fn refocus_main_window(app: &tauri::AppHandle) {
+    if let Some(window) = app.get_webview_window("main") {
+        let _ = window.set_focus();
+    }
 }
 
 #[tauri::command]
@@ -722,6 +750,7 @@ pub fn rearm_if_due(state: &AppState) {
 /// button that has already explained what it is for.
 #[tauri::command]
 pub fn authorize_keep_awake(
+    app: tauri::AppHandle,
     state: tauri::State<AppState>,
 ) -> Result<crate::keep_awake::Status, String> {
     let handle = &state.keep_awake;
@@ -737,7 +766,7 @@ pub fn authorize_keep_awake(
     // user's own. It is forgotten only once a loop is running with it.
     let reclaimed_prior = handle.reclaimed_prior();
 
-    state
+    let result = state
         .platform
         .start_awake_watchdog(&crate::platform::Watchdog {
             flag: &flag,
@@ -745,7 +774,9 @@ pub fn authorize_keep_awake(
             reclaimed_prior,
             app_pid: std::process::id(),
         })
-        .map_err(|e| e.to_string())?;
+        .map_err(|e| e.to_string());
+    refocus_main_window(&app);
+    result?;
 
     handle.clear_reclaimed_prior();
     handle.mark_authorized();
@@ -778,9 +809,14 @@ pub fn authorize_keep_awake(
 /// `tauri::State`. That is not tidiness: the invariant this used to lean on was
 /// asserted by a test that could not have observed it failing.
 #[tauri::command]
-pub fn restore_sleep(state: tauri::State<AppState>) -> Result<crate::keep_awake::Status, String> {
-    crate::keep_awake::restore(&state.keep_awake, state.platform.as_ref())
-        .map_err(|e| e.to_string())?;
+pub fn restore_sleep(
+    app: tauri::AppHandle,
+    state: tauri::State<AppState>,
+) -> Result<crate::keep_awake::Status, String> {
+    let result = crate::keep_awake::restore(&state.keep_awake, state.platform.as_ref())
+        .map_err(|e| e.to_string());
+    refocus_main_window(&app);
+    result?;
     Ok(state.keep_awake.status())
 }
 
