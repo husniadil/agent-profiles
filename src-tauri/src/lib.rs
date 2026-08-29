@@ -247,14 +247,26 @@ pub fn run() {
 
             if let Some(state) = app.try_state::<AppState>() {
                 tray::sync_identities(&state);
-                // Keep the one-off wakes from lapsing. A per-weekday schedule is
-                // armed as a horizon of individual `pmset` events; this re-arms the
-                // next horizon once the buffer has run low, which is the only thing
-                // that asks for the password — and then only every several weeks,
-                // never on an ordinary launch.
-                commands::rearm_if_due(&state);
             }
             tray::rebuild(app.handle())?;
+
+            // Keep the one-off wakes from lapsing. A per-weekday schedule is armed
+            // as a horizon of individual `pmset` events; this re-arms the next
+            // horizon once the buffer has run low, which is the only thing that
+            // asks for the password — and then only every several weeks, never on
+            // an ordinary launch. Off the startup path and after the tray is
+            // already up: the password prompt this can trigger must never be why
+            // the tray icon is still missing.
+            // ponytail: the prompt still arrives with no more context than macOS's
+            // own "wants to make changes" dialog — a notification that tells the
+            // user why before osascript asks would close that gap, add one if a
+            // cold prompt turns out to confuse people.
+            let rearm_handle = app.handle().clone();
+            std::thread::spawn(move || {
+                if let Some(state) = rearm_handle.try_state::<AppState>() {
+                    commands::rearm_if_due(&state);
+                }
+            });
             Ok(())
         })
         .build(tauri::generate_context!());
