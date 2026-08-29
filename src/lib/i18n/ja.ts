@@ -215,6 +215,9 @@ export const ja: Strings = {
   "schedule.app.empty": "アプリが見つかりません",
   "schedule.caveat":
     "各曜日の時刻に、スリープ中の Mac を復帰させ、ログイン中の場合のみアプリを起動します(画面がロックされていても該当しますが、実際にログアウトしている場合は該当しません)。約1分前に復帰し、バッテリーでも動作しますが、完全にシャットダウンしている Mac はそのまま起動しません。またふたを閉じている場合、外部ディスプレイがないとアプリは実際には開きません。復帰は数週間先まで予約されるため、継続させるには時々 Agent Profiles を開いてください。",
+  "schedule.coverage.armed": "今後 {{days}} 日分の復帰が予約されています。",
+  "schedule.coverage.none":
+    "まだ予約されていません — このスケジュールを保存すると最初の復帰が予約されます。",
   "schedule.copy.tooltip": "時刻をコピー",
   "schedule.copy.aria": "{{day}}の時刻を他の曜日にコピー",
   "schedule.copy.heading": "時刻のコピー先",

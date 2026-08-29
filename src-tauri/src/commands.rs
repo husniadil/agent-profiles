@@ -637,6 +637,10 @@ fn schedule_status(state: &AppState) -> crate::schedule::Status {
             Some("Scheduled wake is only available on macOS.".to_string())
         },
         settings: state.schedule.settings(),
+        coverage_days: crate::schedule::coverage_days_remaining(
+            &state.schedule.installed_wakes(),
+            chrono::Local::now(),
+        ),
     }
 }
 

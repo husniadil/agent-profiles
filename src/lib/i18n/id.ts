@@ -215,6 +215,9 @@ export const id: Strings = {
   "schedule.app.empty": "Aplikasi tidak ditemukan",
   "schedule.caveat":
     "Membangunkan Mac yang tidur dan membuka aplikasi pada waktu setiap hari, hanya jika Anda masih masuk — layar terkunci masih terhitung, hanya benar-benar keluar (logout) yang tidak — Mac bangun sekitar satu menit lebih awal dan bisa bekerja dengan baterai, tetapi Mac yang benar-benar dimatikan akan tetap mati, dan jika layar tertutup, aplikasi memerlukan monitor eksternal agar benar-benar terbuka. Bangun dijadwalkan beberapa minggu ke depan, jadi buka Agent Profiles sesekali agar tetap berjalan.",
+  "schedule.coverage.armed": "Bangun terjadwal untuk {{days}} hari ke depan.",
+  "schedule.coverage.none":
+    "Belum terjadwal — simpan jadwal ini untuk menjadwalkan kelompok bangun pertama.",
   "schedule.copy.tooltip": "Salin waktu",
   "schedule.copy.aria": "Salin waktu {{day}} ke hari lain",
   "schedule.copy.heading": "Salin waktu ke",

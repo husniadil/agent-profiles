@@ -224,6 +224,12 @@ pub struct Status {
     /// Why the feature cannot be offered here, if it cannot.
     pub refusal: Option<String>,
     pub settings: Settings,
+    /// Days of already-armed one-off wakes remaining, from
+    /// [`coverage_days_remaining`] — `None` while disabled, unsupported, or
+    /// nothing is installed yet. Per-day times cost this horizon instead of a
+    /// permanent `pmset repeat` slot, so the tab says so rather than letting the
+    /// wakes lapse silently.
+    pub coverage_days: Option<i64>,
 }
 
 /// Everything the macOS backend needs to install the schedule, built by
@@ -393,15 +399,32 @@ pub fn build_wake_plan(
 /// that buffer has drained to `min_days`.
 pub fn coverage_is_low(installed: &[String], now: DateTime<Local>, min_days: i64) -> bool {
     let threshold = now + Duration::days(min_days);
-    match installed
+    match furthest_wake(installed, now) {
+        Some(latest) => latest <= threshold,
+        None => true,
+    }
+}
+
+/// The furthest-out installed wake still ahead of `now`, or `None` if nothing
+/// installed remains in the future.
+fn furthest_wake(installed: &[String], now: DateTime<Local>) -> Option<DateTime<Local>> {
+    installed
         .iter()
         .filter_map(|s| parse_pmset_datetime(s))
         .filter(|dt| *dt > now)
         .max()
-    {
-        Some(latest) => latest <= threshold,
-        None => true,
-    }
+}
+
+/// How many days of armed one-off wakes remain, for the tab to say so before
+/// the buffer runs dry rather than after — the whole reason per-day times cost
+/// a horizon instead of a permanent `pmset repeat` slot. `None` when nothing is
+/// installed: disabled, unsupported, or the `schedule_applied` record was
+/// lost, in which case the tab has nothing honest to report either way.
+pub fn coverage_days_remaining(installed: &[String], now: DateTime<Local>) -> Option<i64> {
+    // Calendar days, not a 24-hour duration: "40 days" should mean the
+    // fortieth day from today regardless of what time of day `now` is, not
+    // fluctuate between 39 and 40 depending on the hour someone opens the tab.
+    furthest_wake(installed, now).map(|latest| (latest.date_naive() - now.date_naive()).num_days())
 }
 
 /// The live settings, mirroring [`crate::general::Handle`]: the file is the
@@ -561,6 +584,22 @@ mod tests {
         // Only past wakes remain (none still in the future) — re-arm.
         let past = vec![pmset_datetime(at(2026, 1, 3, 9, 0))];
         assert!(coverage_is_low(&past, now, 14));
+    }
+
+    #[test]
+    fn coverage_days_remaining_counts_to_the_furthest_future_wake() {
+        let now = at(2026, 1, 5, 12, 0);
+
+        let installed = vec![
+            pmset_datetime(at(2026, 1, 10, 9, 0)),
+            pmset_datetime(at(2026, 2, 14, 9, 0)),
+        ];
+        assert_eq!(coverage_days_remaining(&installed, now), Some(40));
+
+        // Nothing installed, or only past wakes: nothing to report.
+        assert_eq!(coverage_days_remaining(&[], now), None);
+        let past = vec![pmset_datetime(at(2026, 1, 3, 9, 0))];
+        assert_eq!(coverage_days_remaining(&past, now), None);
     }
 
     #[test]

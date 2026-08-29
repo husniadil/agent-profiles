@@ -141,6 +141,10 @@ export type ScheduleStatus = {
   supported: boolean;
   refusal: string | null;
   settings: ScheduleSettings;
+  /// Days of already-armed one-off wakes left, or null while disabled,
+  /// unsupported, or nothing is installed yet — per-day times cost this
+  /// horizon instead of a permanent OS-level slot, so the tab says so.
+  coverage_days: number | null;
 };
 
 /// One installed application the schedule picker can choose. `icon` is a

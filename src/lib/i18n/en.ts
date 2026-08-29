@@ -231,6 +231,9 @@ export const en = {
   "schedule.app.empty": "No apps found",
   "schedule.caveat":
     "Wakes a sleeping Mac and opens the app at each day's time, only if you're logged in — a locked screen still counts, only actually being logged out doesn't — it wakes about a minute early and works on battery, but a Mac that's fully shut down stays off, and a closed lid needs an external display for the app to actually open. Wakes are scheduled a few weeks ahead, so open Agent Profiles now and then to keep them going.",
+  "schedule.coverage.armed": "Wakes are armed for the next {{days}} days.",
+  "schedule.coverage.none":
+    "Not armed yet — save this schedule to arm the first batch of wakes.",
   "schedule.copy.tooltip": "Copy times",
   "schedule.copy.aria": "Copy {{day}} times to other days",
   "schedule.copy.heading": "Copy times to",

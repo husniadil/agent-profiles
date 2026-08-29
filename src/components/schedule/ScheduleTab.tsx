@@ -266,6 +266,16 @@ export function ScheduleTab({ schedule }: { schedule: Schedule }) {
           </div>
 
           <p className="mt-1 text-sub text-ink-2">{t("schedule.caveat")}</p>
+          {/* Per-day times cost a horizon of one-off wakes instead of a
+              permanent OS-level slot (see schedule.rs::coverage_days_remaining).
+              Said plainly rather than letting the buffer run out silently. */}
+          {s.enabled && (
+            <p className="text-sub text-ink-2">
+              {status.coverage_days !== null
+                ? t("schedule.coverage.armed", { days: status.coverage_days })
+                : t("schedule.coverage.none")}
+            </p>
+          )}
         </>
       )}
     </section>
