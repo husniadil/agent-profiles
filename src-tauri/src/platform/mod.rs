@@ -31,17 +31,19 @@ pub const DATA_DIR_NAME: &str = "Agent Profiles";
 /// Our own directory name, where a slug is conventional (Linux, window classes).
 pub const DATA_DIR_SLUG: &str = "agent-profiles";
 
-/// Why an app cannot be used, at the two lengths the two surfaces used to
-/// afford — `summary` dropped the path for the tray's row, `detail` kept it for
-/// the window's. Neither surface shows either string any more: an app that
-/// cannot be used simply does not appear, tray or window. `unavailable` is now
-/// read only as `Some`-or-`None`. Both fields stay because `summary` is still
-/// exercised by tests that pin the shorter form's shape, and collapsing the
-/// type is a bigger change than the one asked for.
+/// Why an app cannot be used, at the two lengths the two surfaces can afford.
+///
+/// The same fact, told twice. `detail` is the whole of it, path included, and is
+/// what the window shows: the path we looked at is the fastest way for someone
+/// who *has* the app to see why it is not being found. `summary` drops the path
+/// and is what the tray shows, because a menu is as wide as its widest row —
+/// seven declared apps on macOS means a stock path of up to 96 characters
+/// setting the width of every profile row above it.
 ///
 /// Carried as an error so the shape survives `Result`: `Display` renders
 /// `detail`, so every caller that only launches and reports still says exactly
-/// what it said before.
+/// what it said before, and only the callers that ask *why* have to know there
+/// are two lengths.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Unavailable {
     pub summary: String,

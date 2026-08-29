@@ -121,9 +121,19 @@ export function ProfileList({
   const content = useRef<HTMLDivElement>(null);
   useFitWindowToContent(scroller, content);
 
-  // The same count the tray heads its menu on: with one app installed the list
-  // is simply the list.
-  const headed = apps.length > 1;
+  // Apps that work first, their reasons after — the order the tray builds its
+  // rows in. Interleaving them by registry position would put "Claude Desktop
+  // is not installed" above the ChatGPT profiles in one surface and below them
+  // in the other, for the same machine.
+  const ordered = [
+    ...apps.filter((app) => !app.unavailable),
+    ...apps.filter((app) => app.unavailable),
+  ];
+  // The same count the tray heads its menu on: an app that cannot be used
+  // brings no rows to tell apart from anyone else's, and its own sentence names
+  // its product. Counting it would give someone with one app installed seven
+  // headed sections where the tray gives them a flat list.
+  const headed = apps.filter((app) => !app.unavailable).length > 1;
 
   return (
     // The frame takes the height the window has left and clips to its own
@@ -142,10 +152,12 @@ export function ProfileList({
         {/* Natural height, never stretched: this is what the window is sized to
             match, so it must report the content's height and not the scroller's. */}
         <div ref={content} data-fit-content>
-          {apps.map((app, index) => (
+          {ordered.map((app, index) => (
           <section key={app.id} className={index > 0 ? "mt-1" : undefined}>
-            {/* A heading only earns its space once there is a second app to
-                tell apart. With one app installed the list is simply the list. */}
+            {/* A heading only earns its space once there is a second *usable*
+                app to tell apart. With one app installed the list is simply the
+                list, and an app that cannot be used names its own product in
+                its sentence, so it needs no heading over it either. */}
             {headed ? (
               <div className="flex items-center gap-2 px-2 pt-1.5 pb-0.5">
                 {/* Sentence case, no tracking. The typeface was always the
@@ -160,18 +172,50 @@ export function ProfileList({
                 <span aria-hidden="true" className="h-px flex-1 bg-hairline" />
               </div>
             ) : null}
-            <Rows
-              app={app}
-              sizes={sizes}
-              reload={reload}
-              onError={onError}
-              clearError={clearError}
-            />
+            {app.unavailable ? (
+              <Unavailable reason={app.unavailable} />
+            ) : (
+              <Rows
+                app={app}
+                sizes={sizes}
+                reload={reload}
+                onError={onError}
+                clearError={clearError}
+              />
+            )}
           </section>
           ))}
         </div>
       </div>
     </div>
+  );
+}
+
+/// An app this tool knows about but cannot use, saying why.
+///
+/// Greyed rather than hidden: an app that simply disappears is indistinguishable
+/// from one this tool never supported, and the profiles under it are not gone —
+/// they come back the moment the app is installed.
+///
+/// The reason stays the backend's words: it differs by platform and by cause —
+/// a binary missing from `/Applications`, a command absent from `PATH`, a
+/// registry that could not be read — and that is the only side that knows what
+/// it looked for and where. What it cannot do is stand alone, because this row
+/// occupies the same slot and the same classes as the translated "no profiles
+/// yet" line directly below: the same visual row would be Indonesian for an
+/// empty app and English for a missing one, which reads as the one sentence the
+/// app forgot to translate. So the frame is translated and the reason is
+/// quoted inside it, the way `AwakeStatusCard` sets a verbatim backend error
+/// inside a translated band.
+function Unavailable({ reason }: { reason: string }) {
+  const t = useT();
+  return (
+    // `ink-2`, not the fainter `ink-3`: this row is quiet because it offers
+    // nothing to do, not because it is less worth reading — a sentence set below
+    // the contrast floor is one nobody can act on.
+    <p className="px-2 py-1.5 text-callout text-ink-2">
+      {t("profiles.unavailable", { reason })}
+    </p>
   );
 }
 

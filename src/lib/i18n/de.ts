@@ -50,6 +50,7 @@ export const de: Strings = {
 
   // A profile row
   "profiles.empty": "Noch keine Profile.",
+  "profiles.unavailable": "Nicht verfügbar: {{reason}}",
   "row.running": "Aktiv",
   "row.sharedSignIn": "Gemeinsame Anmeldung",
   "row.open": "{{name}} öffnen",

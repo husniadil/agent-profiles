@@ -121,10 +121,11 @@ pub struct MenuRow {
 pub struct AppSection {
     pub spec: &'static AppSpec,
     pub profiles: Vec<Profile>,
-    /// Why this app cannot be used, if it cannot. An app that carries this
-    /// contributes no rows anywhere — the tray menu and the settings window
-    /// both simply omit it, the same way they would an app this tool never
-    /// heard of. See [`Unavailable`].
+    /// Why this app cannot be used, if it cannot. It contributes no profile rows
+    /// — there is nothing to launch — but it does contribute one greyed row
+    /// carrying this reason, so an app the tool knows about is never silently
+    /// missing from the menu. The menu takes the short form of it; see
+    /// [`Unavailable`].
     pub unavailable: Option<Unavailable>,
 }
 
@@ -221,6 +222,28 @@ pub fn menu_rows(
                 text: format!("{}{suffix}", profile.label),
                 enabled: enabled && action != "running",
                 running: pid.is_some(),
+            });
+        }
+    }
+
+    // An app that cannot be used says so, always — beside a working app as much
+    // as alone. Dropping the row left someone who expected two apps with no way
+    // to tell "not installed" from "this tool forgot about it", and it is the
+    // absence itself that is worth naming, not an error. The row is disabled and
+    // dotless: it is a sentence about the app, with nothing to click.
+    //
+    // The short form, never the detail: a menu is as wide as its widest row, so
+    // one stock path here sets the width of every profile row above it, and on
+    // macOS a user with one of the seven declared apps installed would get six
+    // of them. The path is not lost — the window shows it, where the width is
+    // not shared with anything.
+    for section in sections {
+        if let Some(reason) = &section.unavailable {
+            rows.push(MenuRow {
+                id: format!("error:{}", section.spec.id),
+                text: reason.summary.clone(),
+                enabled: false,
+                running: false,
             });
         }
     }
@@ -579,14 +602,52 @@ mod tests {
         assert!(rows.iter().all(|r| !r.text.starts_with(' ')));
     }
 
+    /// An NSMenu is as wide as its widest row, so the reason a tray row carries
+    /// sets the width of every profile row above it. A macOS user with one of
+    /// the seven declared apps installed gets six of these rows, and the longest
+    /// stock path among them runs to 96 characters — enough to stretch the menu
+    /// to roughly 700px and push the profile labels away from the pointer. The
+    /// tray names the product and stops; the window, which is not
+    /// width-constrained, keeps the path.
     #[test]
-    fn an_app_that_is_not_installed_produces_no_row_beside_a_working_one() {
+    fn the_tray_reason_names_the_product_and_leaves_the_path_to_the_window() {
         let sections = vec![
             section(&app_spec::CLAUDE, profiles(&["Kerja"])),
             missing(&app_spec::CODEX),
         ];
         let rows = menu_rows(&sections, &[], None, crate::general::Locale::En);
-        assert!(rows.iter().all(|r| !r.id.contains("codex")));
+        let row = rows
+            .iter()
+            .find(|r| r.id == "error:codex")
+            .expect("an uninstalled app says why, it does not vanish");
+        assert!(
+            row.text.contains(app_spec::CODEX.product),
+            "the row is useless if it does not say which app it is about: {}",
+            row.text
+        );
+        assert!(
+            !row.text.contains('/'),
+            "a filesystem path in a tray row widens every other row: {}",
+            row.text
+        );
+    }
+
+    #[test]
+    fn an_app_that_is_not_installed_is_greyed_with_its_reason_beside_a_working_one() {
+        let sections = vec![
+            section(&app_spec::CLAUDE, profiles(&["Kerja"])),
+            missing(&app_spec::CODEX),
+        ];
+        let rows = menu_rows(&sections, &[], None, crate::general::Locale::En);
+        let row = rows
+            .iter()
+            .find(|r| r.id == "error:codex")
+            .expect("an uninstalled app says why, it does not vanish");
+        assert!(!row.enabled, "the reason is a label, not an action");
+        assert!(row.text.contains("ChatGPT"));
+        assert!(!row.running, "an app that cannot launch carries no dot");
+        // Naming it is the whole of what it offers: nothing about it is clickable.
+        assert!(rows.iter().all(|r| !r.id.contains(":codex:")));
         // The app that does work is untouched by the other's absence.
         assert!(rows.iter().any(|r| r.id == "launch:claude:id0"));
     }
@@ -643,10 +704,13 @@ mod tests {
     }
 
     #[test]
-    fn when_nothing_is_installed_the_menu_has_no_app_rows() {
+    fn when_nothing_is_installed_every_reason_is_shown() {
         let sections = vec![missing(&app_spec::CLAUDE), missing(&app_spec::CODEX)];
         let rows = menu_rows(&sections, &[], None, crate::general::Locale::En);
-        assert!(rows.is_empty());
+        assert_eq!(rows.len(), 2);
+        assert!(rows.iter().all(|r| !r.enabled));
+        assert!(rows.iter().any(|r| r.text.contains("Claude Desktop")));
+        assert!(rows.iter().any(|r| r.text.contains("ChatGPT")));
     }
 
     #[test]
