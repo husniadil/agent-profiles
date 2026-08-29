@@ -665,9 +665,10 @@ fn same_wake_set(a: &[String], b: &[String]) -> bool {
 /// prompts; changing only which app launches rewrites the password-free
 /// LaunchAgent and leaves the wakes alone; re-saving the same days and times does
 /// nothing privileged. Order matters: the privileged `set_wakes` step runs before
-/// the installed-wakes record is updated, so a cancelled prompt (the step returns
-/// `Err`) leaves both the stored schedule and the record untouched and the tab
-/// never claims a wake the machine will not honour.
+/// the password-free `refresh_launch_agent` step, so a cancelled prompt (the step
+/// returns `Err`) leaves launchd, the stored schedule, and the installed-wakes
+/// record all untouched — the tab never claims a wake the machine will not
+/// honour, and the machine never honours a wake the tab does not claim.
 fn apply_schedule(state: &AppState, settings: crate::schedule::Settings) -> anyhow::Result<()> {
     if !state.platform.can_schedule_wake() {
         // Nothing to install here; remember the intent so a future macOS run
@@ -690,9 +691,6 @@ fn apply_schedule(state: &AppState, settings: crate::schedule::Settings) -> anyh
 
     match desired {
         Some(plan) => {
-            // Always rewrite the LaunchAgent (no password): the launch times or
-            // the launched app may have changed even when the wake set has not.
-            state.platform.refresh_launch_agent(&plan)?;
             if same_wake_set(&installed, &plan.wake_datetimes) {
                 // The exact same wakes are already armed — an app-only edit, or a
                 // no-op save. Nothing privileged, no prompt, record left as-is.
@@ -700,6 +698,10 @@ fn apply_schedule(state: &AppState, settings: crate::schedule::Settings) -> anyh
                 state.platform.set_wakes(&installed, &plan.wake_datetimes)?;
                 state.schedule.set_installed_wakes(&plan.wake_datetimes)?;
             }
+            // Only after the privileged step above succeeded, or was not needed:
+            // a cancelled prompt must not leave launchd holding a schedule this
+            // function is about to fail out of and never record.
+            state.platform.refresh_launch_agent(&plan)?;
         }
         None => {
             // Disabled, no days, or no app: tear the OS side down. Only prompt if
