@@ -73,6 +73,14 @@ Agent Profiles holds that flag while an agent is working and gives it back when 
 
 **One thing worth knowing.** The flag file lives in your own Application Support folder and is writable by anything running as you, so any process of yours could pin the machine awake. This is not a privilege boundary — Agent Profiles runs as you — and the worst it costs is a flat battery, not root.
 
+## Wake and open an app on a schedule
+
+The **Schedule** tab wakes a sleeping Mac and opens a chosen application at each day's own time — Slack, a browser, anything in `/Applications`. It is not scoped to agent profiles: this is a general "wake the machine and open something" tool, not a way to launch a profile specifically (profiles already have their own launch path elsewhere in the app).
+
+Turn on the master switch, pick which weekdays are active and what time each one wakes at, and choose the app to open. It works whether the Mac is on AC power or battery, wakes about a minute early, and needs you logged in — a locked screen still counts, only actually being logged out doesn't. A fully shut-down Mac stays off; a closed lid needs an external display for the app to actually open.
+
+Per-day times mean this cannot use macOS's built-in repeating wake, which only holds one time for all its days — instead it schedules a rolling batch of one-off wakes a few weeks ahead and tops the batch up automatically. The tab shows how many days of wakes are currently armed, and if you go long enough without opening Agent Profiles, that number reaches zero and wakes stop until you open it again.
+
 ## Updating
 
 Agent Profiles updates itself silently by default: once per launch it checks this repository's own GitHub releases, and if a newer one exists it downloads, installs and relaunches with no dialog in between. The switch — **Update automatically** — lives in the General tab, alongside the version currently installed, a **Check now** button for running the same check on demand, and a status line reporting exactly what it is doing. Turning it off is a real off: no request to GitHub is made at any point, not a check whose result is discarded.
