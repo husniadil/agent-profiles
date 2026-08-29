@@ -278,11 +278,13 @@ pub fn upcoming_wakes(
         while date <= end_date {
             if date.weekday() == target {
                 if let Some(naive) = date.and_hms_opt(u32::from(h), u32::from(m), 0) {
-                    // A spring-forward gap makes the wall-clock time nonexistent
-                    // (`.earliest()` is `None`); a fall-back overlap makes it
-                    // ambiguous, and the earlier of the two instants is the right
-                    // one to wake at. Either way this is safe — the wake is a
-                    // little early at worst, and launchd fires on wall-clock time.
+                    // A fall-back overlap makes the wall-clock time ambiguous, and
+                    // the earlier of the two instants is the right one to wake at
+                    // — `.earliest()` covers that case safely. A spring-forward
+                    // gap makes the wall-clock time nonexistent instead: there is
+                    // no instant to prefer, `.earliest()` is `None`, and that
+                    // day's occurrence is simply dropped for the one week the gap
+                    // falls on, rather than firing early or late.
                     if let Some(dt) = naive.and_local_timezone(Local).earliest() {
                         if dt > now && dt <= end {
                             out.push(dt);
@@ -435,6 +437,15 @@ impl Handle {
 
     /// The one-off wake datetimes currently installed, one per line, in the
     /// `pmset` format. Empty file or no file means nothing is installed.
+    ///
+    /// This file is the only record `set_wakes` has of what to cancel. If it is
+    /// lost (data root reset, reinstall, a manual delete) this returns empty and
+    /// nothing gets cancelled from the UI's side — the next save arms a fresh
+    /// batch on top of whatever `pmset` still remembers. Self-limiting, since a
+    /// one-off wake expires on its own once its date passes: at most
+    /// `WAKE_HORIZON_DAYS` worth of stray events, and `pmset -g sched` /
+    /// `pmset -a schedule cancelall` (from a terminal, not this app) clears them
+    /// sooner for anyone who notices.
     pub fn installed_wakes(&self) -> Vec<String> {
         std::fs::read_to_string(crate::paths::schedule_applied(&self.data_root))
             .map(|raw| {
