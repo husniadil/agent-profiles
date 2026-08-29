@@ -145,20 +145,37 @@ pub fn application_dirs() -> Vec<PathBuf> {
     dirs
 }
 
-/// Every `.app` bundle directly inside `dirs`, de-duplicated by name (the first
-/// directory to carry a name wins) and sorted case-insensitively for the picker.
+/// Every `.app` bundle in `dirs`, one level of subdirectory deep, de-duplicated
+/// by name (the first directory to carry a name wins) and sorted
+/// case-insensitively for the picker.
+///
+/// One level, not a full walk: `/System/Applications/Utilities` (Terminal,
+/// Activity Monitor, Disk Utility) and a vendor's `/Applications/<Vendor>/`
+/// both put the bundle one directory down from where `application_dirs` looks,
+/// and that is as deep as any real install goes — going further would just be
+/// walking `.app` bundles' own internals for no apps found.
 pub fn scan_applications(dirs: &[PathBuf]) -> Vec<InstalledApp> {
     let mut apps = Vec::new();
     let mut seen = std::collections::HashSet::new();
     for dir in dirs {
-        let Ok(entries) = std::fs::read_dir(dir) else {
-            continue;
-        };
-        for entry in entries.flatten() {
-            let path = entry.path();
-            if path.extension().and_then(|e| e.to_str()) != Some("app") {
-                continue;
-            }
+        scan_one_level(dir, 1, &mut apps, &mut seen);
+    }
+    apps.sort_by_key(|app| app.name.to_lowercase());
+    apps
+}
+
+fn scan_one_level(
+    dir: &std::path::Path,
+    depth_left: u8,
+    apps: &mut Vec<InstalledApp>,
+    seen: &mut std::collections::HashSet<String>,
+) {
+    let Ok(entries) = std::fs::read_dir(dir) else {
+        return;
+    };
+    for entry in entries.flatten() {
+        let path = entry.path();
+        if path.extension().and_then(|e| e.to_str()) == Some("app") {
             let Some(name) = path.file_stem().and_then(|s| s.to_str()) else {
                 continue;
             };
@@ -171,10 +188,10 @@ pub fn scan_applications(dirs: &[PathBuf]) -> Vec<InstalledApp> {
                     icon: None,
                 });
             }
+        } else if depth_left > 0 && path.is_dir() {
+            scan_one_level(&path, depth_left - 1, apps, seen);
         }
     }
-    apps.sort_by_key(|app| app.name.to_lowercase());
-    apps
 }
 
 /// Standard-alphabet base64, hand-rolled so a PNG icon can become a `data:` URI
@@ -790,6 +807,22 @@ mod tests {
         // The path is the bundle from the first directory that carried the name.
         let slack = apps.iter().find(|app| app.name == "Slack").unwrap();
         assert_eq!(slack.path, a.join("Slack.app").display().to_string());
+    }
+
+    #[test]
+    fn the_app_scan_finds_one_level_of_vendor_subfolder() {
+        // `/System/Applications/Utilities/Terminal.app` and a vendor's own
+        // `/Applications/<Vendor>/App.app` both live one directory below the
+        // top-level dirs the scan is pointed at.
+        let dir = tempfile::tempdir().unwrap();
+        let apps_dir = dir.path().join("Applications");
+        std::fs::create_dir_all(apps_dir.join("Utilities").join("Terminal.app")).unwrap();
+        std::fs::create_dir_all(apps_dir.join("Vendor").join("Tool.app")).unwrap();
+        std::fs::create_dir_all(apps_dir.join("Slack.app")).unwrap(); // still top-level
+
+        let apps = scan_applications(&[apps_dir]);
+        let names: Vec<&str> = apps.iter().map(|app| app.name.as_str()).collect();
+        assert_eq!(names, vec!["Slack", "Terminal", "Tool"]);
     }
 
     #[test]
