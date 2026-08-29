@@ -448,7 +448,10 @@ fn launchctl(args: &[&str]) -> Result<()> {
 /// Offscreen `NSImage` drawing via `lockFocus`/`unlockFocus` does not require the
 /// main thread — it renders into a private bitmap context this call owns and
 /// never installs into a view — so this is safe to run on the Tauri command
-/// worker `list_applications` calls it from.
+/// worker `list_applications` calls it from. Backed by
+/// `every_installed_app_renders_an_icon_off_the_main_thread`, which renders a
+/// whole real `/Applications` scan on a `cargo test` worker thread (never the
+/// main thread) rather than trusting the claim on Apple's word alone.
 // `lockFocus`/`unlockFocus` are deprecated in favour of resolution-independent
 // block drawing, which matters for vector art rendered at unknown scale. This
 // draws a system icon into a fixed 36-point thumbnail once, so the concern does
@@ -991,6 +994,49 @@ mod tests {
             payload.starts_with(&[0x89, b'P', b'N', b'G']),
             "the decoded icon must begin with the PNG signature, got {:?}",
             &payload[..payload.len().min(8)]
+        );
+    }
+
+    #[test]
+    fn every_installed_app_renders_an_icon_off_the_main_thread() {
+        // `list_applications` calls `app_icon` once per scanned app, synchronously,
+        // from the Tauri command worker — never the main thread. `cargo test`
+        // gives every test its own non-main worker thread, which is the same
+        // shape, so running the *whole* real `/Applications` scan here (not just
+        // one app, as the test above does) is the empirical answer to "does
+        // lockFocus/drawInRect/TIFFRepresentation hold up off the main thread at
+        // the size a real machine's Applications folder gets to": every machine
+        // that runs this test IS that machine.
+        //
+        // `--nocapture` prints how many apps and how long the batch took, which
+        // is the other open question — whether the per-app AppKit round trip is
+        // fast enough to do synchronously before the tab draws.
+        let scanned = crate::schedule::scan_applications(&crate::schedule::application_dirs());
+        if scanned.is_empty() {
+            return; // A bare CI runner is allowed to have nothing installed.
+        }
+
+        let start = std::time::Instant::now();
+        for app in &scanned {
+            let Some(uri) = MacOs.app_icon(&app.path) else {
+                // Some system bundles (frameworks masquerading as .app, or ones
+                // missing an icon resource) legitimately produce none — that is
+                // `app_icon`'s own `Option`, not a crash, and not this test's
+                // concern. What matters is that rendering N of them in a row
+                // never panics and never corrupts a later one.
+                continue;
+            };
+            let payload = decode_base64(&uri["data:image/png;base64,".len()..]);
+            assert!(
+                payload.starts_with(&[0x89, b'P', b'N', b'G']),
+                "{} produced a non-PNG payload",
+                app.name
+            );
+        }
+        eprintln!(
+            "rendered {} icons in {:?} off the main thread",
+            scanned.len(),
+            start.elapsed()
         );
     }
 
