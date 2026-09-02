@@ -77,7 +77,7 @@ Agent Profiles holds that flag while an agent is working and gives it back when 
 
 The **Schedule** tab wakes a sleeping Mac and opens a chosen application at each day's own time — Slack, a browser, anything in `/Applications`. It is not scoped to agent profiles: this is a general "wake the machine and open something" tool, not a way to launch a profile specifically (profiles already have their own launch path elsewhere in the app).
 
-Turn on the master switch, pick which weekdays are active and what time each one wakes at, and choose the app to open. It works whether the Mac is on AC power or battery, wakes about a minute early, and needs you logged in — a locked screen still counts, only actually being logged out doesn't. A fully shut-down Mac stays off; a closed lid needs an external display for the app to actually open.
+Turn on the master switch, pick which weekdays are active and what time each one wakes at, and choose the app to open. It works whether the Mac is on AC power or battery, and needs you logged in — a locked screen still counts, only actually being logged out doesn't. A fully shut-down Mac stays off; a closed lid needs an external display for the app to actually open.
 
 Per-day times mean this cannot use macOS's built-in repeating wake, which only holds one time for all its days — instead it schedules a rolling batch of one-off wakes a few weeks ahead and tops the batch up automatically. The tab shows how many days of wakes are currently armed, and if you go long enough without opening Agent Profiles, that number reaches zero and wakes stop until you open it again.
 

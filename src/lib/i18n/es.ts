@@ -212,7 +212,7 @@ export const es: Strings = {
   "schedule.app.searchPlaceholder": "Buscar apps…",
   "schedule.app.empty": "No se encontraron apps",
   "schedule.caveat":
-    "Despierta un Mac dormido y abre la app a la hora de cada día, solo si has iniciado sesión (una pantalla bloqueada cuenta, cerrar sesión de verdad no): despierta aproximadamente un minuto antes y funciona con batería, pero un Mac completamente apagado permanece apagado, y con la tapa cerrada la app necesita una pantalla externa para abrirse de verdad. Las activaciones se programan con unas semanas de antelación, así que abre Agent Profiles de vez en cuando para mantenerlas.",
+    "Despierta un Mac dormido y abre la app a la hora de cada día, solo si has iniciado sesión (una pantalla bloqueada cuenta, cerrar sesión de verdad no): funciona con batería, pero un Mac completamente apagado permanece apagado, y con la tapa cerrada la app necesita una pantalla externa para abrirse de verdad. Las activaciones se programan con unas semanas de antelación, así que abre Agent Profiles de vez en cuando para mantenerlas.",
   "schedule.coverage.armed":
     "Las activaciones están programadas para los próximos {{days}} días.",
   "schedule.coverage.none":

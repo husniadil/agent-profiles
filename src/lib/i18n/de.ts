@@ -212,7 +212,7 @@ export const de: Strings = {
   "schedule.app.searchPlaceholder": "Apps suchen…",
   "schedule.app.empty": "Keine Apps gefunden",
   "schedule.caveat":
-    "Weckt einen schlafenden Mac und öffnet die App zur Zeit des jeweiligen Tages, nur wenn Sie angemeldet sind — ein gesperrter Bildschirm zählt noch, nur ein tatsächliches Abmelden nicht — er wacht etwa eine Minute früher auf und funktioniert auch im Akkubetrieb, aber ein vollständig heruntergefahrener Mac bleibt aus, und bei zugeklapptem Deckel braucht die App einen externen Bildschirm, um sich wirklich zu öffnen. Weckvorgänge werden einige Wochen im Voraus geplant, öffnen Sie Agent Profiles also ab und zu, damit sie weiterlaufen.",
+    "Weckt einen schlafenden Mac und öffnet die App zur Zeit des jeweiligen Tages, nur wenn Sie angemeldet sind — ein gesperrter Bildschirm zählt noch, nur ein tatsächliches Abmelden nicht — er funktioniert auch im Akkubetrieb, aber ein vollständig heruntergefahrener Mac bleibt aus, und bei zugeklapptem Deckel braucht die App einen externen Bildschirm, um sich wirklich zu öffnen. Weckvorgänge werden einige Wochen im Voraus geplant, öffnen Sie Agent Profiles also ab und zu, damit sie weiterlaufen.",
   "schedule.coverage.armed":
     "Weckvorgänge sind für die nächsten {{days}} Tage eingerichtet.",
   "schedule.coverage.none":
