@@ -6,6 +6,7 @@ export const id: Strings = {
   // Tabs
   "tab.profiles": "Profil Agen",
   "tab.keepAwake": "Tetap Terjaga",
+  "tab.schedule": "Jadwal",
   "tab.general": "Umum",
 
   // Status strip and its tooltip
@@ -190,4 +191,36 @@ export const id: Strings = {
   "general.update.installing": "Memasang, lalu memulai ulang…",
   "general.update.failed": "Tidak dapat memperbarui: {{reason}}",
   "general.update.disabled": "Nonaktif — tidak ada rilis yang diperiksa.",
+
+  // Schedule
+  "schedule.band.unavailable": "Tidak tersedia di sini",
+  "schedule.unsupported.generic": "Bangun terjadwal hanya tersedia di macOS.",
+  "schedule.enable.name": "Bangunkan komputer",
+  "schedule.enable.hint":
+    "Membangunkan Mac yang tidur, baik dengan daya AC maupun baterai. Mac yang benar-benar dimatikan akan tetap mati — menyalakannya kembali tidak dapat diandalkan bahkan saat tercolok, jadi ini tidak mencobanya.",
+  "schedule.days.legend": "Hari & waktu",
+  "schedule.day.mon": "Senin",
+  "schedule.day.tue": "Selasa",
+  "schedule.day.wed": "Rabu",
+  "schedule.day.thu": "Kamis",
+  "schedule.day.fri": "Jumat",
+  "schedule.day.sat": "Sabtu",
+  "schedule.day.sun": "Minggu",
+  "schedule.day.off": "Nonaktif",
+  "schedule.day.toggleAria": "Alihkan {{day}}",
+  "schedule.time.name": "Waktu",
+  "schedule.app.name": "Aplikasi yang dijalankan",
+  "schedule.app.placeholder": "Pilih aplikasi",
+  "schedule.app.searchPlaceholder": "Cari aplikasi…",
+  "schedule.app.empty": "Aplikasi tidak ditemukan",
+  "schedule.caveat":
+    "Membangunkan Mac yang tidur dan membuka aplikasi pada waktu setiap hari, hanya jika Anda masih masuk — layar terkunci masih terhitung, hanya benar-benar keluar (logout) yang tidak — Mac bangun sekitar satu menit lebih awal dan bisa bekerja dengan baterai, tetapi Mac yang benar-benar dimatikan akan tetap mati, dan jika layar tertutup, aplikasi memerlukan monitor eksternal agar benar-benar terbuka. Bangun dijadwalkan beberapa minggu ke depan, jadi buka Agent Profiles sesekali agar tetap berjalan.",
+  "schedule.coverage.armed": "Bangun terjadwal untuk {{days}} hari ke depan.",
+  "schedule.coverage.none":
+    "Belum terjadwal — simpan jadwal ini untuk menjadwalkan kelompok bangun pertama.",
+  "schedule.copy.tooltip": "Salin waktu",
+  "schedule.copy.aria": "Salin waktu {{day}} ke hari lain",
+  "schedule.copy.heading": "Salin waktu ke",
+  "schedule.copy.everyDay": "Setiap hari",
+  "schedule.copy.apply": "Terapkan",
 } as const;

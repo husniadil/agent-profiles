@@ -175,18 +175,19 @@ export function TabsContent({
   const { value: current } = useTabs();
   const reduce = useReducedMotion();
   const active = current === value;
-  if (!active) {
-    return (
-      <div hidden className={className}>
-        {children}
-      </div>
-    );
-  }
+  // Local fix, diverges from beui.dev: switching between a plain `div` and a
+  // `motion.div` here changed the element type React sees at this spot, which
+  // unmounts and remounts `children` on every tab switch — including the ones
+  // that are becoming hidden, not just the one coming in. A caller relying on
+  // "inactive tabs stay mounted" (see App.tsx) silently lost that on every
+  // switch, redoing every mount-time side effect (schedule's app scan) each
+  // visit. One `motion.div` for both states keeps its identity across the
+  // switch, so `hidden` truly just hides.
   return (
     <motion.div
-      key={value}
-      initial={{ opacity: 0, y: reduce ? 0 : 4 }}
-      animate={{ opacity: 1, y: 0 }}
+      hidden={!active}
+      initial={false}
+      animate={active ? { opacity: 1, y: 0 } : { opacity: 0, y: reduce ? 0 : 4 }}
       transition={{ duration: 0.18, ease: EASE_OUT }}
       className={cn("mt-4", className)}
     >

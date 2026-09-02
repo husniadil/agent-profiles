@@ -4,6 +4,7 @@ export const pt: Strings = {
   // Tabs
   "tab.profiles": "Perfis de agente",
   "tab.keepAwake": "Manter Ativo",
+  "tab.schedule": "Agendamento",
   "tab.general": "Geral",
 
   // Status strip and its tooltip
@@ -188,4 +189,37 @@ export const pt: Strings = {
   "general.update.installing": "Instalando, depois reiniciando…",
   "general.update.failed": "Não foi possível atualizar: {{reason}}",
   "general.update.disabled": "Desativado — nenhuma versão é verificada.",
+
+  // Schedule
+  "schedule.band.unavailable": "Não disponível aqui",
+  "schedule.unsupported.generic": "A ativação agendada só está disponível no macOS.",
+  "schedule.enable.name": "Despertar o computador",
+  "schedule.enable.hint":
+    "Acorda um Mac adormecido, seja na energia CA ou na bateria. Um Mac totalmente desligado permanece desligado — ligá-lo de novo não é confiável mesmo conectado, então isso não é tentado.",
+  "schedule.days.legend": "Dias e horários",
+  "schedule.day.mon": "Segunda",
+  "schedule.day.tue": "Terça",
+  "schedule.day.wed": "Quarta",
+  "schedule.day.thu": "Quinta",
+  "schedule.day.fri": "Sexta",
+  "schedule.day.sat": "Sábado",
+  "schedule.day.sun": "Domingo",
+  "schedule.day.off": "Desligado",
+  "schedule.day.toggleAria": "Alternar {{day}}",
+  "schedule.time.name": "Hora",
+  "schedule.app.name": "App a iniciar",
+  "schedule.app.placeholder": "Escolha um app",
+  "schedule.app.searchPlaceholder": "Buscar apps…",
+  "schedule.app.empty": "Nenhum app encontrado",
+  "schedule.caveat":
+    "Acorda um Mac adormecido e abre o app no horário de cada dia, apenas se você estiver conectado — uma tela bloqueada ainda conta, só sair de fato da conta não — ele acorda cerca de um minuto antes e funciona na bateria, mas um Mac totalmente desligado permanece desligado, e com a tampa fechada o app precisa de uma tela externa para realmente abrir. Os despertares são agendados com algumas semanas de antecedência, então abra o Agent Profiles de vez em quando para mantê-los.",
+  "schedule.coverage.armed":
+    "Os despertares estão agendados para os próximos {{days}} dias.",
+  "schedule.coverage.none":
+    "Ainda não agendado — salve este horário para agendar o primeiro lote de despertares.",
+  "schedule.copy.tooltip": "Copiar horários",
+  "schedule.copy.aria": "Copiar horários de {{day}} para outros dias",
+  "schedule.copy.heading": "Copiar horários para",
+  "schedule.copy.everyDay": "Todos os dias",
+  "schedule.copy.apply": "Aplicar",
 } as const;

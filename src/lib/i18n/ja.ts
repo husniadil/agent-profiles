@@ -6,6 +6,7 @@ export const ja: Strings = {
   // Tabs
   "tab.profiles": "エージェントプロファイル",
   "tab.keepAwake": "スリープ防止",
+  "tab.schedule": "スケジュール",
   "tab.general": "一般",
 
   // Status strip and its tooltip
@@ -190,4 +191,36 @@ export const ja: Strings = {
   "general.update.installing": "インストール中、その後再起動します…",
   "general.update.failed": "更新できませんでした: {{reason}}",
   "general.update.disabled": "オフになっています — リリースは確認されません。",
+
+  // Schedule
+  "schedule.band.unavailable": "ここでは利用できません",
+  "schedule.unsupported.generic": "スケジュール起動は macOS でのみ利用できます。",
+  "schedule.enable.name": "コンピュータを復帰",
+  "schedule.enable.hint":
+    "スリープ中の Mac を、AC電源でもバッテリーでも復帰させます。完全にシャットダウンした Mac はそのまま起動しません — 電源につないでいても再起動は信頼できないため、試みません。",
+  "schedule.days.legend": "曜日と時刻",
+  "schedule.day.mon": "月曜日",
+  "schedule.day.tue": "火曜日",
+  "schedule.day.wed": "水曜日",
+  "schedule.day.thu": "木曜日",
+  "schedule.day.fri": "金曜日",
+  "schedule.day.sat": "土曜日",
+  "schedule.day.sun": "日曜日",
+  "schedule.day.off": "オフ",
+  "schedule.day.toggleAria": "{{day}}を切り替え",
+  "schedule.time.name": "時刻",
+  "schedule.app.name": "起動するアプリ",
+  "schedule.app.placeholder": "アプリを選択",
+  "schedule.app.searchPlaceholder": "アプリを検索…",
+  "schedule.app.empty": "アプリが見つかりません",
+  "schedule.caveat":
+    "各曜日の時刻に、スリープ中の Mac を復帰させ、ログイン中の場合のみアプリを起動します(画面がロックされていても該当しますが、実際にログアウトしている場合は該当しません)。約1分前に復帰し、バッテリーでも動作しますが、完全にシャットダウンしている Mac はそのまま起動しません。またふたを閉じている場合、外部ディスプレイがないとアプリは実際には開きません。復帰は数週間先まで予約されるため、継続させるには時々 Agent Profiles を開いてください。",
+  "schedule.coverage.armed": "今後 {{days}} 日分の復帰が予約されています。",
+  "schedule.coverage.none":
+    "まだ予約されていません — このスケジュールを保存すると最初の復帰が予約されます。",
+  "schedule.copy.tooltip": "時刻をコピー",
+  "schedule.copy.aria": "{{day}}の時刻を他の曜日にコピー",
+  "schedule.copy.heading": "時刻のコピー先",
+  "schedule.copy.everyDay": "毎日",
+  "schedule.copy.apply": "適用",
 } as const;

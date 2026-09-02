@@ -6,6 +6,10 @@ use crate::profile_store::{Profile, ProfileStore};
 use crate::runtime::{AppRuntime, AppState};
 use serde::Serialize;
 use std::path::Path;
+use tauri::Manager;
+
+/// Matches `identifier` in `tauri.conf.json`; used to name the LaunchAgent.
+const BUNDLE_ID: &str = "com.husniadil.agent-profiles";
 
 #[derive(Serialize, Clone)]
 pub struct ProfileView {
@@ -556,6 +560,193 @@ pub fn set_general_settings(
     Ok(state.general.settings())
 }
 
+#[tauri::command]
+pub fn get_schedule(state: tauri::State<AppState>) -> crate::schedule::Status {
+    schedule_status(&state)
+}
+
+#[tauri::command]
+pub fn set_schedule(
+    app: tauri::AppHandle,
+    state: tauri::State<AppState>,
+    settings: crate::schedule::Settings,
+) -> Result<crate::schedule::Status, String> {
+    let result = apply_schedule(&state, settings).map_err(|e| e.to_string());
+    refocus_main_window(&app);
+    result?;
+    Ok(schedule_status(&state))
+}
+
+#[tauri::command]
+pub fn clear_schedule(
+    app: tauri::AppHandle,
+    state: tauri::State<AppState>,
+) -> Result<crate::schedule::Status, String> {
+    // Persist a disabled schedule and tear down the OS side. Reuses the same
+    // path `set_schedule` takes with `enabled = false`.
+    let mut off = state.schedule.settings();
+    off.enabled = false;
+    let result = apply_schedule(&state, off).map_err(|e| e.to_string());
+    refocus_main_window(&app);
+    result?;
+    Ok(schedule_status(&state))
+}
+
+/// Brings the settings window back in front of whatever was there before, after
+/// a command that may have shown the OS administrator-password prompt.
+///
+/// `osascript`'s `with administrator privileges` dialog belongs to a different
+/// process, and this app runs as an accessory (no Dock icon, see
+/// `ActivationPolicy::Accessory` in `lib.rs`) — when that dialog closes, macOS
+/// does not reliably hand focus back to an accessory app the way it would a
+/// regular one, so the window that asked for the password can end up sitting
+/// behind whatever was frontmost before it appeared. Called unconditionally
+/// rather than only on the branches that actually prompt: the settings window is
+/// already focused the rest of the time, so re-asserting it is a no-op there,
+/// and that is far simpler than threading "did this actually prompt" out of
+/// every caller.
+fn refocus_main_window(app: &tauri::AppHandle) {
+    if let Some(window) = app.get_webview_window("main") {
+        let _ = window.set_focus();
+    }
+}
+
+#[tauri::command]
+pub fn list_applications(state: tauri::State<AppState>) -> Vec<crate::schedule::InstalledApp> {
+    // The scan stays pure and cross-platform; the platform layer attaches each
+    // app's real icon here. This runs once when the tab loads — not on every
+    // dropdown open — so rendering an icon per app is an acceptable one-off cost.
+    let mut apps = crate::schedule::scan_applications(&crate::schedule::application_dirs());
+    for app in &mut apps {
+        app.icon = state.platform.app_icon(&app.path);
+    }
+    apps
+}
+
+/// The tab's whole state in one place: what the platform can do, why not if it
+/// cannot, and the stored settings.
+fn schedule_status(state: &AppState) -> crate::schedule::Status {
+    crate::schedule::Status {
+        supported: state.platform.can_schedule_wake(),
+        // Today the only reason is the platform itself; a data-root quoting
+        // refusal is not reachable here because the pmset datetimes carry no
+        // user path (see schedule::WakePlan).
+        refusal: if state.platform.can_schedule_wake() {
+            None
+        } else {
+            Some("Scheduled wake is only available on macOS.".to_string())
+        },
+        settings: state.schedule.settings(),
+        coverage_days: crate::schedule::coverage_days_remaining(
+            &state.schedule.installed_wakes(),
+            chrono::Local::now(),
+        ),
+    }
+}
+
+/// Whether two sets of wake datetimes are the same, ignoring order.
+///
+/// The desired set from [`build_wake_plan`](crate::schedule::build_wake_plan) is
+/// already sorted, and the installed set was written from an earlier one, but a
+/// set comparison is what the "did the wakes actually change?" question means —
+/// and it is the thing that keeps a no-op save, or an app-only edit, from asking
+/// for the password.
+fn same_wake_set(a: &[String], b: &[String]) -> bool {
+    if a.len() != b.len() {
+        return false;
+    }
+    let mut a: Vec<&String> = a.iter().collect();
+    let mut b: Vec<&String> = b.iter().collect();
+    a.sort();
+    b.sort();
+    a == b
+}
+
+/// Make the OS match the requested schedule, then record it.
+///
+/// The administrator password is asked for **only when the set of one-off wakes
+/// genuinely changes**. Editing with the switch off installs nothing, so it never
+/// prompts; changing only which app launches rewrites the password-free
+/// LaunchAgent and leaves the wakes alone; re-saving the same days and times does
+/// nothing privileged. Order matters: the privileged `set_wakes` step runs before
+/// the password-free `refresh_launch_agent` step, so a cancelled prompt (the step
+/// returns `Err`) leaves launchd, the stored schedule, and the installed-wakes
+/// record all untouched — the tab never claims a wake the machine will not
+/// honour, and the machine never honours a wake the tab does not claim.
+fn apply_schedule(state: &AppState, settings: crate::schedule::Settings) -> anyhow::Result<()> {
+    if !state.platform.can_schedule_wake() {
+        // Nothing to install here; remember the intent so a future macOS run
+        // keeps it.
+        return state.schedule.set_settings(settings);
+    }
+
+    let home = std::path::PathBuf::from(
+        std::env::var("HOME").map_err(|_| anyhow::anyhow!("HOME is not set"))?,
+    );
+    let now = chrono::Local::now();
+    let desired = crate::schedule::build_wake_plan(
+        &settings,
+        now,
+        &home,
+        BUNDLE_ID,
+        crate::schedule::WAKE_HORIZON_DAYS,
+    );
+    let installed = state.schedule.installed_wakes();
+
+    match desired {
+        Some(plan) => {
+            if same_wake_set(&installed, &plan.wake_datetimes) {
+                // The exact same wakes are already armed — an app-only edit, or a
+                // no-op save. Nothing privileged, no prompt, record left as-is.
+            } else {
+                state.platform.set_wakes(&installed, &plan.wake_datetimes)?;
+                state.schedule.set_installed_wakes(&plan.wake_datetimes)?;
+            }
+            // Only after the privileged step above succeeded, or was not needed:
+            // a cancelled prompt must not leave launchd holding a schedule this
+            // function is about to fail out of and never record.
+            state.platform.refresh_launch_agent(&plan)?;
+        }
+        None => {
+            // Disabled, no days, or no app: tear the OS side down. Only prompt if
+            // something is actually installed to cancel.
+            if !installed.is_empty() {
+                state.platform.set_wakes(&installed, &[])?;
+                state.platform.remove_launch_agent()?;
+                state.schedule.clear_installed_wakes();
+            }
+        }
+    }
+    // Only after the OS side actually succeeded.
+    state.schedule.set_settings(settings)
+}
+
+/// Re-arm the schedule at startup when its wake buffer has run low, so the wakes
+/// never lapse without the user touching a setting.
+///
+/// Does nothing unless the schedule is enabled, the platform can schedule a wake,
+/// and [`coverage_is_low`](crate::schedule::coverage_is_low) says the furthest-out
+/// installed wake is within [`REARM_BELOW_DAYS`](crate::schedule::REARM_BELOW_DAYS)
+/// of now. Because a re-arm schedules eight weeks of wakes, this prompts for the
+/// password at startup only every several weeks — when the buffer actually ran
+/// low — and stays silent on every other launch.
+pub fn rearm_if_due(state: &AppState) {
+    let settings = state.schedule.settings();
+    if !settings.enabled || !state.platform.can_schedule_wake() {
+        return;
+    }
+    let installed = state.schedule.installed_wakes();
+    if crate::schedule::coverage_is_low(
+        &installed,
+        chrono::Local::now(),
+        crate::schedule::REARM_BELOW_DAYS,
+    ) {
+        if let Err(error) = apply_schedule(state, settings) {
+            eprintln!("could not re-arm the wake schedule at startup: {error}");
+        }
+    }
+}
+
 /// Asks for the administrator password, once, and starts the watchdog.
 ///
 /// Explicitly a command rather than something `setup` does when the trigger is
@@ -565,6 +756,7 @@ pub fn set_general_settings(
 /// button that has already explained what it is for.
 #[tauri::command]
 pub fn authorize_keep_awake(
+    app: tauri::AppHandle,
     state: tauri::State<AppState>,
 ) -> Result<crate::keep_awake::Status, String> {
     let handle = &state.keep_awake;
@@ -580,7 +772,7 @@ pub fn authorize_keep_awake(
     // user's own. It is forgotten only once a loop is running with it.
     let reclaimed_prior = handle.reclaimed_prior();
 
-    state
+    let result = state
         .platform
         .start_awake_watchdog(&crate::platform::Watchdog {
             flag: &flag,
@@ -588,7 +780,9 @@ pub fn authorize_keep_awake(
             reclaimed_prior,
             app_pid: std::process::id(),
         })
-        .map_err(|e| e.to_string())?;
+        .map_err(|e| e.to_string());
+    refocus_main_window(&app);
+    result?;
 
     handle.clear_reclaimed_prior();
     handle.mark_authorized();
@@ -621,9 +815,14 @@ pub fn authorize_keep_awake(
 /// `tauri::State`. That is not tidiness: the invariant this used to lean on was
 /// asserted by a test that could not have observed it failing.
 #[tauri::command]
-pub fn restore_sleep(state: tauri::State<AppState>) -> Result<crate::keep_awake::Status, String> {
-    crate::keep_awake::restore(&state.keep_awake, state.platform.as_ref())
-        .map_err(|e| e.to_string())?;
+pub fn restore_sleep(
+    app: tauri::AppHandle,
+    state: tauri::State<AppState>,
+) -> Result<crate::keep_awake::Status, String> {
+    let result = crate::keep_awake::restore(&state.keep_awake, state.platform.as_ref())
+        .map_err(|e| e.to_string());
+    refocus_main_window(&app);
+    result?;
     Ok(state.keep_awake.status())
 }
 

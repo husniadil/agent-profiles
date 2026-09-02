@@ -4,6 +4,7 @@ export const de: Strings = {
   // Tabs
   "tab.profiles": "Agent-Profile",
   "tab.keepAwake": "Wach halten",
+  "tab.schedule": "Zeitplan",
   "tab.general": "Allgemein",
 
   // Status strip and its tooltip
@@ -188,4 +189,37 @@ export const de: Strings = {
   "general.update.installing": "Wird installiert, dann neu gestartet…",
   "general.update.failed": "Update fehlgeschlagen: {{reason}}",
   "general.update.disabled": "Deaktiviert — es wird nicht nach Updates gesucht.",
+
+  // Schedule
+  "schedule.band.unavailable": "Hier nicht verfügbar",
+  "schedule.unsupported.generic": "Geplantes Aufwecken ist nur unter macOS verfügbar.",
+  "schedule.enable.name": "Computer aufwecken",
+  "schedule.enable.hint":
+    "Weckt einen schlafenden Mac auf, im Netzbetrieb wie im Akkubetrieb. Ein vollständig heruntergefahrener Mac bleibt aus — ihn wieder einzuschalten ist selbst am Netzteil nicht zuverlässig, daher wird es nicht versucht.",
+  "schedule.days.legend": "Tage & Zeiten",
+  "schedule.day.mon": "Montag",
+  "schedule.day.tue": "Dienstag",
+  "schedule.day.wed": "Mittwoch",
+  "schedule.day.thu": "Donnerstag",
+  "schedule.day.fri": "Freitag",
+  "schedule.day.sat": "Samstag",
+  "schedule.day.sun": "Sonntag",
+  "schedule.day.off": "Aus",
+  "schedule.day.toggleAria": "{{day}} umschalten",
+  "schedule.time.name": "Uhrzeit",
+  "schedule.app.name": "Zu startende App",
+  "schedule.app.placeholder": "App wählen",
+  "schedule.app.searchPlaceholder": "Apps suchen…",
+  "schedule.app.empty": "Keine Apps gefunden",
+  "schedule.caveat":
+    "Weckt einen schlafenden Mac und öffnet die App zur Zeit des jeweiligen Tages, nur wenn Sie angemeldet sind — ein gesperrter Bildschirm zählt noch, nur ein tatsächliches Abmelden nicht — er wacht etwa eine Minute früher auf und funktioniert auch im Akkubetrieb, aber ein vollständig heruntergefahrener Mac bleibt aus, und bei zugeklapptem Deckel braucht die App einen externen Bildschirm, um sich wirklich zu öffnen. Weckvorgänge werden einige Wochen im Voraus geplant, öffnen Sie Agent Profiles also ab und zu, damit sie weiterlaufen.",
+  "schedule.coverage.armed":
+    "Weckvorgänge sind für die nächsten {{days}} Tage eingerichtet.",
+  "schedule.coverage.none":
+    "Noch nicht eingerichtet — speichern Sie diesen Zeitplan, um die erste Reihe von Weckvorgängen einzurichten.",
+  "schedule.copy.tooltip": "Zeiten kopieren",
+  "schedule.copy.aria": "Zeiten von {{day}} auf andere Tage kopieren",
+  "schedule.copy.heading": "Zeiten kopieren nach",
+  "schedule.copy.everyDay": "Jeden Tag",
+  "schedule.copy.apply": "Anwenden",
 } as const;

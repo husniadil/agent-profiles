@@ -26,6 +26,11 @@ serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 anyhow = "1.0.104"
 uuid = { version = "1.24.0", features = ["v4"] }
+# Calendar math for the per-weekday wake schedule: turning each day-and-time into
+# the exact upcoming datetimes to hand `pmset schedule`. `default-features =
+# false` drops the bundled time zone database and `oldtime`/`wasm` bits this build
+# never touches; `clock` keeps `Local::now`, `std` keeps `Display`/parsing.
+chrono = { version = "0.4", default-features = false, features = ["clock", "std"] }
 tauri-plugin-autostart = "2.5.1"
 # Reading the operating system's own language, which the tray needs before any
 # webview exists to report `navigator.language`. Three platforms, three
@@ -52,6 +57,16 @@ objc2-app-kit = { version = "0.3.2", features = [
   "NSMenu",
   "NSMenuItem",
   "NSStatusItem",
+  # The Schedule tab's app picker draws each installed app's real icon. The
+  # system icon comes from `NSWorkspace`, is scaled into a fixed-size `NSImage`
+  # (`NSGraphics` for the composite op, core-foundation for the geometry types),
+  # and re-encoded to PNG through `NSBitmapImageRep`.
+  "NSWorkspace",
+  "NSImage",
+  "NSImageRep",
+  "NSBitmapImageRep",
+  "NSGraphics",
+  "objc2-core-foundation",
 ] }
 objc2-foundation = { version = "0.3.2", features = [
   "NSAttributedString",
@@ -59,6 +74,9 @@ objc2-foundation = { version = "0.3.2", features = [
   # `pmset -g therm` was the obvious alternative and reports nothing at all on
   # current hardware; this needs no root and no extra dependency.
   "NSProcessInfo",
+  # `NSRect`/`NSSize`/`NSPoint` for scaling the app icon are aliases of the
+  # Core Foundation geometry types, available only with this feature.
+  "objc2-core-foundation",
 ] }
 
 [target.'cfg(target_os = "windows")'.dependencies]

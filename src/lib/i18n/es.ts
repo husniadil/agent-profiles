@@ -4,6 +4,7 @@ export const es: Strings = {
   // Tabs
   "tab.profiles": "Perfiles de agente",
   "tab.keepAwake": "Mantener activo",
+  "tab.schedule": "Programación",
   "tab.general": "General",
 
   // Status strip and its tooltip
@@ -188,4 +189,37 @@ export const es: Strings = {
   "general.update.installing": "Instalando y reiniciando…",
   "general.update.failed": "No se pudo actualizar: {{reason}}",
   "general.update.disabled": "Desactivado — no se busca ninguna versión.",
+
+  // Schedule
+  "schedule.band.unavailable": "No disponible aquí",
+  "schedule.unsupported.generic": "La activación programada solo está disponible en macOS.",
+  "schedule.enable.name": "Despertar el equipo",
+  "schedule.enable.hint":
+    "Despierta un Mac dormido, ya sea con corriente alterna o con batería. Un Mac completamente apagado permanece apagado: encenderlo de nuevo no es fiable ni siquiera enchufado, así que no se intenta.",
+  "schedule.days.legend": "Días y horas",
+  "schedule.day.mon": "Lunes",
+  "schedule.day.tue": "Martes",
+  "schedule.day.wed": "Miércoles",
+  "schedule.day.thu": "Jueves",
+  "schedule.day.fri": "Viernes",
+  "schedule.day.sat": "Sábado",
+  "schedule.day.sun": "Domingo",
+  "schedule.day.off": "Desactivado",
+  "schedule.day.toggleAria": "Alternar {{day}}",
+  "schedule.time.name": "Hora",
+  "schedule.app.name": "App a iniciar",
+  "schedule.app.placeholder": "Elige una app",
+  "schedule.app.searchPlaceholder": "Buscar apps…",
+  "schedule.app.empty": "No se encontraron apps",
+  "schedule.caveat":
+    "Despierta un Mac dormido y abre la app a la hora de cada día, solo si has iniciado sesión (una pantalla bloqueada cuenta, cerrar sesión de verdad no): despierta aproximadamente un minuto antes y funciona con batería, pero un Mac completamente apagado permanece apagado, y con la tapa cerrada la app necesita una pantalla externa para abrirse de verdad. Las activaciones se programan con unas semanas de antelación, así que abre Agent Profiles de vez en cuando para mantenerlas.",
+  "schedule.coverage.armed":
+    "Las activaciones están programadas para los próximos {{days}} días.",
+  "schedule.coverage.none":
+    "Aún no programadas — guarda este horario para programar el primer lote de activaciones.",
+  "schedule.copy.tooltip": "Copiar horas",
+  "schedule.copy.aria": "Copiar las horas de {{day}} a otros días",
+  "schedule.copy.heading": "Copiar horas a",
+  "schedule.copy.everyDay": "Todos los días",
+  "schedule.copy.apply": "Aplicar",
 } as const;

@@ -128,6 +128,30 @@ pub fn general_settings(data_root: &std::path::Path) -> PathBuf {
     data_root.join("general.json")
 }
 
+/// The one recurring wake schedule, app-wide like [`keep_awake_settings`] and
+/// [`general_settings`]: one machine has one wake schedule, not one per profile.
+pub fn schedule_settings(data_root: &std::path::Path) -> PathBuf {
+    data_root.join("schedule.json")
+}
+
+/// The per-user LaunchAgent that fires the scheduled launch. Named by bundle id
+/// plus `.schedule` so it is unmistakable for any other agent, and never touched
+/// off macOS — the one caller is the macOS backend, hence the allow elsewhere.
+#[cfg_attr(not(target_os = "macos"), allow(dead_code))]
+pub fn launch_agent_plist(home: &std::path::Path, bundle_id: &str) -> PathBuf {
+    home.join("Library")
+        .join("LaunchAgents")
+        .join(format!("{bundle_id}.schedule.plist"))
+}
+
+/// Records the one-off wake datetimes we last installed, one per line in the
+/// `pmset schedule` format (`MM/dd/yy HH:mm:ss`), so the app can tell whether the
+/// wakes already match without re-running the privileged `pmset` (which would
+/// prompt for the password). Absent or empty means nothing is installed.
+pub fn schedule_applied(data_root: &std::path::Path) -> PathBuf {
+    data_root.join("schedule.applied")
+}
+
 /// Existence means "hold the machine awake". Never read, only tested for — its
 /// contents would otherwise be interpolated into a root shell.
 pub fn keep_awake_flag(data_root: &std::path::Path) -> PathBuf {
@@ -359,6 +383,27 @@ mod tests {
         assert!(
             reason.contains(&cramped.display().to_string().len().to_string()),
             "got: {reason}"
+        );
+    }
+
+    #[test]
+    fn the_schedule_settings_file_sits_beside_the_other_app_wide_files() {
+        // App-wide like keep-awake and general: one machine has one wake schedule.
+        assert_eq!(
+            schedule_settings(Path::new("/data")),
+            PathBuf::from("/data/schedule.json")
+        );
+    }
+
+    #[test]
+    fn the_launch_agent_plist_lives_under_the_users_launch_agents() {
+        // The per-user LaunchAgents directory, named by bundle id plus `.schedule`
+        // so it cannot collide with any other agent the user has.
+        assert_eq!(
+            launch_agent_plist(Path::new("/Users/h"), "com.husniadil.agent-profiles"),
+            PathBuf::from(
+                "/Users/h/Library/LaunchAgents/com.husniadil.agent-profiles.schedule.plist"
+            )
         );
     }
 

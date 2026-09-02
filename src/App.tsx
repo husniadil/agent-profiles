@@ -4,18 +4,20 @@ import { ProfilesPanel } from "@/components/ProfilesPanel";
 import { StatusStrip } from "@/components/StatusStrip";
 import { GeneralTab } from "@/components/general/GeneralTab";
 import { KeepAwakeTab } from "@/components/keepawake/KeepAwakeTab";
+import { ScheduleTab } from "@/components/schedule/ScheduleTab";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/motion/tabs";
 import { useAppData } from "@/hooks/useAppData";
 import { useAutostart } from "@/hooks/useAutostart";
 import { useGeneral } from "@/hooks/useGeneral";
 import { useKeepAwake } from "@/hooks/useKeepAwake";
+import { useSchedule } from "@/hooks/useSchedule";
 import { useSizes } from "@/hooks/useSizes";
 import { useSocketBudget } from "@/hooks/useSocketBudget";
 import type { Locale } from "@/lib/api";
 import { I18nProvider, LOCALE_NAMES, useT } from "@/lib/i18n";
 import { PathNamesContext } from "@/lib/paths";
 
-type TabId = "profiles" | "keep-awake" | "general";
+type TabId = "profiles" | "keep-awake" | "schedule" | "general";
 
 /// The window's copy of `general::resolve_locale`: chosen wins, else the system
 /// language subtag, else English. Split on the same delimiters as the Rust rule
@@ -77,6 +79,7 @@ export default function App() {
   const autostart = useAutostart(visit, fail, clearError);
   const general = useGeneral(fail);
   const keepAwake = useKeepAwake(visit, fail);
+  const schedule = useSchedule(visit, fail);
 
   // Not reset on every visit: someone who left the window on Keep Awake was most
   // likely reading it, and reopening onto the profile list would throw that away
@@ -147,6 +150,7 @@ export default function App() {
               />
             }
             keepAwake={<KeepAwakeTab keepAwake={keepAwake} />}
+            schedule={<ScheduleTab schedule={schedule} />}
             general={<GeneralTab general={general} autostart={autostart} />}
           />
         </main>
@@ -163,12 +167,14 @@ function TabbedPanels({
   onTab,
   profiles,
   keepAwake,
+  schedule,
   general,
 }: {
   tab: TabId;
   onTab: (next: TabId) => void;
   profiles: ReactNode;
   keepAwake: ReactNode;
+  schedule: ReactNode;
   general: ReactNode;
 }) {
   const t = useT();
@@ -186,6 +192,9 @@ function TabbedPanels({
         <TabsTrigger value="keep-awake" className={TAB_TRIGGER}>
           {t("tab.keepAwake")}
         </TabsTrigger>
+        <TabsTrigger value="schedule" className={TAB_TRIGGER}>
+          {t("tab.schedule")}
+        </TabsTrigger>
         <TabsTrigger value="general" className={TAB_TRIGGER}>
           {t("tab.general")}
         </TabsTrigger>
@@ -200,6 +209,9 @@ function TabbedPanels({
       </TabsContent>
       <TabsContent value="keep-awake" className={TAB_PANEL}>
         {keepAwake}
+      </TabsContent>
+      <TabsContent value="schedule" className={TAB_PANEL}>
+        {schedule}
       </TabsContent>
       <TabsContent value="general" className={TAB_PANEL}>
         {general}

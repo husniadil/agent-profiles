@@ -14,6 +14,7 @@ export const en = {
   // Tabs
   "tab.profiles": "Agent Profiles",
   "tab.keepAwake": "Keep Awake",
+  "tab.schedule": "Schedule",
   "tab.general": "General",
 
   // Status strip and its tooltip
@@ -206,4 +207,36 @@ export const en = {
   "general.update.installing": "Installing, then restarting…",
   "general.update.failed": "Could not update: {{reason}}",
   "general.update.disabled": "Turned off — no release is checked for.",
+
+  // Schedule
+  "schedule.band.unavailable": "Not available here",
+  "schedule.unsupported.generic": "Scheduled wake is only available on macOS.",
+  "schedule.enable.name": "Wake up the computer",
+  "schedule.enable.hint":
+    "Wakes a sleeping Mac on AC power or battery. A fully shut-down Mac stays off — powering one back on isn't reliable even plugged in, so this doesn't attempt it.",
+  "schedule.days.legend": "Days & times",
+  "schedule.day.mon": "Monday",
+  "schedule.day.tue": "Tuesday",
+  "schedule.day.wed": "Wednesday",
+  "schedule.day.thu": "Thursday",
+  "schedule.day.fri": "Friday",
+  "schedule.day.sat": "Saturday",
+  "schedule.day.sun": "Sunday",
+  "schedule.day.off": "Off",
+  "schedule.day.toggleAria": "Toggle {{day}}",
+  "schedule.time.name": "Time",
+  "schedule.app.name": "App to launch",
+  "schedule.app.placeholder": "Choose an app",
+  "schedule.app.searchPlaceholder": "Search apps…",
+  "schedule.app.empty": "No apps found",
+  "schedule.caveat":
+    "Wakes a sleeping Mac and opens the app at each day's time, only if you're logged in — a locked screen still counts, only actually being logged out doesn't — it wakes about a minute early and works on battery, but a Mac that's fully shut down stays off, and a closed lid needs an external display for the app to actually open. Wakes are scheduled a few weeks ahead, so open Agent Profiles now and then to keep them going.",
+  "schedule.coverage.armed": "Wakes are armed for the next {{days}} days.",
+  "schedule.coverage.none":
+    "Not armed yet — save this schedule to arm the first batch of wakes.",
+  "schedule.copy.tooltip": "Copy times",
+  "schedule.copy.aria": "Copy {{day}} times to other days",
+  "schedule.copy.heading": "Copy times to",
+  "schedule.copy.everyDay": "Every day",
+  "schedule.copy.apply": "Apply",
 } as const;

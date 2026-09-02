@@ -247,6 +247,51 @@ pub trait Platform: Send + Sync {
         false
     }
 
+    /// Whether this machine can schedule a recurring wake-and-launch.
+    ///
+    /// Answered per platform like [`Platform::can_hold_awake`]: only macOS has
+    /// both `pmset repeat` and per-user LaunchAgents. Off macOS the tab is shown
+    /// disabled with the reason, never hidden.
+    fn can_schedule_wake(&self) -> bool {
+        false
+    }
+
+    /// The icon of the application bundle at `path`, as a
+    /// `data:image/png;base64,…` URI the Schedule tab's picker can render, or
+    /// `None` where this platform has no way to produce one.
+    ///
+    /// Defaulted to `None` like [`Platform::can_hold_awake`]: only macOS can hand
+    /// back a file's icon, so off macOS the picker simply shows no thumbnail.
+    fn app_icon(&self, _path: &str) -> Option<String> {
+        None
+    }
+
+    /// Cancel one batch of one-off wakes and arm another, in a single privileged
+    /// step so the administrator password is asked for exactly once.
+    ///
+    /// `cancel` is every wake datetime we last installed and `schedule` is every
+    /// one to arm now, both formatted for `pmset schedule`. The macOS backend runs
+    /// a `pmset schedule cancel wake "<dt>"` for each `cancel` and a
+    /// `pmset schedule wake "<dt>"` for each `schedule`, joined into one elevated
+    /// shell command. Both slices empty is a no-op. The default is the honest
+    /// answer for a platform with no such mechanism.
+    fn set_wakes(&self, _cancel: &[String], _schedule: &[String]) -> Result<()> {
+        anyhow::bail!("this platform cannot schedule a wake")
+    }
+
+    /// Write (or replace) the LaunchAgent that fires the launch, without touching
+    /// the `pmset` wakes. Needs no administrator password, so the caller uses it
+    /// whenever the plist may have changed — a different app, or different times.
+    fn refresh_launch_agent(&self, _plan: &crate::schedule::WakePlan) -> Result<()> {
+        anyhow::bail!("this platform cannot schedule a wake")
+    }
+
+    /// Remove the LaunchAgent. Needs no administrator password. Used on disable,
+    /// after [`Platform::set_wakes`] has cancelled the wakes.
+    fn remove_launch_agent(&self) -> Result<()> {
+        anyhow::bail!("this platform cannot schedule a wake")
+    }
+
     /// Whether holding costs the user an administrator prompt.
     ///
     /// True only on macOS, where the setting is `pmset disablesleep` and root
