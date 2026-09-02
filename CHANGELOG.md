@@ -2,6 +2,15 @@
 
 Notable changes, newest first. This project follows [Semantic Versioning](https://semver.org).
 
+## [0.7.0] — 2026-09-02
+
+A Schedule tab: the Mac wakes itself at a time you set and opens an app.
+
+### Added
+
+- **Wake a sleeping Mac on a weekly schedule and open an application.** Each weekday carries its own time, and at that time the machine wakes and the app you chose opens — Slack, a browser, anything installed. The tab is deliberately not scoped to agent profiles: profiles already have their own launch path, and this is the general "wake the machine and open something" half that had nowhere to live. Waking works on battery as well as AC. A Mac that is fully shut down stays off, because powering one back on is unreliable enough that attempting it would promise more than it delivers, and the app opens only if you are still logged in — a locked screen counts, being logged out does not.
+- **The tab says how many days of wakes are actually armed.** A time per day cannot be expressed as macOS's single repeating wake, so the schedule is a rolling batch of one-off wakes armed a few weeks ahead and topped up in the background. That buffer drains if the app is never opened, and a schedule that stops quietly is the worst way for this to fail, so the number of days still covered is on screen rather than left to trust. The top-up is the only step that asks for an administrator password, and it now runs off the startup path, so it never holds up the tray icon.
+
 ## [0.6.2] — 2026-08-26
 
 Three fixes. One of them stops an update taking the machine back after it had already been handed over, and one finally renders the row 0.6.0 promised.
