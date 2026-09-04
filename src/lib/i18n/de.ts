@@ -96,7 +96,7 @@ export const de: Strings = {
     "Agent Profiles wurde unerwartet beendet, während der Zustand „Deckel geschlossen“ aktiv war, und diese Einstellung übersteht einen Neustart.",
   "awake.restoreSleep": "Ruhezustand wiederherstellen",
   "awake.needsPassword":
-    "Erfordert einmal pro Sitzung ein Administratorkennwort. Ein Hilfsprozess aktiviert die Einstellung, während ein Agent arbeitet, deaktiviert sie danach wieder und wird mit Agent Profiles beendet.",
+    "Erfordert einmalig ein Administratorkennwort auf diesem Mac, nicht bei jedem Start. Gewährt werden genau zwei Befehle — die Einstellung bei geschlossenem Deckel ein- und auszuschalten — und sonst nichts. Zum späteren Entfernen: sudo rm /etc/sudoers.d/agent-profiles",
 
   // Keep Awake — status card bands (unsupported, stranded, unauthorized, failed hold)
   "awake.band.unavailable": "Hier nicht verfügbar",

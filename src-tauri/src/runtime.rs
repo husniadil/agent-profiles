@@ -223,6 +223,7 @@ mod tests {
                     hold: false,
                     thermal: false,
                     needs_authorization: true,
+                    authorization_installed: false,
                 },
                 crate::keep_awake::Recovery {
                     reclaimed_prior: None,

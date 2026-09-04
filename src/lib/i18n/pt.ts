@@ -96,7 +96,7 @@ export const pt: Strings = {
     "O Agent Profiles foi encerrado inesperadamente enquanto mantinha o estado de tampa fechada, e essa configuração sobrevive a uma reinicialização.",
   "awake.restoreSleep": "Restaurar suspensão",
   "awake.needsPassword":
-    "Precisa da senha de administrador uma vez por execução. Um auxiliar ativa a configuração enquanto um agente trabalha, desativa quando ele para, e encerra junto com o Agent Profiles.",
+    "Precisa da senha de administrador uma única vez neste Mac, não a cada execução. Concede exatamente dois comandos — ligar e desligar a configuração com a tampa fechada — e nada além disso. Para revogar depois: sudo rm /etc/sudoers.d/agent-profiles",
 
   // Keep Awake — status card bands (unsupported, stranded, unauthorized, failed hold)
   "awake.band.unavailable": "Não disponível aqui",
