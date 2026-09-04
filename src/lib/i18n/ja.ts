@@ -98,7 +98,7 @@ export const ja: Strings = {
     "Agent Profiles はふたを閉じた状態を保持したまま予期せず終了しました。この設定は再起動後も維持されます。",
   "awake.restoreSleep": "スリープを復元",
   "awake.needsPassword":
-    "実行ごとに一度、管理者パスワードが必要です。ヘルパーがエージェントの動作中は設定をオンにし、停止するとオフに戻し、Agent Profiles と共に終了します。",
+    "この Mac で一度だけ管理者パスワードが必要です。起動のたびには必要ありません。許可されるのは、ふたを閉じたままにする設定をオンとオフにする 2 つのコマンドだけです。後で取り消すには: sudo rm /etc/sudoers.d/agent-profiles",
 
   // Keep Awake — status card bands (unsupported, stranded, unauthorized, failed hold)
   "awake.band.unavailable": "ここでは利用できません",

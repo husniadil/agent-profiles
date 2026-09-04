@@ -4,6 +4,7 @@ use crate::platform::{
     DATA_DIR_NAME,
 };
 use anyhow::{anyhow, Result};
+use std::os::unix::process::CommandExt;
 use std::path::{Path, PathBuf};
 
 pub struct MacOs;
@@ -224,14 +225,53 @@ impl Platform for MacOs {
         }
     }
 
+    fn authorization_installed(&self) -> bool {
+        authorization_installed()
+    }
+
+    fn install_authorization(&self) -> Result<()> {
+        run_osascript(&privileged_now(&sudoers_install_script(current_uid())))
+    }
+
     fn start_awake_watchdog(&self, watchdog: &crate::platform::Watchdog) -> Result<()> {
-        run_osascript(&privileged_background(&watchdog_script(watchdog)))
+        // No elevation. The loop is an ordinary user process that spends the
+        // grant installed once by `install_authorization`; the outer shell
+        // backgrounds it and exits immediately, so this returns at once and the
+        // child is reaped rather than left a zombie.
+        //
+        // Its own process group, because it is no longer detached by `osascript`
+        // running it as root: left in ours, a SIGHUP or a group-wide kill — a
+        // dev build started from a terminal that closes — would take it out
+        // before it could run its trailing release.
+        let status = std::process::Command::new("/bin/sh")
+            .arg("-c")
+            .arg(watchdog_spawn_command(watchdog))
+            .process_group(0)
+            .status()?;
+        if !status.success() {
+            anyhow::bail!("could not start the keep-awake helper");
+        }
+        Ok(())
     }
 
     fn restore_sleep(&self) -> Result<()> {
         // Deliberately not the watchdog: someone who has turned the feature off
         // and is only digging themselves out of a stranded run should not end up
-        // with a root loop running for the rest of the session.
+        // with a loop running for the rest of the session.
+        //
+        // Through the grant where it exists, so the way out of a stranded
+        // machine costs nothing; falling back to a prompt where it does not,
+        // because this is the one screen a user reaches precisely when the
+        // normal path has already failed them.
+        if authorization_installed() {
+            let status = std::process::Command::new("/bin/sh")
+                .arg("-c")
+                .arg(format!("{PMSET_AS_ROOT} -a disablesleep 0"))
+                .status()?;
+            if status.success() {
+                return Ok(());
+            }
+        }
         run_osascript(&privileged_now("pmset -a disablesleep 0"))
     }
 }
@@ -243,6 +283,144 @@ impl Platform for MacOs {
 /// than it needs to be. The app itself only revises its decision every fifteen
 /// seconds, so anything below this buys nothing.
 const WATCHDOG_POLL_SECONDS: u32 = 3;
+
+/// Where the one-time authorization lives.
+///
+/// No dot in the file name, deliberately. `man 5 sudoers`: the directory is read
+/// "skipping file names that end in `~' or contain a `.' character to avoid
+/// causing problems with package manager or editor temporary/backup files". A
+/// reverse-DNS name would install cleanly, pass `visudo`, and then never load —
+/// the app would ask for a password every launch with nothing saying why.
+const SUDOERS_PATH: &str = "/etc/sudoers.d/agent-profiles";
+
+/// The one binary the grant is pinned to.
+///
+/// Absolute because sudoers matches on an absolute path, and worth naming why
+/// this particular one is safe to grant: `/usr/bin/pmset` is `root:wheel`, mode
+/// 755, and flagged `restricted` by SIP, so no process running as the user can
+/// replace it. That is the whole difference between this and the same pattern in
+/// yabai (#1318) and battery (#443), where the granted binary sat in a
+/// user-writable directory and the NOPASSWD rule became a root shell.
+const PMSET: &str = "/usr/bin/pmset";
+
+/// How the unprivileged loop spends the grant. `-n` so it fails rather than
+/// blocking on a prompt no one is watching.
+const PMSET_AS_ROOT: &str = "sudo -n /usr/bin/pmset";
+
+fn current_uid() -> u32 {
+    // Safe: `getuid` takes no arguments, cannot fail, and touches no memory.
+    unsafe { libc::getuid() }
+}
+
+/// The contents of the drop-in: two exact commands, and the note that tells
+/// whoever finds this file what removes it.
+///
+/// A numeric uid rather than a username or `%admin`. `%admin` would extend the
+/// grant to every administrator account on the machine, including ones that
+/// never asked for it. A username would be attacker-influenced text being
+/// interpolated into the file that governs root, which is a quoting problem
+/// nobody should have; a uid is digits.
+fn sudoers_rule_text(uid: u32) -> String {
+    format!(
+        "# Agent Profiles — Keep Awake.\n\
+         # Lets the lid-closed hold be taken without a password on every launch.\n\
+         # Remove with: sudo rm {SUDOERS_PATH}\n\
+         #{uid} ALL=(root) NOPASSWD: NOSETENV: {PMSET} -a disablesleep 1\n\
+         #{uid} ALL=(root) NOPASSWD: NOSETENV: {PMSET} -a disablesleep 0\n"
+    )
+}
+
+/// The one-shot root script that installs the grant.
+///
+/// Held to one line for the same reason as [`watchdog_script`] — it goes into an
+/// AppleScript string literal. Three rules, each with a test:
+///
+/// 1. The candidate is validated by `visudo` *before* it is ever in place. A
+///    malformed file in `/etc/sudoers.d` breaks `sudo` machine-wide, including
+///    the `sudo` that would repair it.
+/// 2. The staging copy is created inside the target directory, so the final
+///    `install` is a same-filesystem operation, and is named with a leading dot
+///    so `sudo` skips it while it exists.
+/// 3. The whole tree is re-validated afterwards, and the file removed again if
+///    that fails, so a rule that is individually valid but breaks in context
+///    cannot survive.
+fn sudoers_install_script(uid: u32) -> String {
+    let mut script = vec![
+        "set -eu".to_string(),
+        "DIR=/etc/sudoers.d".to_string(),
+        // Refuse anything but the real directory: a symlink here would redirect
+        // a root write anywhere on the disk.
+        r#"[ -d "$DIR" ] && [ ! -L "$DIR" ]"#.to_string(),
+        "umask 077".to_string(),
+        r#"TMP=$(mktemp "$DIR/.agent-profiles.XXXXXX")"#.to_string(),
+        r#"trap 'rm -f "$TMP"' EXIT HUP INT TERM"#.to_string(),
+    ];
+    let lines: Vec<String> = sudoers_rule_text(uid)
+        .lines()
+        .map(|line| format!("'{line}'"))
+        .collect();
+    script.push(format!(r#"printf '%s\n' {} > "$TMP""#, lines.join(" ")));
+    script.extend([
+        r#"/usr/sbin/chown root:wheel "$TMP""#.to_string(),
+        r#"/bin/chmod 0440 "$TMP""#.to_string(),
+        r#"/usr/sbin/visudo -cf "$TMP" >/dev/null"#.to_string(),
+        format!(r#"/usr/bin/install -m 0440 -o root -g wheel "$TMP" {SUDOERS_PATH}"#),
+        format!(r#"/usr/sbin/visudo -c >/dev/null || {{ rm -f {SUDOERS_PATH}; exit 1; }}"#),
+    ]);
+    script.join("; ")
+}
+
+/// Whether this account can actually spend the grant.
+///
+/// Not a `stat` of [`SUDOERS_PATH`]: the file is `0440 root:wheel` and this
+/// process is neither, so its contents cannot be read back, and "a file exists"
+/// is not the question. The rule is pinned to one uid, so on a two-account Mac
+/// the second user would find the file, be told they were authorized, and have
+/// every hold fail silently with the Authorize button hidden.
+///
+/// Also deliberately **not** `sudo -n -l <command>`, which is the obvious call
+/// and a trap. macOS ships `%admin ALL=(ALL) ALL`, so the listing carries an
+/// `(ALL) ALL` line and every command an admin could run *with* a password
+/// matches it; and once any NOPASSWD rule exists the listing itself stops
+/// needing a password, so `-n` stops discriminating too. The exit status then
+/// means "this user has some NOPASSWD rule somewhere", which a rule belonging to
+/// an unrelated tool would satisfy — hiding the Authorize button in front of a
+/// grant that was never installed. Found by running it, not by reading it.
+///
+/// So: ask for the listing and read it.
+fn authorization_installed() -> bool {
+    let Ok(out) = std::process::Command::new("sudo")
+        .args(["-n", "-l"])
+        .stdin(std::process::Stdio::null())
+        .stderr(std::process::Stdio::null())
+        .output()
+    else {
+        return false;
+    };
+    grant_is_listed(&String::from_utf8_lossy(&out.stdout))
+}
+
+/// Whether a `sudo -l` listing carries both halves of this app's own grant.
+///
+/// Split out so the parsing can be asserted against real captured listings —
+/// the `(ALL) ALL` line included — with no `sudo` to run and no machine to have
+/// authorized first.
+///
+/// Both halves are required. One without the other is not this grant, and the
+/// asymmetry matters in one direction: a run that can take the hold but not give
+/// it back is the one state worth refusing outright.
+fn grant_is_listed(listing: &str) -> bool {
+    let granted = |suffix: String| {
+        listing.lines().any(|line| {
+            let line = line.trim_end();
+            // `NOPASSWD` and our exact argv on the same line. Anchored at the
+            // end, so a wider rule carrying further arguments after ours does
+            // not read as this grant.
+            line.contains("NOPASSWD") && line.ends_with(&suffix)
+        })
+    };
+    granted(format!("{PMSET} -a disablesleep 1")) && granted(format!("{PMSET} -a disablesleep 0"))
+}
 
 /// The body of the privileged loop.
 ///
@@ -285,7 +463,7 @@ fn watchdog_script(watchdog: &crate::platform::Watchdog) -> String {
         r#"if [ "$RECLAIM" = - ]"#.to_string(),
         r#"then PRIOR=$(pmset -g | awk '/SleepDisabled/{print $2}'); [ "$PRIOR" = 1 ] || PRIOR=0"#
             .to_string(),
-        r#"else PRIOR="$RECLAIM"; pmset -a disablesleep "$PRIOR""#.to_string(),
+        format!(r#"else PRIOR="$RECLAIM"; {PMSET_AS_ROOT} -a disablesleep "$PRIOR""#),
         "fi".to_string(),
         r#"printf 'prior=%s\n' "$PRIOR" > "$CRUMB""#.to_string(),
         "HELD=0".to_string(),
@@ -297,15 +475,41 @@ fn watchdog_script(watchdog: &crate::platform::Watchdog) -> String {
         // Edge-triggered: written only on a transition, so a user toggling
         // `pmset` by hand is not fought every three seconds.
         r#"if [ "$WANT" != "$HELD" ]"#.to_string(),
-        r#"then if [ "$WANT" = 1 ]; then pmset -a disablesleep 1; else pmset -a disablesleep "$PRIOR"; fi; HELD="$WANT""#
-            .to_string(),
+        format!(
+            // `HELD` moves only when the command that moves the machine
+            // succeeded. When this loop was root the write could not fail for
+            // want of privilege, so recording the intent was the same as
+            // recording the outcome; spending a grant is fallible — it can be
+            // revoked underneath us, or overridden by a later drop-in — and an
+            // unconditional `HELD="$WANT"` would retire the edge this loop is
+            // triggered on, believing it holds a machine that is free to sleep
+            // and never trying again. Left unmoved, the next poll retries.
+            r#"then if [ "$WANT" = 1 ]; then {PMSET_AS_ROOT} -a disablesleep 1 && HELD=1; else {PMSET_AS_ROOT} -a disablesleep "$PRIOR" && HELD=0; fi"#
+        ),
         "fi".to_string(),
         format!("sleep {WATCHDOG_POLL_SECONDS}"),
         "done".to_string(),
-        r#"[ "$HELD" = 0 ] || pmset -a disablesleep "$PRIOR""#.to_string(),
-        r#"rm -f "$CRUMB""#.to_string(),
+        // The breadcrumb is the *only* thing that tells a later launch this
+        // machine was left held, and `disablesleep` survives a reboot. So it is
+        // removed if and only if the release actually landed: a failed release
+        // that still cleared the note would produce a Mac that never sleeps
+        // again and an app that reports nothing about it at any future launch.
+        format!(
+            r#"if [ "$HELD" = 0 ] || {PMSET_AS_ROOT} -a disablesleep "$PRIOR"; then rm -f "$CRUMB"; fi"#
+        ),
     ]
     .join("; ")
+}
+
+/// How the loop is started now that it is not root.
+///
+/// Backgrounded with every stream closed, exactly as the `osascript` wrapper
+/// used to do it — the shell this is handed to must return at once, or the app
+/// would not finish starting. What is gone is the elevation: the loop spends the
+/// grant with `sudo -n` instead of being root itself, so nothing here can
+/// produce a password prompt.
+fn watchdog_spawn_command(watchdog: &crate::platform::Watchdog) -> String {
+    format!("{{ {} ; }} >/dev/null 2>&1 &", watchdog_script(watchdog))
 }
 
 /// Escapes a shell command for an AppleScript string literal.
@@ -318,24 +522,14 @@ fn as_applescript_string(shell: &str) -> String {
     format!("\"{}\"", shell.replace('\\', "\\\\").replace('"', "\\\""))
 }
 
-/// Runs `shell` as root and returns immediately, leaving it running.
-///
-/// `do shell script` waits for its command's output to close, so the loop is
-/// backgrounded with every stream redirected — otherwise `osascript` would
-/// block for the entire session and the app would never finish starting.
-fn privileged_background(shell: &str) -> String {
-    format!(
-        "do shell script {} with administrator privileges",
-        as_applescript_string(&format!("{{ {shell} ; }} >/dev/null 2>&1 &"))
-    )
-}
-
 /// Runs `shell` as root and waits for it.
 ///
-/// Deliberately not backgrounded, unlike [`privileged_background`]: this is used
-/// for one-shot repairs, where returning before the command has run would report
-/// a success nobody has verified — on the one screen whose job is to tell the
-/// user the truth about whether their Mac can sleep.
+/// Every remaining elevation is one-shot and waited for: installing the grant,
+/// handing it back, arming a wake schedule, and the stranded-machine repair.
+/// There used to be a backgrounded sibling for the watchdog, which is gone with
+/// the root loop it existed to start — a run that returns before its command has
+/// run would report a success nobody has verified, on the one screen whose job
+/// is to tell the user the truth about whether their Mac can sleep.
 fn privileged_now(shell: &str) -> String {
     format!(
         "do shell script {} with administrator privileges",
@@ -776,8 +970,16 @@ mod tests {
     fn the_backgrounded_wrapper_is_valid_shell_once_unescaped() {
         // The braces-and-ampersand wrapper is assembled separately from the loop
         // body, so it gets its own parse: a stray brace there would not show up
-        // in the test above.
-        let wrapped = format!("{{ {} ; }} >/dev/null 2>&1 &", sample_watchdog(None));
+        // in the test above. Built through the real function rather than
+        // re-spelt here, so the thing that gets parsed is the thing that runs.
+        let flag = PathBuf::from("/data/keep-awake.hold");
+        let crumb = PathBuf::from("/data/keep-awake.owned");
+        let wrapped = watchdog_spawn_command(&crate::platform::Watchdog {
+            flag: &flag,
+            breadcrumb: &crumb,
+            reclaimed_prior: None,
+            app_pid: 4242,
+        });
         let checked = std::process::Command::new("sh")
             .arg("-n")
             .arg("-c")
@@ -801,19 +1003,20 @@ mod tests {
     }
 
     #[test]
-    fn the_watchdog_is_backgrounded_so_osascript_returns_at_once() {
-        // `do shell script` waits for its command's output to close. Without
-        // this the password prompt would be followed by a hang lasting the
-        // whole session, because the loop only ends when the app does.
-        let applescript = privileged_background("true");
-        assert!(
-            applescript.contains("with administrator privileges"),
-            "got: {applescript}"
-        );
-        assert!(
-            applescript.contains(">/dev/null 2>&1 &"),
-            "got: {applescript}"
-        );
+    fn the_watchdog_is_backgrounded_so_starting_it_returns_at_once() {
+        // The loop ends only when the app does, so whatever starts it must not
+        // wait for it. This used to be true of `osascript`, which waits for its
+        // command's output to close; it is now true of the shell the loop is
+        // spawned into, and the requirement outlived the elevation.
+        let flag = PathBuf::from("/data/keep-awake.hold");
+        let crumb = PathBuf::from("/data/keep-awake.owned");
+        let spawned = watchdog_spawn_command(&crate::platform::Watchdog {
+            flag: &flag,
+            breadcrumb: &crumb,
+            reclaimed_prior: None,
+            app_pid: 4242,
+        });
+        assert!(spawned.contains(">/dev/null 2>&1 &"), "got: {spawned}");
     }
 
     #[test]
@@ -831,6 +1034,293 @@ mod tests {
             !applescript.contains('&'),
             "a repair must be waited for: {applescript}"
         );
+    }
+
+    #[test]
+    fn the_grant_names_two_exact_commands_and_nothing_wider() {
+        // The whole safety case. `man 5 sudoers`: with arguments present, "the
+        // arguments in the Cmnd must match those given by the user on the
+        // command line" — so the grant is two fixed state transitions, not a
+        // root shell. A bare `pmset`, or one carrying a `*`, would hand over
+        // every power setting on the machine including the wake schedule.
+        let rule = sudoers_rule_text(501);
+        assert!(
+            rule.contains("#501 ALL=(root) NOPASSWD: NOSETENV: /usr/bin/pmset -a disablesleep 1"),
+            "got: {rule}"
+        );
+        assert!(
+            rule.contains("#501 ALL=(root) NOPASSWD: NOSETENV: /usr/bin/pmset -a disablesleep 0"),
+            "got: {rule}"
+        );
+        assert!(!rule.contains('*'), "no wildcard may appear: {rule}");
+        for wider in ["ALL\n", "(ALL)", "/bin/sh", "pmset\n"] {
+            assert!(!rule.contains(wider), "must not grant {wider:?}: {rule}");
+        }
+    }
+
+    #[test]
+    fn the_grant_is_pinned_to_one_uid_rather_than_every_administrator() {
+        // `%admin` would extend the grant to every administrator account on the
+        // machine, including ones that never asked for it. A numeric uid is also
+        // the one grantee form that cannot need escaping: a username is
+        // attacker-influenced text being written into a file that governs root.
+        let rule = sudoers_rule_text(501);
+        assert!(!rule.contains("%admin"), "got: {rule}");
+        assert!(!rule.contains("%wheel"), "got: {rule}");
+        let uid_lines = rule
+            .lines()
+            .filter(|line| line.starts_with("#501 "))
+            .count();
+        assert_eq!(uid_lines, 2, "exactly two granted commands: {rule}");
+    }
+
+    #[test]
+    fn the_drop_in_is_named_without_a_dot_so_sudo_actually_reads_it() {
+        // `man 5 sudoers`: the directory is read "skipping file names that end
+        // in `~' or contain a `.' character". A reverse-DNS name would install
+        // cleanly, validate cleanly, and then never load — the app would ask for
+        // a password every launch and no error would say why.
+        let name = SUDOERS_PATH.rsplit('/').next().unwrap();
+        assert!(!name.contains('.'), "got: {SUDOERS_PATH}");
+        assert!(!name.ends_with('~'), "got: {SUDOERS_PATH}");
+        assert!(
+            SUDOERS_PATH.starts_with("/etc/sudoers.d/"),
+            "got: {SUDOERS_PATH}"
+        );
+    }
+
+    #[test]
+    fn the_install_validates_a_temporary_copy_before_it_is_ever_in_place() {
+        // A malformed file in `/etc/sudoers.d` breaks `sudo` for the whole
+        // machine, including the `sudo` that would fix it. Validating after
+        // placement — which is what the one comparable project on GitHub does —
+        // leaves a window in which a broken file is live.
+        let script = sudoers_install_script(501);
+        let validate_at = script.find("visudo -cf").expect("must validate");
+        let place_at = script.find("/usr/bin/install").expect("must install");
+        assert!(
+            validate_at < place_at,
+            "validation must precede placement: {script}"
+        );
+    }
+
+    #[test]
+    fn the_installed_file_is_owned_by_root_and_not_writable_by_anyone_else() {
+        // The file names the commands root will run without a password. Left
+        // user-writable it is a root shell for anything running as the user,
+        // which is exactly the defect that made the same pattern a live
+        // privilege escalation in yabai (#1318) and battery (#443).
+        let script = sudoers_install_script(501);
+        assert!(
+            script.contains("/usr/bin/install -m 0440 -o root -g wheel"),
+            "got: {script}"
+        );
+    }
+
+    #[test]
+    fn a_failed_install_leaves_no_file_behind_at_all() {
+        // Half an install is worse than none: a truncated rule that fails to
+        // parse takes `sudo` down with it.
+        let script = sudoers_install_script(501);
+        assert!(script.contains("set -eu"), "got: {script}");
+        assert!(
+            script.contains("trap") && script.contains("rm -f"),
+            "the temporary copy must be cleaned up on any exit: {script}"
+        );
+    }
+
+    #[test]
+    fn the_watchdog_reaches_pmset_through_the_grant_rather_than_as_root() {
+        // The point of the whole change. The loop used to *be* root, which is
+        // why it cost a password every launch; now it is an ordinary user
+        // process spending a grant that was paid for once. `-n` so it can never
+        // block on a prompt nobody is watching.
+        let script = sample_watchdog(None);
+        assert!(
+            script.contains("sudo -n /usr/bin/pmset -a disablesleep"),
+            "got: {script}"
+        );
+        // Every one of the four writes, counted rather than spot-checked: the
+        // exit release is the one a spot-check missed, and losing its prefix
+        // means every app exit silently fails to let go.
+        assert_eq!(
+            script
+                .matches("sudo -n /usr/bin/pmset -a disablesleep")
+                .count(),
+            4,
+            "every write must go through the grant: {script}"
+        );
+        for unprefixed in ["; pmset -a", "then pmset -a", "|| pmset -a"] {
+            assert!(
+                !script.contains(unprefixed),
+                "no unprefixed pmset may remain ({unprefixed:?}): {script}"
+            );
+        }
+    }
+
+    /// A real `sudo -n -l` listing, captured on macOS 26.2 with the grant
+    /// installed. The `(ALL) ALL` line is macOS's stock `%admin` rule and is the
+    /// whole reason this is parsed rather than inferred from an exit status.
+    const LISTING_WITH_GRANT: &str = "\
+Matching Defaults entries for yudha on host:
+    env_reset, env_keep+=BLOCKSIZE, !log_allowed
+
+User yudha may run the following commands on host:
+    (ALL) ALL
+    (root) NOSETENV: NOPASSWD: /usr/bin/pmset -a disablesleep 1
+    (root) NOSETENV: NOPASSWD: /usr/bin/pmset -a disablesleep 0";
+
+    #[test]
+    fn the_grant_is_recognised_in_a_real_sudo_listing() {
+        assert!(grant_is_listed(LISTING_WITH_GRANT));
+    }
+
+    #[test]
+    fn a_blanket_admin_rule_is_not_mistaken_for_the_grant() {
+        // The defect that shipped in the first draft of this function, caught by
+        // running it rather than reading it: macOS gives admins `(ALL) ALL`, so
+        // `sudo -n -l <anything>` succeeds and the exit status cannot tell "our
+        // grant is installed" from "this user is an admin". Hiding the Authorize
+        // button on that basis leaves a machine that can never hold anything.
+        let admin_only = "\
+User yudha may run the following commands on host:
+    (ALL) ALL";
+        assert!(!grant_is_listed(admin_only));
+    }
+
+    #[test]
+    fn another_tools_nopasswd_rule_is_not_mistaken_for_the_grant() {
+        // Once any NOPASSWD rule exists the listing itself stops asking for a
+        // password, so `-n` stops discriminating. A rule belonging to some other
+        // utility must not read as ours.
+        let someone_else = "\
+User yudha may run the following commands on host:
+    (ALL) ALL
+    (root) NOPASSWD: /usr/local/bin/smc -k CH0B -w 02";
+        assert!(!grant_is_listed(someone_else));
+    }
+
+    #[test]
+    fn half_a_grant_is_not_a_grant() {
+        // Take the hold but never give it back is the one asymmetry worth
+        // refusing: it strands the machine rather than merely failing.
+        let only_on = "\
+User yudha may run the following commands on host:
+    (root) NOSETENV: NOPASSWD: /usr/bin/pmset -a disablesleep 1";
+        assert!(!grant_is_listed(only_on));
+    }
+
+    #[test]
+    fn a_rule_that_merely_starts_like_ours_is_not_the_grant() {
+        // Anchored at the end of the line, so a wider rule carrying further
+        // arguments — or a trailing wildcard — is not read as this grant.
+        let wider = "\
+User yudha may run the following commands on host:
+    (root) NOPASSWD: /usr/bin/pmset -a disablesleep 1 extra
+    (root) NOPASSWD: /usr/bin/pmset -a disablesleep 0 extra";
+        assert!(!grant_is_listed(wider));
+    }
+
+    #[test]
+    fn no_listing_at_all_means_no_grant() {
+        // `sudo -n -l` fails outright when nothing is granted without a
+        // password, leaving empty output. That is "not authorized", not a crash.
+        assert!(!grant_is_listed(""));
+    }
+
+    #[test]
+    fn a_hold_that_failed_is_retried_rather_than_recorded_as_held() {
+        // The defect this loop is most likely to have, now that the command can
+        // fail: `HELD` marks the edge as spent, so assigning it after a failed
+        // `sudo` retires the trigger and the loop sits believing it holds a
+        // machine that is free to sleep. Run for real against a `sudo` that
+        // always fails, and count the attempts.
+        let dir = tempfile::tempdir().unwrap();
+        let bin = dir.path().join("sudo");
+        std::fs::write(&bin, "#!/bin/sh\necho attempt >> \"$TALLY\"\nexit 1\n").unwrap();
+        std::fs::set_permissions(&bin, std::os::unix::fs::PermissionsExt::from_mode(0o755))
+            .unwrap();
+        let tally = dir.path().join("tally");
+        let flag = dir.path().join("keep-awake.hold");
+        std::fs::write(&flag, "").unwrap();
+        let crumb = dir.path().join("keep-awake.owned");
+
+        // A pid that is alive for the whole run, ended by the timeout below.
+        let mut sleeper = std::process::Command::new("sleep")
+            .arg("30")
+            .spawn()
+            .unwrap();
+        let script = watchdog_script(&crate::platform::Watchdog {
+            flag: &flag,
+            breadcrumb: &crumb,
+            reclaimed_prior: None,
+            app_pid: sleeper.id(),
+        });
+        let mut loop_process = std::process::Command::new("sh")
+            .arg("-c")
+            .arg(&script)
+            .env("PATH", format!("{}:/usr/bin:/bin", dir.path().display()))
+            .env("TALLY", &tally)
+            .stdout(std::process::Stdio::null())
+            .stderr(std::process::Stdio::null())
+            .spawn()
+            .unwrap();
+        // Long enough for several polls at three seconds each.
+        std::thread::sleep(std::time::Duration::from_secs(8));
+        let _ = loop_process.kill();
+        let _ = loop_process.wait();
+        let _ = sleeper.kill();
+        let _ = sleeper.wait();
+
+        let attempts = std::fs::read_to_string(&tally)
+            .unwrap_or_default()
+            .lines()
+            .count();
+        assert!(
+            attempts > 1,
+            "a failed hold must be retried on the next poll, saw {attempts} attempt(s)"
+        );
+    }
+
+    #[test]
+    fn the_breadcrumb_outlives_a_release_that_did_not_land() {
+        // `disablesleep` survives a reboot and the breadcrumb is the only thing
+        // that tells a later launch to reclaim it. Removing it after a release
+        // that failed produces a Mac that never sleeps again and an app that
+        // reports nothing about it, ever.
+        let script = sample_watchdog(None);
+        let release = script
+            .find(r#"if [ "$HELD" = 0 ] ||"#)
+            .expect("the exit release must be guarded");
+        let removal = script.find(r#"rm -f "$CRUMB""#).expect("must remove");
+        assert!(
+            release < removal,
+            "the removal must sit inside the guard: {script}"
+        );
+        assert!(
+            script[release..removal].contains("then"),
+            "the removal must be conditional on the release: {script}"
+        );
+    }
+
+    #[test]
+    fn starting_the_watchdog_asks_for_no_password_once_the_grant_is_in_place() {
+        // The defect in #55, stated as a test: a second launch must reach a
+        // holding state without an administrator prompt. The loop is spawned as
+        // the user, so there is no `osascript` and nothing to type into.
+        let flag = PathBuf::from("/data/keep-awake.hold");
+        let crumb = PathBuf::from("/data/keep-awake.owned");
+        let spawned = watchdog_spawn_command(&crate::platform::Watchdog {
+            flag: &flag,
+            breadcrumb: &crumb,
+            reclaimed_prior: None,
+            app_pid: 4242,
+        });
+        assert!(
+            !spawned.contains("administrator privileges"),
+            "got: {spawned}"
+        );
+        assert!(!spawned.contains("osascript"), "got: {spawned}");
     }
 
     #[test]

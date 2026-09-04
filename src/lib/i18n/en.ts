@@ -114,7 +114,7 @@ export const en = {
     "Agent Profiles ended unexpectedly while holding the lid-closed state, and that setting survives a restart.",
   "awake.restoreSleep": "Restore sleep",
   "awake.needsPassword":
-    "Needs an administrator password once per run. A helper turns the setting on while an agent works, off when it stops, and shuts down with Agent Profiles.",
+    "Needs an administrator password once on this Mac, not on every launch. It grants exactly two commands — turning the lid-closed setting on and off — and nothing else. To undo it later: sudo rm /etc/sudoers.d/agent-profiles",
 
   // Keep Awake — status card bands (unsupported, stranded, unauthorized, failed hold)
   "awake.band.unavailable": "Not available here",
