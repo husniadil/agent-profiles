@@ -298,11 +298,16 @@ pub fn apply(data_root: &Path, hold: bool) -> Result<()> {
 /// Puts sleep back after a run that died holding it, and makes that stick.
 ///
 /// Disarms the trigger and drops the flag before restoring anything, because
-/// the way out has to stay out. It is tempting to argue that neither is needed:
-/// `stranded` and `authorized` cannot both be true inside one `Handle` — where
-/// a password is needed the app starts unauthorized, and the only thing that
-/// authorizes it clears `stranded` in the same breath — so this app's own sweep
-/// would be writing a flag that nothing is watching.
+/// the way out has to stay out. It used to be arguable that neither was needed:
+/// `stranded` and `authorized` could not both be true inside one `Handle` —
+/// where a password was needed the app started unauthorized, and the only thing
+/// that authorized it cleared `stranded` in the same breath — so this app's own
+/// sweep would be writing a flag that nothing was watching.
+///
+/// Since the grant outlives the process (#55) that is no longer true: a launch
+/// can find itself authorized *and* stranded, start a loop straight away, and be
+/// watching that flag within milliseconds. The argument below was already the
+/// load-bearing one; this is now the second reason rather than the only one.
 ///
 /// That argument is about a process, and `disablesleep` is a machine. Nothing
 /// stops a second copy of the app running; `cargo tauri dev` beside the
@@ -541,6 +546,25 @@ pub struct Capabilities {
     /// macOS; elsewhere the app is already allowed to do this, and the window
     /// skips the whole ask-first band.
     pub needs_authorization: bool,
+    /// Whether that prompt has already been answered on this machine, by some
+    /// earlier run. Meaningless where nothing needs authorizing, and never read
+    /// there — see [`starts_authorized`].
+    pub authorization_installed: bool,
+}
+
+/// Whether a run may consider itself authorized before asking anybody anything.
+///
+/// The decision issue #55 turned on. It used to be `!needs_authorization`, which
+/// made every macOS launch start unauthorized and put the password prompt in
+/// front of the user again — once per run, forever, because a grant obtained by
+/// elevating *this process* dies with it.
+///
+/// The fix is not to remember an answer, which would let the window claim an
+/// authorization the run does not hold. It is to ask a question whose answer
+/// outlives the process: the grant lives on the machine, so a later launch can
+/// go and look. `authorization_installed` is that look.
+pub fn starts_authorized(capabilities: Capabilities) -> bool {
+    !capabilities.needs_authorization || capabilities.authorization_installed
 }
 
 /// Everything the window asks for in one call.
@@ -559,7 +583,6 @@ pub struct Status {
     /// Whether the privileged watchdog is running for this app run. Always true
     /// where nothing needed authorizing in the first place.
     pub authorized: bool,
-    /// Whether a previous run may have left the machine unable to sleep.
     pub stranded: bool,
     pub phase: Phase,
     pub settings: Settings,
@@ -645,10 +668,10 @@ impl Handle {
             thermal_supported: capabilities.thermal,
             needs_authorization: capabilities.needs_authorization,
             // Authorized from the start wherever there was nothing to
-            // authorize. Linux takes a logind inhibitor as the user and Windows
-            // writes a power scheme the user owns; only macOS has a root loop
-            // that has to be started before anything can be held.
-            authorized: !capabilities.needs_authorization,
+            // authorize — Linux takes a logind inhibitor as the user and Windows
+            // writes a power scheme the user owns — and, since #55, also
+            // wherever the one-time grant is already on the machine.
+            authorized: starts_authorized(capabilities),
             stranded: recovery.stranded,
             phase: Phase::Off,
             settings,
@@ -831,6 +854,20 @@ impl Handle {
         if let Ok(mut status) = self.status.lock() {
             status.authorized = true;
             status.stranded = false;
+        }
+    }
+
+    /// Walks back the optimism in [`starts_authorized`].
+    ///
+    /// A run that finds the grant already on the machine reports itself
+    /// authorized before anything has been started, because that is what the
+    /// window has to render on its first frame. If the loop then fails to start,
+    /// the claim stops being true, and the honest thing is to put the Authorize
+    /// button back rather than leave a window saying the machine is being held
+    /// by a loop that is not running.
+    pub fn mark_unauthorized(&self) {
+        if let Ok(mut status) = self.status.lock() {
+            status.authorized = false;
         }
     }
 
@@ -1171,6 +1208,42 @@ mod tests {
     }
 
     #[test]
+    fn a_machine_that_was_authorized_once_does_not_ask_again_on_the_next_launch() {
+        // Issue #55, as a decision. A macOS run used to start unauthorized every
+        // time, because the old answer was `!needs_authorization` and nothing
+        // outlived the process that had been elevated. What outlives it is the
+        // grant on the machine, so a later launch that finds one starts holding
+        // without putting a password prompt in front of anybody.
+        let macos = |installed| Capabilities {
+            hold: true,
+            thermal: true,
+            needs_authorization: true,
+            authorization_installed: installed,
+        };
+        assert!(!starts_authorized(macos(false)), "first ever launch asks");
+        assert!(
+            starts_authorized(macos(true)),
+            "every launch after does not"
+        );
+    }
+
+    #[test]
+    fn a_platform_with_nothing_to_authorize_never_consults_the_grant() {
+        // Linux takes a logind inhibitor as the user and Windows writes a power
+        // scheme the user already owns. Neither has anything to install, so
+        // neither may be made to depend on finding it installed — a false here
+        // must not be able to lock those platforms out of holding.
+        for installed in [false, true] {
+            assert!(starts_authorized(Capabilities {
+                hold: true,
+                thermal: false,
+                needs_authorization: false,
+                authorization_installed: installed,
+            }));
+        }
+    }
+
+    #[test]
     fn a_pending_nudge_wakes_the_sweep_at_once() {
         // The delay the user hit: a toggled trigger waited up to a full tick
         // before anything re-decided. A nudge that lands while the sweep is busy
@@ -1185,6 +1258,7 @@ mod tests {
                 hold: true,
                 thermal: false,
                 needs_authorization: true,
+                authorization_installed: false,
             },
             Recovery {
                 reclaimed_prior: None,
@@ -1594,6 +1668,7 @@ mod tests {
                 hold: true,
                 thermal: true,
                 needs_authorization: true,
+                authorization_installed: false,
             },
             recovery,
         )

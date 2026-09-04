@@ -303,6 +303,24 @@ pub trait Platform: Send + Sync {
         false
     }
 
+    /// Whether the one-time authorization has already been given on this
+    /// machine, so this run needs no prompt at all.
+    ///
+    /// The answer to issue #55. Where a hold needs a privilege the user must
+    /// grant, that grant is a property of the machine, not of the process that
+    /// asked for it — so a second launch has to be able to find it. Platforms
+    /// that never needed authorizing report `false` and are never asked, because
+    /// [`Platform::needs_authorization`] already gates every caller.
+    fn authorization_installed(&self) -> bool {
+        false
+    }
+
+    /// Ask for the administrator password once, and record the grant somewhere
+    /// the next launch will find it.
+    fn install_authorization(&self) -> Result<()> {
+        anyhow::bail!("this platform has nothing to authorize")
+    }
+
     /// Arm or release the hold.
     ///
     /// The default is the flag file the macOS root loop watches, which is also

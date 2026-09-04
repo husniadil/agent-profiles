@@ -96,7 +96,7 @@ export const es: Strings = {
     "Agent Profiles se cerró inesperadamente mientras mantenía activo el estado de tapa cerrada, y ese ajuste persiste tras un reinicio.",
   "awake.restoreSleep": "Restaurar la suspensión",
   "awake.needsPassword":
-    "Necesita una contraseña de administrador una vez por sesión. Un asistente activa el ajuste mientras un agente trabaja, lo desactiva cuando se detiene, y se cierra junto con Agent Profiles.",
+    "Necesita una contraseña de administrador una sola vez en este Mac, no en cada inicio. Concede exactamente dos comandos — activar y desactivar el ajuste con la tapa cerrada — y nada más. Para revocarlo después: sudo rm /etc/sudoers.d/agent-profiles",
 
   // Keep Awake — status card bands (unsupported, stranded, unauthorized, failed hold)
   "awake.band.unavailable": "No disponible aquí",
