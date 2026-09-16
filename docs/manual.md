@@ -88,7 +88,7 @@ Windows and Linux ask for no password.
 
 - **Pause on low battery.** On battery, the hold is dropped below the charge you set, even mid-task. The default is 30%. It is ignored while plugged in. A machine with no battery never uses it.
 - **Give up on a silent agent after.** An agent that finishes its turn releases the machine at once. This setting only covers an agent that stopped part-way: after this many minutes with nothing written, it counts as gone. The default is 10 minutes.
-- **Thermal guard.** Releases the hold when the machine reports it is overheating. On by default. It does nothing on Windows, which does not report this.
+- **Thermal guard.** Releases the hold when the machine reports it is overheating. On by default. The switch is shown only where the machine reports its temperature, so it is absent on Windows.
 
 ### The status card
 
@@ -108,15 +108,9 @@ The **Watching** list shows the Claude Code and Codex session folders being watc
 
 If Agent Profiles ended while holding the machine awake, the setting may still be in place.
 
-- **macOS:** the next launch shows **Your Mac may not be able to sleep** with a **Restore sleep** button. To restore it by hand instead, run the command below.
+- **macOS:** the next launch shows **Your Mac may not be able to sleep** with a **Restore sleep** button. To restore it by hand instead, run `sudo pmset -a disablesleep 0`.
 - **Windows:** the next launch puts the lid-close action back without asking.
 - **Linux:** the lock ends with the Agent Profiles process.
-
-
-
-```sh
-sudo pmset -a disablesleep 0
-```
 
 ### What a hold covers on each platform
 

@@ -55,8 +55,8 @@ Each module's header comment says what it is for. Read that before the code.
 ### Backend: the OS axis (`platform/`)
 
 - `mod.rs`: the `Platform` trait and `current()`. Nothing here names an app.
-  Capabilities (`can_hold_awake`, `can_schedule_wake`, `can_read_thermal`)
-  default to false and each backend opts in.
+  `can_hold_awake` and `can_schedule_wake` default to false and each backend
+  opts in. `can_read_thermal` is true wherever `thermal()` is not `Unknown`.
 - `macos.rs`, `windows.rs`, `linux.rs`: the three backends. The Windows and
   Linux files compile everywhere so their pure helpers stay tested.
 - `unix_ps.rs`, `win_proc.rs`: process table scans (`ps`, `tasklist`/PowerShell)
@@ -168,8 +168,8 @@ is running".
 ### The socket path budget
 
 Several apps put a Unix socket inside the profile directory, and `sun_path` is
-capped at 104 bytes on macOS. That is why the data root is one character and
-profile ids are short. Do not lengthen a path segment without checking
+capped at 104 bytes on macOS. That is why the profiles folder is `p` and
+profile ids are eight characters. Do not lengthen a path segment without checking
 `paths::socket_path_len`. The probe reports the budget for a new app.
 
 ### A new app is data

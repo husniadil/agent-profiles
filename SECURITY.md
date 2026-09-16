@@ -70,8 +70,8 @@ administrator password through the same path. Opening the app at the set time
 is a per-user LaunchAgent in `~/Library/LaunchAgents` that runs
 `/usr/bin/open`. That half needs no password.
 
-On Windows, Keep Awake writes the current power scheme's lid-close action with
-`powercfg`, records the prior action, and restores it. On Linux it holds a
+On Windows, Keep Awake writes the current power scheme's lid-close action through
+the `powrprof` API, records the prior action, and restores it. On Linux it holds a
 `systemd-inhibit` lid-switch inhibitor. Neither asks for elevation.
 
 ### Network: the updater
