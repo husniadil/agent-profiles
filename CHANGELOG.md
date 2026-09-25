@@ -2,6 +2,12 @@
 
 Notable changes, newest first. This project follows [Semantic Versioning](https://semver.org).
 
+## [Unreleased]
+
+### Fixed
+
+- **An app that is not installed no longer gets a row in the tray.** 0.6.2 gave every uninstalled app a disabled "X is not installed" row beside the ones that work, so the menu for someone with one app installed carried up to six rows naming nothing they could launch. The tray now drops that row again — the reason still has somewhere to live, in the window's greyed section and the empty-state list — and a menu with nothing installed at all shows no rows above Settings…/Quit rather than one per declared app.
+
 ## [0.7.0] — 2026-09-02
 
 A Schedule tab: the Mac wakes itself at a time you set and opens an app.

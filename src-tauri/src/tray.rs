@@ -226,28 +226,12 @@ pub fn menu_rows(
         }
     }
 
-    // An app that cannot be used says so, always — beside a working app as much
-    // as alone. Dropping the row left someone who expected two apps with no way
-    // to tell "not installed" from "this tool forgot about it", and it is the
-    // absence itself that is worth naming, not an error. The row is disabled and
-    // dotless: it is a sentence about the app, with nothing to click.
-    //
-    // The short form, never the detail: a menu is as wide as its widest row, so
-    // one stock path here sets the width of every profile row above it, and on
-    // macOS a user with one of the seven declared apps installed would get six
-    // of them. The path is not lost — the window shows it, where the width is
-    // not shared with anything.
-    for section in sections {
-        if let Some(reason) = &section.unavailable {
-            rows.push(MenuRow {
-                id: format!("error:{}", section.spec.id),
-                text: reason.summary.clone(),
-                enabled: false,
-                running: false,
-            });
-        }
-    }
-
+    // An app that cannot be used contributes no row here — the tray is a launch
+    // menu, and "X is not installed" names nothing you can act on. It also
+    // widens every row above it to the longest stock path among however many of
+    // the seven declared apps are missing. The window still says why, where the
+    // width is not shared with anything and the reason has somewhere useful to
+    // sit (`ProfileList`'s `Unavailable` row, `EmptyState`'s reason list).
     if let Some(message) = runtime_error {
         rows.push(MenuRow {
             id: "error".into(),
@@ -602,54 +586,29 @@ mod tests {
         assert!(rows.iter().all(|r| !r.text.starts_with(' ')));
     }
 
-    /// An NSMenu is as wide as its widest row, so the reason a tray row carries
-    /// sets the width of every profile row above it. A macOS user with one of
-    /// the seven declared apps installed gets six of these rows, and the longest
-    /// stock path among them runs to 96 characters — enough to stretch the menu
-    /// to roughly 700px and push the profile labels away from the pointer. The
-    /// tray names the product and stops; the window, which is not
-    /// width-constrained, keeps the path.
+    /// An NSMenu is as wide as its widest row, and a menu is a launch list, not
+    /// an inventory: "ChatGPT is not installed" offers nothing to click, so it
+    /// earns no place stealing width from the profiles that do. The window
+    /// still says why (`ProfileList`'s `Unavailable` row, `EmptyState`'s reason
+    /// list) — the tray just doesn't repeat it.
     #[test]
-    fn the_tray_reason_names_the_product_and_leaves_the_path_to_the_window() {
+    fn an_app_that_is_not_installed_contributes_no_rows_beside_a_working_one() {
         let sections = vec![
             section(&app_spec::CLAUDE, profiles(&["Kerja"])),
             missing(&app_spec::CODEX),
         ];
         let rows = menu_rows(&sections, &[], None, crate::general::Locale::En);
-        let row = rows
-            .iter()
-            .find(|r| r.id == "error:codex")
-            .expect("an uninstalled app says why, it does not vanish");
         assert!(
-            row.text.contains(app_spec::CODEX.product),
-            "the row is useless if it does not say which app it is about: {}",
-            row.text
+            rows.iter().all(|r| r.id != "error:codex"),
+            "an uninstalled app should contribute no row to the tray"
         );
-        assert!(
-            !row.text.contains('/'),
-            "a filesystem path in a tray row widens every other row: {}",
-            row.text
-        );
-    }
-
-    #[test]
-    fn an_app_that_is_not_installed_is_greyed_with_its_reason_beside_a_working_one() {
-        let sections = vec![
-            section(&app_spec::CLAUDE, profiles(&["Kerja"])),
-            missing(&app_spec::CODEX),
-        ];
-        let rows = menu_rows(&sections, &[], None, crate::general::Locale::En);
-        let row = rows
-            .iter()
-            .find(|r| r.id == "error:codex")
-            .expect("an uninstalled app says why, it does not vanish");
-        assert!(!row.enabled, "the reason is a label, not an action");
-        assert!(row.text.contains("ChatGPT"));
-        assert!(!row.running, "an app that cannot launch carries no dot");
-        // Naming it is the whole of what it offers: nothing about it is clickable.
+        assert!(rows.iter().all(|r| !r.text.contains("ChatGPT")));
+        // Nothing about it is clickable, because nothing about it is there.
         assert!(rows.iter().all(|r| !r.id.contains(":codex:")));
         // The app that does work is untouched by the other's absence.
         assert!(rows.iter().any(|r| r.id == "launch:claude:id0"));
+        // With only one working app left to show, it needs no header either.
+        assert!(rows.iter().all(|r| !r.id.starts_with("header:")));
     }
 
     #[test]
@@ -704,13 +663,13 @@ mod tests {
     }
 
     #[test]
-    fn when_nothing_is_installed_every_reason_is_shown() {
+    fn when_nothing_is_installed_the_tray_shows_no_rows() {
         let sections = vec![missing(&app_spec::CLAUDE), missing(&app_spec::CODEX)];
         let rows = menu_rows(&sections, &[], None, crate::general::Locale::En);
-        assert_eq!(rows.len(), 2);
-        assert!(rows.iter().all(|r| !r.enabled));
-        assert!(rows.iter().any(|r| r.text.contains("Claude Desktop")));
-        assert!(rows.iter().any(|r| r.text.contains("ChatGPT")));
+        assert!(
+            rows.is_empty(),
+            "with nothing installed the tray has nothing to launch and nothing to say"
+        );
     }
 
     #[test]
