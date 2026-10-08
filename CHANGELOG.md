@@ -6,6 +6,7 @@ Notable changes, newest first. This project follows [Semantic Versioning](https:
 
 ### Fixed
 
+- **Keep Awake asks for an administrator password once on a Mac, not once every time Agent Profiles starts.** Holding the lid-closed setting needs root, and the app used to buy that root by elevating itself — which meant the privilege died with the process and the prompt came back on every launch. The password now installs a `sudoers` rule granting exactly two commands, turning that setting on and off and nothing else, so every later launch holds the machine with no prompt. The helper doing the turning is no longer root either. The rule lives at `/etc/sudoers.d/agent-profiles` and outlives the app: deleting Agent Profiles does not remove it, `sudo rm /etc/sudoers.d/agent-profiles` does, and the Keep Awake tab prints that command before it asks for the password. Schedule is unchanged and still asks when the armed set changes.
 - **An app that is not installed no longer gets a row in the tray.** 0.6.2 gave every uninstalled app a disabled "X is not installed" row beside the ones that work, so the menu for someone with one app installed carried up to six rows naming nothing they could launch. The tray now drops that row again — the reason still has somewhere to live, in the window's greyed section and the empty-state list — and a menu with nothing installed at all shows no rows above Settings…/Quit rather than one per declared app.
 
 ## [0.7.0] — 2026-09-02

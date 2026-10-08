@@ -765,6 +765,11 @@ pub fn authorize_keep_awake(
     }
     let flag = crate::paths::keep_awake_flag(&handle.data_root);
     let breadcrumb = crate::paths::keep_awake_breadcrumb(&handle.data_root);
+    let failure = crate::paths::keep_awake_failure(&handle.data_root);
+    // Whatever the last run's loop failed at is not this run's news. Cleared
+    // before the new loop starts, so the only marker the sweep can read is one
+    // this loop wrote.
+    let _ = std::fs::remove_file(&failure);
     // Read, not taken. The spawn below asks for a password and the user can
     // cancel it; discarding the reclaim value before knowing whether a watchdog
     // actually took it on would leave a stranded machine with nothing to put
@@ -783,6 +788,23 @@ pub fn authorize_keep_awake(
             .platform
             .install_authorization()
             .map_err(|e| e.to_string())
+            // Asked again rather than assumed. `install_authorization` reports
+            // whether the elevation ran, not whether `sudo` ended up honouring
+            // what it wrote — a drop-in can land and still not load, and this
+            // used to mark the run authorized over a loop whose every write
+            // would fail, then prompt again on every later launch with nothing
+            // on screen saying why. Failing here is the loud version.
+            .and_then(|()| {
+                if state.platform.authorization_installed() {
+                    Ok(())
+                } else {
+                    Err(
+                        "the authorization was installed but sudo does not report it; \
+                         keep-awake would not be able to hold this Mac"
+                            .to_string(),
+                    )
+                }
+            })
     }
     .and_then(|()| {
         state
@@ -790,6 +812,7 @@ pub fn authorize_keep_awake(
             .start_awake_watchdog(&crate::platform::Watchdog {
                 flag: &flag,
                 breadcrumb: &breadcrumb,
+                failure: &failure,
                 reclaimed_prior,
                 app_pid: std::process::id(),
             })
@@ -824,25 +847,31 @@ pub fn start_watchdog_if_authorized(state: &AppState) {
     }
     let flag = crate::paths::keep_awake_flag(&handle.data_root);
     let breadcrumb = crate::paths::keep_awake_breadcrumb(&handle.data_root);
+    let failure = crate::paths::keep_awake_failure(&handle.data_root);
+    // Whatever the last run's loop failed at is not this run's news. Cleared
+    // before the new loop starts, so the only marker the sweep can read is one
+    // this loop wrote.
+    let _ = std::fs::remove_file(&failure);
     match state
         .platform
         .start_awake_watchdog(&crate::platform::Watchdog {
             flag: &flag,
             breadcrumb: &breadcrumb,
+            failure: &failure,
             reclaimed_prior: handle.reclaimed_prior(),
             app_pid: std::process::id(),
         }) {
-        // The loop reclaims unconditionally, before its first poll, so by the
-        // time it is running a machine left stranded by the previous run has
-        // already been put back. Saying so is the second half of the job:
-        // without it the window opens on a warning about a machine that is
-        // fine, and the only button under that warning turns the user's trigger
-        // off for good. Before this change nothing could reach that state,
-        // because a stranded machine could only be repaired by a click.
-        Ok(()) => {
-            handle.clear_reclaimed_prior();
-            handle.mark_restored();
-        }
+        // Deliberately does NOT clear `stranded`. The loop reclaims before its
+        // first poll, but it was spawned into the background, so this arm
+        // returning says only that a shell started — not that `disablesleep`
+        // came back. It used to clear the warning here, which put a reassuring
+        // window over a machine that could still be stuck awake. The sweep
+        // clears it once the OS reads back as not disabled.
+        //
+        // `reclaimed_prior` is still forgotten, because the durable copy is the
+        // breadcrumb: a reclaim that fails leaves that note untouched, so the
+        // next launch reads the same value out again.
+        Ok(()) => handle.clear_reclaimed_prior(),
         Err(error) => {
             eprintln!("could not start the keep-awake helper at startup: {error}");
             handle.mark_unauthorized();

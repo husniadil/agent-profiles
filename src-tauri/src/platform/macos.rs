@@ -225,6 +225,18 @@ impl Platform for MacOs {
         }
     }
 
+    fn sleep_is_disabled(&self) -> Option<bool> {
+        // `pmset -g` prints `SleepDisabled` to anyone; only writing it is
+        // privileged. A read that fails answers "cannot say" rather than "not
+        // disabled", because the caller uses a false to retire a warning.
+        let out = std::process::Command::new(PMSET).arg("-g").output().ok()?;
+        String::from_utf8_lossy(&out.stdout)
+            .lines()
+            .filter_map(|line| line.split_once("SleepDisabled"))
+            .map(|(_, rest)| rest.trim() == "1")
+            .next()
+    }
+
     fn authorization_installed(&self) -> bool {
         authorization_installed()
     }
@@ -450,6 +462,7 @@ fn watchdog_script(watchdog: &crate::platform::Watchdog) -> String {
         "set -u".to_string(),
         format!("FLAG='{}'", watchdog.flag.display()),
         format!("CRUMB='{}'", watchdog.breadcrumb.display()),
+        format!("FAILED='{}'", watchdog.failure.display()),
         format!("PID={}", watchdog.app_pid),
         format!("RECLAIM={reclaim}"),
         // Read here, not handed in: `lstart` is a date string full of spaces and
@@ -463,7 +476,15 @@ fn watchdog_script(watchdog: &crate::platform::Watchdog) -> String {
         r#"if [ "$RECLAIM" = - ]"#.to_string(),
         r#"then PRIOR=$(pmset -g | awk '/SleepDisabled/{print $2}'); [ "$PRIOR" = 1 ] || PRIOR=0"#
             .to_string(),
-        format!(r#"else PRIOR="$RECLAIM"; {PMSET_AS_ROOT} -a disablesleep "$PRIOR""#),
+        // A failed reclaim exits **before** the breadcrumb below is rewritten,
+        // so the note left by the run that died survives for the next launch to
+        // find. Unchecked, this wrote a fresh breadcrumb over it, started the
+        // loop at `HELD=0`, and then let the exit path delete the note on the
+        // way out — a machine stuck at `disablesleep 1` with nothing left that
+        // knows it. The marker is what tells this run's window the same thing.
+        format!(
+            r#"else PRIOR="$RECLAIM"; {PMSET_AS_ROOT} -a disablesleep "$PRIOR" || {{ printf 'reclaim\n' > "$FAILED"; exit 1; }}"#
+        ),
         "fi".to_string(),
         r#"printf 'prior=%s\n' "$PRIOR" > "$CRUMB""#.to_string(),
         "HELD=0".to_string(),
@@ -484,7 +505,7 @@ fn watchdog_script(watchdog: &crate::platform::Watchdog) -> String {
             // unconditional `HELD="$WANT"` would retire the edge this loop is
             // triggered on, believing it holds a machine that is free to sleep
             // and never trying again. Left unmoved, the next poll retries.
-            r#"then if [ "$WANT" = 1 ]; then {PMSET_AS_ROOT} -a disablesleep 1 && HELD=1; else {PMSET_AS_ROOT} -a disablesleep "$PRIOR" && HELD=0; fi"#
+            r#"then if [ "$WANT" = 1 ]; then {PMSET_AS_ROOT} -a disablesleep 1 && {{ HELD=1; rm -f "$FAILED"; }} || printf 'hold\n' > "$FAILED"; else {PMSET_AS_ROOT} -a disablesleep "$PRIOR" && {{ HELD=0; rm -f "$FAILED"; }} || printf 'release\n' > "$FAILED"; fi"#
         ),
         "fi".to_string(),
         format!("sleep {WATCHDOG_POLL_SECONDS}"),
@@ -495,7 +516,7 @@ fn watchdog_script(watchdog: &crate::platform::Watchdog) -> String {
         // that still cleared the note would produce a Mac that never sleeps
         // again and an app that reports nothing about it at any future launch.
         format!(
-            r#"if [ "$HELD" = 0 ] || {PMSET_AS_ROOT} -a disablesleep "$PRIOR"; then rm -f "$CRUMB"; fi"#
+            r#"if [ "$HELD" = 0 ] || {PMSET_AS_ROOT} -a disablesleep "$PRIOR"; then rm -f "$CRUMB"; else printf 'release\n' > "$FAILED"; fi"#
         ),
     ]
     .join("; ")
@@ -509,7 +530,12 @@ fn watchdog_script(watchdog: &crate::platform::Watchdog) -> String {
 /// grant with `sudo -n` instead of being root itself, so nothing here can
 /// produce a password prompt.
 fn watchdog_spawn_command(watchdog: &crate::platform::Watchdog) -> String {
-    format!("{{ {} ; }} >/dev/null 2>&1 &", watchdog_script(watchdog))
+    watchdog_spawn_command_for(&watchdog_script(watchdog))
+}
+
+/// The wrapper alone, so a test can run a script it already has in hand.
+fn watchdog_spawn_command_for(script: &str) -> String {
+    format!("{{ {script} ; }} >/dev/null 2>&1 &")
 }
 
 /// Escapes a shell command for an AppleScript string literal.
@@ -525,7 +551,8 @@ fn as_applescript_string(shell: &str) -> String {
 /// Runs `shell` as root and waits for it.
 ///
 /// Every remaining elevation is one-shot and waited for: installing the grant,
-/// handing it back, arming a wake schedule, and the stranded-machine repair.
+/// arming a wake schedule, and the stranded-machine repair. Handing the grant
+/// back is not among them — it is a documented `rm`, not something the app runs.
 /// There used to be a backgrounded sibling for the watchdog, which is gone with
 /// the root loop it existed to start — a run that returns before its command has
 /// run would report a success nobody has verified, on the one screen whose job
@@ -825,12 +852,31 @@ mod tests {
         );
     }
 
+    /// Polls `done` until it holds, up to `cap`. Returns whether it did.
+    ///
+    /// These tests drive a real shell loop whose poll interval is three
+    /// seconds, and the suite runs in parallel — a fixed `sleep` long enough on
+    /// an idle machine is a coin flip on a busy one. Waiting for the condition
+    /// instead is both faster when it passes and honest when it does not.
+    fn wait_until(cap: std::time::Duration, done: impl Fn() -> bool) -> bool {
+        let deadline = std::time::Instant::now() + cap;
+        while std::time::Instant::now() < deadline {
+            if done() {
+                return true;
+            }
+            std::thread::sleep(std::time::Duration::from_millis(200));
+        }
+        done()
+    }
+
     fn sample_watchdog(reclaimed_prior: Option<u8>) -> String {
         let flag = PathBuf::from("/data/keep-awake.hold");
         let crumb = PathBuf::from("/data/keep-awake.owned");
+        let failed = PathBuf::from("/data/keep-awake.failed");
         watchdog_script(&crate::platform::Watchdog {
             flag: &flag,
             breadcrumb: &crumb,
+            failure: &failed,
             reclaimed_prior,
             app_pid: 4242,
         })
@@ -933,13 +979,21 @@ mod tests {
             PathBuf::from("/Users/a b/Library/Application Support/Agent Profiles/keep-awake.hold");
         let crumb =
             PathBuf::from("/Users/a b/Library/Application Support/Agent Profiles/keep-awake.owned");
+        let failed = PathBuf::from(
+            "/Users/a b/Library/Application Support/Agent Profiles/keep-awake.failed",
+        );
         let script = watchdog_script(&crate::platform::Watchdog {
             flag: &flag,
             breadcrumb: &crumb,
+            failure: &failed,
             reclaimed_prior: None,
             app_pid: 1,
         });
         assert!(script.contains("FLAG='/Users/a b/"), "got: {script}");
+        // The marker path is interpolated like the other two and carries the
+        // same risk: unquoted, a space in the user's home splits it into two
+        // words and the loop writes its failure somewhere nobody reads.
+        assert!(script.contains("FAILED='/Users/a b/"), "got: {script}");
     }
 
     #[test]
@@ -974,9 +1028,11 @@ mod tests {
         // re-spelt here, so the thing that gets parsed is the thing that runs.
         let flag = PathBuf::from("/data/keep-awake.hold");
         let crumb = PathBuf::from("/data/keep-awake.owned");
+        let failed = PathBuf::from("/data/keep-awake.failed");
         let wrapped = watchdog_spawn_command(&crate::platform::Watchdog {
             flag: &flag,
             breadcrumb: &crumb,
+            failure: &failed,
             reclaimed_prior: None,
             app_pid: 4242,
         });
@@ -1010,9 +1066,11 @@ mod tests {
         // spawned into, and the requirement outlived the elevation.
         let flag = PathBuf::from("/data/keep-awake.hold");
         let crumb = PathBuf::from("/data/keep-awake.owned");
+        let failed = PathBuf::from("/data/keep-awake.failed");
         let spawned = watchdog_spawn_command(&crate::platform::Watchdog {
             flag: &flag,
             breadcrumb: &crumb,
+            failure: &failed,
             reclaimed_prior: None,
             app_pid: 4242,
         });
@@ -1229,6 +1287,122 @@ User yudha may run the following commands on host:
     }
 
     #[test]
+    fn a_failed_reclaim_keeps_the_note_the_next_launch_needs() {
+        // The review's F1, run rather than argued. A previous run died holding,
+        // so there is a breadcrumb and a reclaim value. The grant has since gone
+        // away, so the reclaim fails. The note that tells the *next* launch to
+        // reclaim must survive, and the loop must say what went wrong — the old
+        // code wrote a fresh breadcrumb over it, started at `HELD=0`, and then
+        // let the exit path delete it, leaving a Mac stuck awake and nothing
+        // anywhere that knew.
+        let dir = tempfile::tempdir().unwrap();
+        let bin = dir.path().join("sudo");
+        std::fs::write(&bin, "#!/bin/sh\nexit 1\n").unwrap();
+        std::fs::set_permissions(&bin, std::os::unix::fs::PermissionsExt::from_mode(0o755))
+            .unwrap();
+        let flag = dir.path().join("keep-awake.hold");
+        let crumb = dir.path().join("keep-awake.owned");
+        let failed = dir.path().join("keep-awake.failed");
+        std::fs::write(&crumb, "prior=1\n").unwrap();
+
+        // Long-lived on purpose. The loop's liveness check is `kill -0` plus a
+        // start-time compare, and a child this test reaped would still answer
+        // `kill -0` as a zombie — so the script is bounded below by killing the
+        // script, never by letting the watched pid go.
+        let mut sleeper = std::process::Command::new("sleep")
+            .arg("30")
+            .spawn()
+            .unwrap();
+        let script = watchdog_script(&crate::platform::Watchdog {
+            flag: &flag,
+            breadcrumb: &crumb,
+            failure: &failed,
+            // Reclaiming means the previous run left it on; put it back to 0.
+            reclaimed_prior: Some(0),
+            app_pid: sleeper.id(),
+        });
+        let mut run = std::process::Command::new("sh")
+            .arg("-c")
+            .arg(&script)
+            .env("PATH", format!("{}:/usr/bin:/bin", dir.path().display()))
+            .spawn()
+            .unwrap();
+        // Guarded, the marker appears at once and the script is already gone;
+        // unguarded, the script is polling and the breadcrumb has been
+        // overwritten by now. Either way the assertions decide it, not the
+        // script's exit status.
+        wait_until(std::time::Duration::from_secs(30), || failed.exists());
+        let _ = run.kill();
+        let _ = run.wait();
+        let _ = sleeper.kill();
+        let _ = sleeper.wait();
+        assert_eq!(
+            std::fs::read_to_string(&crumb).unwrap(),
+            "prior=1\n",
+            "the breadcrumb must be left exactly as the dead run wrote it"
+        );
+        assert_eq!(
+            std::fs::read_to_string(&failed).unwrap().trim(),
+            "reclaim",
+            "the window has to be able to say which step missed"
+        );
+    }
+
+    #[test]
+    fn a_successful_hold_clears_a_marker_an_earlier_failure_left() {
+        // Otherwise one transient failure pins a permanent error band onto a
+        // feature that is working again.
+        let dir = tempfile::tempdir().unwrap();
+        let bin = dir.path().join("sudo");
+        std::fs::write(&bin, "#!/bin/sh\nexit 0\n").unwrap();
+        std::fs::set_permissions(&bin, std::os::unix::fs::PermissionsExt::from_mode(0o755))
+            .unwrap();
+        let flag = dir.path().join("keep-awake.hold");
+        std::fs::write(&flag, "").unwrap();
+        let crumb = dir.path().join("keep-awake.owned");
+        let failed = dir.path().join("keep-awake.failed");
+        std::fs::write(&failed, "hold\n").unwrap();
+
+        let mut sleeper = std::process::Command::new("sleep")
+            .arg("30")
+            .spawn()
+            .unwrap();
+        let script = watchdog_script(&crate::platform::Watchdog {
+            flag: &flag,
+            breadcrumb: &crumb,
+            failure: &failed,
+            reclaimed_prior: None,
+            app_pid: sleeper.id(),
+        });
+        let mut loop_process = std::process::Command::new("sh")
+            .arg("-c")
+            .arg(watchdog_spawn_command_for(&script))
+            .env("PATH", format!("{}:/usr/bin:/bin", dir.path().display()))
+            .spawn()
+            .unwrap();
+        let cleared = wait_until(std::time::Duration::from_secs(30), || !failed.exists());
+        let _ = loop_process.kill();
+        let _ = loop_process.wait();
+        let _ = sleeper.kill();
+        let _ = sleeper.wait();
+
+        assert!(
+            cleared,
+            "a hold that landed must retire the earlier failure"
+        );
+    }
+
+    #[test]
+    fn the_reclaim_bails_out_before_it_can_overwrite_the_note() {
+        // The ordering the test above exercises, pinned so a refactor cannot
+        // quietly move the breadcrumb write above the reclaim's guard.
+        let script = sample_watchdog(Some(0));
+        let guard = script.find(r#"exit 1; }"#).expect("reclaim must guard");
+        let write = script.find(r#"> "$CRUMB""#).expect("must write a crumb");
+        assert!(guard < write, "got: {script}");
+    }
+
+    #[test]
     fn a_hold_that_failed_is_retried_rather_than_recorded_as_held() {
         // The defect this loop is most likely to have, now that the command can
         // fail: `HELD` marks the edge as spent, so assigning it after a failed
@@ -1244,6 +1418,7 @@ User yudha may run the following commands on host:
         let flag = dir.path().join("keep-awake.hold");
         std::fs::write(&flag, "").unwrap();
         let crumb = dir.path().join("keep-awake.owned");
+        let failed = dir.path().join("keep-awake.failed");
 
         // A pid that is alive for the whole run, ended by the timeout below.
         let mut sleeper = std::process::Command::new("sleep")
@@ -1253,6 +1428,7 @@ User yudha may run the following commands on host:
         let script = watchdog_script(&crate::platform::Watchdog {
             flag: &flag,
             breadcrumb: &crumb,
+            failure: &failed,
             reclaimed_prior: None,
             app_pid: sleeper.id(),
         });
@@ -1265,19 +1441,21 @@ User yudha may run the following commands on host:
             .stderr(std::process::Stdio::null())
             .spawn()
             .unwrap();
-        // Long enough for several polls at three seconds each.
-        std::thread::sleep(std::time::Duration::from_secs(8));
+        let tally_lines = || {
+            std::fs::read_to_string(&tally)
+                .unwrap_or_default()
+                .lines()
+                .count()
+        };
+        let retried = wait_until(std::time::Duration::from_secs(30), || tally_lines() > 1);
         let _ = loop_process.kill();
         let _ = loop_process.wait();
         let _ = sleeper.kill();
         let _ = sleeper.wait();
 
-        let attempts = std::fs::read_to_string(&tally)
-            .unwrap_or_default()
-            .lines()
-            .count();
+        let attempts = tally_lines();
         assert!(
-            attempts > 1,
+            retried,
             "a failed hold must be retried on the next poll, saw {attempts} attempt(s)"
         );
     }
@@ -1310,9 +1488,11 @@ User yudha may run the following commands on host:
         // the user, so there is no `osascript` and nothing to type into.
         let flag = PathBuf::from("/data/keep-awake.hold");
         let crumb = PathBuf::from("/data/keep-awake.owned");
+        let failed = PathBuf::from("/data/keep-awake.failed");
         let spawned = watchdog_spawn_command(&crate::platform::Watchdog {
             flag: &flag,
             breadcrumb: &crumb,
+            failure: &failed,
             reclaimed_prior: None,
             app_pid: 4242,
         });

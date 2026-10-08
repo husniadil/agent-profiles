@@ -871,6 +871,13 @@ impl Handle {
         }
     }
 
+    pub fn is_stranded(&self) -> bool {
+        self.status
+            .lock()
+            .map(|status| status.stranded)
+            .unwrap_or(false)
+    }
+
     pub fn mark_restored(&self) {
         if let Ok(mut status) = self.status.lock() {
             status.stranded = false;
@@ -1003,6 +1010,24 @@ pub enum HoldStep {
 /// strand the lid. The two are separate because they end differently: `stopping`
 /// ends the loop, a pause only skips this step, so the sweep is still there to
 /// re-arm the moment a failed install clears it.
+/// What the loop last failed at, if anything.
+///
+/// Read, never written. Its contents choose a message and nothing else: the
+/// file sits in a user-writable directory, so the text is evidence that the
+/// loop wrote something, never evidence of what is true. Any value it does not
+/// recognise still reports a failed hold rather than silence.
+fn loop_failure(data_root: &Path) -> Option<String> {
+    let raw = std::fs::read_to_string(crate::paths::keep_awake_failure(data_root)).ok()?;
+    let what = match raw.trim() {
+        "reclaim" => "could not put the sleep setting back after a run that died holding it",
+        "release" => "could not hand the sleep setting back",
+        _ => "could not disable sleep",
+    };
+    Some(format!(
+        "{what} — the one-time authorization may have been removed"
+    ))
+}
+
 pub fn hold_step(
     handle: &Handle,
     platform: &dyn crate::platform::Platform,
@@ -1045,6 +1070,22 @@ pub fn hold_step(
             );
             error.to_string()
         });
+    // On macOS `hold` only writes the flag file, and that write cannot fail for
+    // the reason that matters: the loop reading the flag spends a `sudo` grant,
+    // and the grant can go away underneath it — the documented undo is `rm` on
+    // a file the user owns. So the loop says so in a marker of its own, and this
+    // is where the window hears about it. Without this the tab reports a hold
+    // for the rest of the run while every write behind it fails.
+    let hold_error = hold_error.or_else(|| loop_failure(&handle.data_root));
+    // A stranded machine is only reported back as fixed once the OS agrees. The
+    // reclaim runs inside a loop that was spawned into the background, so the
+    // spawn returning proves nothing about whether `disablesleep` came back —
+    // claiming otherwise cleared the warning over a machine still stuck awake.
+    // `Some(false)` is the only answer that retires it; `None` (the platform
+    // cannot say) and `Some(true)` both leave it standing.
+    if handle.is_stranded() && platform.sleep_is_disabled() == Some(false) {
+        handle.mark_restored();
+    }
     // Told what actually happened, so the next sweep credits its interval to
     // the hold that was really in place rather than to the phase that asked
     // for one.
@@ -2006,6 +2047,9 @@ mod tests {
         /// Make every `hold` write fail, so a test can drive the case the clock
         /// has to answer to: the app asked for a hold and the platform refused.
         fails: bool,
+        /// What the OS says about `disablesleep`. `None` is a platform that
+        /// cannot tell, which is the default and must never retire a warning.
+        os_says: Option<bool>,
     }
 
     impl crate::platform::Platform for RecordingHold {
@@ -2047,12 +2091,72 @@ mod tests {
         fn quit(&self, _pid: i32) -> Result<()> {
             unimplemented!()
         }
+        fn sleep_is_disabled(&self) -> Option<bool> {
+            self.os_says
+        }
         fn hold(&self, _data_root: &Path, on: bool) -> Result<()> {
             self.calls.lock().unwrap().push(on);
             if self.fails {
                 return Err(anyhow::anyhow!("could not hold the machine awake"));
             }
             Ok(())
+        }
+    }
+
+    #[test]
+    fn a_marker_the_loop_left_becomes_the_window_s_hold_error() {
+        // The review's F2. On macOS `hold` only writes the flag file and
+        // succeeds, so without this channel the tab reports a hold for the rest
+        // of the run while every `sudo` behind it fails — which is what happens
+        // the moment the user follows the documented undo.
+        let d = tempfile::tempdir().unwrap();
+        assert_eq!(loop_failure(d.path()), None, "no marker, nothing to report");
+        for (written, expected) in [
+            ("reclaim", "put the sleep setting back"),
+            ("release", "hand the sleep setting back"),
+            ("hold", "disable sleep"),
+            ("something a future loop writes", "disable sleep"),
+        ] {
+            std::fs::write(crate::paths::keep_awake_failure(d.path()), written).unwrap();
+            let got = loop_failure(d.path()).expect("a marker must be reported");
+            assert!(got.contains(expected), "{written:?} gave: {got}");
+            assert!(
+                got.contains("authorization"),
+                "the message has to name the likely cause: {got}"
+            );
+        }
+    }
+
+    #[test]
+    fn a_stranded_machine_is_only_declared_fixed_once_the_os_agrees() {
+        // The review's F1, Rust half. The reclaim runs in a loop that was
+        // spawned into the background, so the spawn returning says nothing
+        // about whether `disablesleep` came back. Clearing the warning on that
+        // basis put a calm window over a machine that could still be stuck.
+        for (os_says, still_stranded) in [
+            (None, true),         // platform cannot tell: leave it standing
+            (Some(true), true),   // still disabled: leave it standing
+            (Some(false), false), // confirmed back: and only now retire it
+        ] {
+            let d = tempfile::tempdir().unwrap();
+            let handle = handle_with(
+                Recovery {
+                    reclaimed_prior: None,
+                    stranded: true,
+                },
+                d.path(),
+            );
+            let platform = RecordingHold {
+                os_says,
+                ..RecordingHold::default()
+            };
+            let mut sweep = Sweep::default();
+            hold_step(&handle, &platform, Phase::Idle, &mut sweep);
+            assert_eq!(
+                handle.status().stranded,
+                still_stranded,
+                "os_says={os_says:?}"
+            );
         }
     }
 

@@ -164,6 +164,22 @@ pub fn keep_awake_breadcrumb(data_root: &std::path::Path) -> PathBuf {
     data_root.join("keep-awake.owned")
 }
 
+/// Where the loop says its last `sudo` did not land.
+///
+/// A second note beside the breadcrumb rather than a field inside it. The
+/// breadcrumb answers "who owns the sleep setting" and is read by the *next*
+/// launch; this answers "is the hold this run reports actually happening" and is
+/// read by the current one's sweep. Folding them together would mean the
+/// liveness check and the failure channel could not disagree — and the case
+/// worth catching is exactly the one where a loop is alive and failing.
+///
+/// Written by the loop, never by the app; read by the app, never written. The
+/// app removes it only when it starts a loop, so a marker left by a dead run
+/// cannot outlive the run that replaces it.
+pub fn keep_awake_failure(data_root: &std::path::Path) -> PathBuf {
+    data_root.join("keep-awake.failed")
+}
+
 /// What closing the lid did before Windows took the setting over.
 ///
 /// Its own file rather than the breadcrumb above, which records a single

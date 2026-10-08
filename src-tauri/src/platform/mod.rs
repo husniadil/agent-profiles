@@ -303,6 +303,20 @@ pub trait Platform: Send + Sync {
         false
     }
 
+    /// Whether the OS says sleep is disabled right now, where the platform can
+    /// tell at all.
+    ///
+    /// `None` means "cannot say", which is every platform but macOS, and is not
+    /// the same answer as `Some(false)`. Used in one direction only: to *clear*
+    /// a stranded warning once the machine is confirmed back. Never to raise
+    /// one — the loop takes up to its poll interval to act on a flag, so a
+    /// read taken straight after a hold was asked for would report a failure
+    /// that has not happened. Raising failures is the loop's own job, through
+    /// the marker it writes.
+    fn sleep_is_disabled(&self) -> Option<bool> {
+        None
+    }
+
     /// Whether the one-time authorization has already been given on this
     /// machine, so this run needs no prompt at all.
     ///
@@ -404,6 +418,9 @@ pub struct Watchdog<'a> {
     pub flag: &'a Path,
     /// Where the loop records who owns the sleep setting.
     pub breadcrumb: &'a Path,
+    /// Where the loop records that a `sudo` of its own did not land. The one
+    /// channel by which a demoted, fallible loop can contradict the window.
+    pub failure: &'a Path,
     /// The `SleepDisabled` value from before a previous run died holding it,
     /// recovered from a stale breadcrumb. `Some` means the new loop must reset
     /// the setting to this value as its first act; `None` means read the live
