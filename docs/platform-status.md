@@ -71,6 +71,7 @@ Built in #7. Its tests ran the root loop against a stubbed `pmset`. The PR left 
 - [x] **Compiles on a real Windows runner**, and passes `clippy --all-targets -D warnings` and the test suite there. Everything below is unobserved
 - [ ] Real process shape of either installed app
 - [ ] MSIX vs classic default-directory selection against a real installation
+- [ ] Claude Desktop found through its MSIX package location when neither the classic binary nor the execution alias exists, and launched from there
 - [ ] The declared ChatGPT install path. A plausible guess, never checked against a real Windows install
 - [ ] Hardlink creation for the shared configuration
 - [ ] Parallel instances, focus, quit, end-to-end launch

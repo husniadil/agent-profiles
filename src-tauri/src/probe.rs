@@ -730,7 +730,7 @@ fn probe_an_app_bundle() {
     );
     println!("        }},");
     println!("        linux: LinuxLocation {{ command: \"TODO\", default_profile: \"TODO\", install_hint: \"TODO\" }},");
-    println!("        windows: WindowsLocation {{ binaries: &[/* TODO */], default_profiles: &[/* TODO */], process_name: \"TODO\" }},");
+    println!("        windows: WindowsLocation {{ binaries: &[/* TODO */], default_profiles: &[/* TODO */], process_name: \"TODO\", package_family: None }},");
     println!("    }},");
     println!("    designation: Designation {{");
     println!("        writes: &[");

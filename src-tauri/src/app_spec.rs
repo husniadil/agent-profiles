@@ -101,6 +101,13 @@ pub struct WindowsLocation {
     pub default_profiles: &'static [WinPath],
     /// The `Win32_Process` name used to narrow the process query.
     pub process_name: &'static str,
+    /// The MSIX package family, for an app the Store installs under
+    /// `C:\Program Files\WindowsApps\<name>_<version>_<arch>__<publisher>`.
+    /// That folder changes with every update, so it cannot be a `WinPath`;
+    /// Windows is asked where the package is, and `process_name` is looked for
+    /// inside it. Only tried when no `binaries` entry exists — the execution
+    /// alias in `WindowsApps` covers the package when the user has it on.
+    pub package_family: Option<&'static str>,
 }
 
 #[allow(dead_code)]
@@ -239,6 +246,7 @@ pub static CLAUDE: AppSpec = AppSpec {
                 },
             ],
             process_name: "claude.exe",
+            package_family: Some("Claude_pzs8sxrjxfjjc"),
         }),
     },
     designation: Designation {
@@ -299,6 +307,7 @@ pub static CODEX: AppSpec = AppSpec {
                 rest: ".codex",
             }],
             process_name: "ChatGPT.exe",
+            package_family: None,
         }),
     },
     designation: Designation {
