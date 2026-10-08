@@ -80,7 +80,17 @@ Choose one trigger:
 
 ### Authorizing on macOS
 
-macOS needs an administrator password once per run of Agent Profiles. Press **Authorize…** and enter it. A helper then turns the setting on while an agent works and off when it stops. The helper shuts down when Agent Profiles quits.
+macOS needs an administrator password **once on this Mac**, not once per run. Press **Authorize…** and enter it. What the password buys is a `sudoers` rule at `/etc/sudoers.d/agent-profiles` granting exactly two commands and nothing else — turning the lid-closed setting on, and turning it off. Every later launch finds that rule and holds the machine with no prompt.
+
+The helper that does the turning is an ordinary process running as you, not root. It turns the setting on while an agent works, off when it stops, and shuts down when Agent Profiles quits.
+
+The rule outlives the app: **deleting Agent Profiles does not remove it.** To hand it back, run
+
+```
+sudo rm /etc/sudoers.d/agent-profiles
+```
+
+The same command is printed in the tab before you authorize. If the rule goes away while the app is running, the Keep Awake tab stops claiming a hold and says the authorization may have been removed, rather than showing a hold that is not happening.
 
 Windows and Linux ask for no password.
 

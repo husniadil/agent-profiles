@@ -237,24 +237,74 @@ one setting that holds with the lid shut, and it is root's.
 On Windows the lid action lives in a scheme the user already owns. On Linux
 logind grants the inhibitor to the user and drops it when the process dies.
 
-## The macOS root loop is inline and exits with the app
+## The macOS privilege lives on the machine, not in the process
 
-On Authorize the app runs one shell loop as root through `osascript`, once per
-run of the app. The loop is built in memory and passed as a single argument.
-Every 3 seconds it checks two things: whether `keep-awake.hold` exists, and
-whether the app's pid still runs with the same start time. Flag present means
-sleep is disabled. Flag gone means the prior value is restored. When the app
-is gone the loop restores the prior value and exits. The loop writes only on a
-change.
+On Authorize the app asks for an administrator password once and spends it
+installing a `sudoers` drop-in at `/etc/sudoers.d/agent-profiles`:
+
+```
+#<uid> ALL=(root) NOPASSWD: NOSETENV: /usr/bin/pmset -a disablesleep 1
+#<uid> ALL=(root) NOPASSWD: NOSETENV: /usr/bin/pmset -a disablesleep 0
+```
+
+A later launch asks `sudo -l` what it may run and starts the loop with no
+prompt at all. The loop is an ordinary process running as the user; it reaches
+`pmset` through `sudo -n`. It is still built in memory and passed as a single
+argument, still polls every 3 seconds, still keyed on whether
+`keep-awake.hold` exists and whether the app's pid runs with the same start
+time, and still writes only on a change.
 
 The app decides whether to hold every 15 seconds and creates or deletes the
 flag.
 
-### Why
+### Why not a privileged helper
 
-A script under Application Support is writable by anything running as the
-user. Running such a file as root would be a standing root escalation. An
-inline script leaves nothing on disk.
+Apple's supported route for authorizing once — `SMAppService`, or the older
+`SMJobBless` — validates the app's code signature when the helper is
+registered. `SMAppService.h`: "Apps that use SMAppService APIs must be code
+signed", and an ad-hoc signature returns `kSMErrorInvalidSignature`. These
+builds are deliberately unsigned, so that route was tried and dropped rather
+than overlooked.
+
+### Why a grant of two exact commands
+
+`sudoers` matches the full argument vector, so the rule cannot be spent on
+anything but those two state changes — no other `pmset` subcommand, no extra
+argument. And `/usr/bin/pmset` is `root:wheel` and SIP-`restricted`, so it
+cannot be replaced with something else to run. That second half is what
+separates this from the same pattern in yabai (#1318) and battery (#443),
+where the granted binary sat in a user-writable directory and the rule became
+a root shell.
+
+The loop body is still built in memory rather than written to disk, but the
+reason it used to have is gone. A script under user-writable Application
+Support run **as root** would have been a standing escalation; this one runs as
+the user, and the grant already lets anything running as the user set
+`disablesleep`, so a file on disk would hand over nothing a caller did not
+already have. It stays inline because there is no reason to put it on disk, not
+because putting it there would be dangerous. The thing that now needs
+protecting is the drop-in, and what protects it is being root-owned in
+`/etc/sudoers.d` rather than anything about the loop.
+
+### What the demotion cost
+
+As root the writes could not fail. Spending a grant can: the user may remove
+the drop-in, or a later drop-in may override it. Three consequences are
+handled explicitly.
+
+- `HELD` moves only when the write succeeded, so a failed hold is retried on
+  the next poll instead of retiring the edge the loop triggers on.
+- A failed reclaim exits before the breadcrumb is rewritten, so the note
+  telling the next launch to reclaim survives. The exit release is guarded the
+  same way: the breadcrumb is removed only when the release landed.
+- The loop writes `keep-awake.failed` naming which step missed, and clears it
+  on the next success. The sweep reads it into `hold_error`, which is how a
+  window stops claiming a hold that is not happening.
+
+A stranded machine is reported fixed only once `pmset -g` reads back as not
+disabled. The loop is spawned into the background, so the spawn returning
+proves nothing — and that read is used only to retire the warning, never to
+raise one, because the loop takes up to a poll interval to act on a flag.
 
 The flag is tested for existence and never read, so its contents never reach a
 root shell. The pid is paired with its start time because pids are recycled. A

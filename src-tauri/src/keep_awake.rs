@@ -298,11 +298,16 @@ pub fn apply(data_root: &Path, hold: bool) -> Result<()> {
 /// Puts sleep back after a run that died holding it, and makes that stick.
 ///
 /// Disarms the trigger and drops the flag before restoring anything, because
-/// the way out has to stay out. It is tempting to argue that neither is needed:
-/// `stranded` and `authorized` cannot both be true inside one `Handle` — where
-/// a password is needed the app starts unauthorized, and the only thing that
-/// authorizes it clears `stranded` in the same breath — so this app's own sweep
-/// would be writing a flag that nothing is watching.
+/// the way out has to stay out. It used to be arguable that neither was needed:
+/// `stranded` and `authorized` could not both be true inside one `Handle` —
+/// where a password was needed the app started unauthorized, and the only thing
+/// that authorized it cleared `stranded` in the same breath — so this app's own
+/// sweep would be writing a flag that nothing was watching.
+///
+/// Since the grant outlives the process (#55) that is no longer true: a launch
+/// can find itself authorized *and* stranded, start a loop straight away, and be
+/// watching that flag within milliseconds. The argument below was already the
+/// load-bearing one; this is now the second reason rather than the only one.
 ///
 /// That argument is about a process, and `disablesleep` is a machine. Nothing
 /// stops a second copy of the app running; `cargo tauri dev` beside the
@@ -541,6 +546,25 @@ pub struct Capabilities {
     /// macOS; elsewhere the app is already allowed to do this, and the window
     /// skips the whole ask-first band.
     pub needs_authorization: bool,
+    /// Whether that prompt has already been answered on this machine, by some
+    /// earlier run. Meaningless where nothing needs authorizing, and never read
+    /// there — see [`starts_authorized`].
+    pub authorization_installed: bool,
+}
+
+/// Whether a run may consider itself authorized before asking anybody anything.
+///
+/// The decision issue #55 turned on. It used to be `!needs_authorization`, which
+/// made every macOS launch start unauthorized and put the password prompt in
+/// front of the user again — once per run, forever, because a grant obtained by
+/// elevating *this process* dies with it.
+///
+/// The fix is not to remember an answer, which would let the window claim an
+/// authorization the run does not hold. It is to ask a question whose answer
+/// outlives the process: the grant lives on the machine, so a later launch can
+/// go and look. `authorization_installed` is that look.
+pub fn starts_authorized(capabilities: Capabilities) -> bool {
+    !capabilities.needs_authorization || capabilities.authorization_installed
 }
 
 /// Everything the window asks for in one call.
@@ -559,7 +583,6 @@ pub struct Status {
     /// Whether the privileged watchdog is running for this app run. Always true
     /// where nothing needed authorizing in the first place.
     pub authorized: bool,
-    /// Whether a previous run may have left the machine unable to sleep.
     pub stranded: bool,
     pub phase: Phase,
     pub settings: Settings,
@@ -645,10 +668,10 @@ impl Handle {
             thermal_supported: capabilities.thermal,
             needs_authorization: capabilities.needs_authorization,
             // Authorized from the start wherever there was nothing to
-            // authorize. Linux takes a logind inhibitor as the user and Windows
-            // writes a power scheme the user owns; only macOS has a root loop
-            // that has to be started before anything can be held.
-            authorized: !capabilities.needs_authorization,
+            // authorize — Linux takes a logind inhibitor as the user and Windows
+            // writes a power scheme the user owns — and, since #55, also
+            // wherever the one-time grant is already on the machine.
+            authorized: starts_authorized(capabilities),
             stranded: recovery.stranded,
             phase: Phase::Off,
             settings,
@@ -834,6 +857,27 @@ impl Handle {
         }
     }
 
+    /// Walks back the optimism in [`starts_authorized`].
+    ///
+    /// A run that finds the grant already on the machine reports itself
+    /// authorized before anything has been started, because that is what the
+    /// window has to render on its first frame. If the loop then fails to start,
+    /// the claim stops being true, and the honest thing is to put the Authorize
+    /// button back rather than leave a window saying the machine is being held
+    /// by a loop that is not running.
+    pub fn mark_unauthorized(&self) {
+        if let Ok(mut status) = self.status.lock() {
+            status.authorized = false;
+        }
+    }
+
+    pub fn is_stranded(&self) -> bool {
+        self.status
+            .lock()
+            .map(|status| status.stranded)
+            .unwrap_or(false)
+    }
+
     pub fn mark_restored(&self) {
         if let Ok(mut status) = self.status.lock() {
             status.stranded = false;
@@ -931,6 +975,23 @@ pub enum HoldStep {
     /// error the write returned so the window can report it.
     Applied(Option<String>),
 }
+/// What the loop last failed at, if anything.
+///
+/// Read, never written. Its contents choose a message and nothing else: the
+/// file sits in a user-writable directory, so the text is evidence that the
+/// loop wrote something, never evidence of what is true. Any value it does not
+/// recognise still reports a failed hold rather than silence.
+fn loop_failure(data_root: &Path) -> Option<String> {
+    let raw = std::fs::read_to_string(crate::paths::keep_awake_failure(data_root)).ok()?;
+    let what = match raw.trim() {
+        "reclaim" => "could not put the sleep setting back after a run that died holding it",
+        "release" => "could not hand the sleep setting back",
+        _ => "could not disable sleep",
+    };
+    Some(format!(
+        "{what} — the one-time authorization may have been removed"
+    ))
+}
 
 /// The one step of a sweep iteration that can re-arm the hold, pulled out of
 /// [`watch`] so the re-arm guard can be exercised on its own.
@@ -1008,6 +1069,22 @@ pub fn hold_step(
             );
             error.to_string()
         });
+    // On macOS `hold` only writes the flag file, and that write cannot fail for
+    // the reason that matters: the loop reading the flag spends a `sudo` grant,
+    // and the grant can go away underneath it — the documented undo is `rm` on
+    // a file the user owns. So the loop says so in a marker of its own, and this
+    // is where the window hears about it. Without this the tab reports a hold
+    // for the rest of the run while every write behind it fails.
+    let hold_error = hold_error.or_else(|| loop_failure(&handle.data_root));
+    // A stranded machine is only reported back as fixed once the OS agrees. The
+    // reclaim runs inside a loop that was spawned into the background, so the
+    // spawn returning proves nothing about whether `disablesleep` came back —
+    // claiming otherwise cleared the warning over a machine still stuck awake.
+    // `Some(false)` is the only answer that retires it; `None` (the platform
+    // cannot say) and `Some(true)` both leave it standing.
+    if handle.is_stranded() && platform.sleep_is_disabled() == Some(false) {
+        handle.mark_restored();
+    }
     // Told what actually happened, so the next sweep credits its interval to
     // the hold that was really in place rather than to the phase that asked
     // for one.
@@ -1171,6 +1248,42 @@ mod tests {
     }
 
     #[test]
+    fn a_machine_that_was_authorized_once_does_not_ask_again_on_the_next_launch() {
+        // Issue #55, as a decision. A macOS run used to start unauthorized every
+        // time, because the old answer was `!needs_authorization` and nothing
+        // outlived the process that had been elevated. What outlives it is the
+        // grant on the machine, so a later launch that finds one starts holding
+        // without putting a password prompt in front of anybody.
+        let macos = |installed| Capabilities {
+            hold: true,
+            thermal: true,
+            needs_authorization: true,
+            authorization_installed: installed,
+        };
+        assert!(!starts_authorized(macos(false)), "first ever launch asks");
+        assert!(
+            starts_authorized(macos(true)),
+            "every launch after does not"
+        );
+    }
+
+    #[test]
+    fn a_platform_with_nothing_to_authorize_never_consults_the_grant() {
+        // Linux takes a logind inhibitor as the user and Windows writes a power
+        // scheme the user already owns. Neither has anything to install, so
+        // neither may be made to depend on finding it installed — a false here
+        // must not be able to lock those platforms out of holding.
+        for installed in [false, true] {
+            assert!(starts_authorized(Capabilities {
+                hold: true,
+                thermal: false,
+                needs_authorization: false,
+                authorization_installed: installed,
+            }));
+        }
+    }
+
+    #[test]
     fn a_pending_nudge_wakes_the_sweep_at_once() {
         // The delay the user hit: a toggled trigger waited up to a full tick
         // before anything re-decided. A nudge that lands while the sweep is busy
@@ -1185,6 +1298,7 @@ mod tests {
                 hold: true,
                 thermal: false,
                 needs_authorization: true,
+                authorization_installed: false,
             },
             Recovery {
                 reclaimed_prior: None,
@@ -1594,6 +1708,7 @@ mod tests {
                 hold: true,
                 thermal: true,
                 needs_authorization: true,
+                authorization_installed: false,
             },
             recovery,
         )
@@ -1931,6 +2046,9 @@ mod tests {
         /// Make every `hold` write fail, so a test can drive the case the clock
         /// has to answer to: the app asked for a hold and the platform refused.
         fails: bool,
+        /// What the OS says about `disablesleep`. `None` is a platform that
+        /// cannot tell, which is the default and must never retire a warning.
+        os_says: Option<bool>,
     }
 
     impl crate::platform::Platform for RecordingHold {
@@ -1972,12 +2090,72 @@ mod tests {
         fn quit(&self, _pid: i32) -> Result<()> {
             unimplemented!()
         }
+        fn sleep_is_disabled(&self) -> Option<bool> {
+            self.os_says
+        }
         fn hold(&self, _data_root: &Path, on: bool) -> Result<()> {
             self.calls.lock().unwrap().push(on);
             if self.fails {
                 return Err(anyhow::anyhow!("could not hold the machine awake"));
             }
             Ok(())
+        }
+    }
+
+    #[test]
+    fn a_marker_the_loop_left_becomes_the_window_s_hold_error() {
+        // The review's F2. On macOS `hold` only writes the flag file and
+        // succeeds, so without this channel the tab reports a hold for the rest
+        // of the run while every `sudo` behind it fails — which is what happens
+        // the moment the user follows the documented undo.
+        let d = tempfile::tempdir().unwrap();
+        assert_eq!(loop_failure(d.path()), None, "no marker, nothing to report");
+        for (written, expected) in [
+            ("reclaim", "put the sleep setting back"),
+            ("release", "hand the sleep setting back"),
+            ("hold", "disable sleep"),
+            ("something a future loop writes", "disable sleep"),
+        ] {
+            std::fs::write(crate::paths::keep_awake_failure(d.path()), written).unwrap();
+            let got = loop_failure(d.path()).expect("a marker must be reported");
+            assert!(got.contains(expected), "{written:?} gave: {got}");
+            assert!(
+                got.contains("authorization"),
+                "the message has to name the likely cause: {got}"
+            );
+        }
+    }
+
+    #[test]
+    fn a_stranded_machine_is_only_declared_fixed_once_the_os_agrees() {
+        // The review's F1, Rust half. The reclaim runs in a loop that was
+        // spawned into the background, so the spawn returning says nothing
+        // about whether `disablesleep` came back. Clearing the warning on that
+        // basis put a calm window over a machine that could still be stuck.
+        for (os_says, still_stranded) in [
+            (None, true),         // platform cannot tell: leave it standing
+            (Some(true), true),   // still disabled: leave it standing
+            (Some(false), false), // confirmed back: and only now retire it
+        ] {
+            let d = tempfile::tempdir().unwrap();
+            let handle = handle_with(
+                Recovery {
+                    reclaimed_prior: None,
+                    stranded: true,
+                },
+                d.path(),
+            );
+            let platform = RecordingHold {
+                os_says,
+                ..RecordingHold::default()
+            };
+            let mut sweep = Sweep::default();
+            hold_step(&handle, &platform, Phase::Idle, &mut sweep);
+            assert_eq!(
+                handle.status().stranded,
+                still_stranded,
+                "os_says={os_says:?}"
+            );
         }
     }
 

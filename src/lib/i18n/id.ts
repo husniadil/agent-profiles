@@ -98,7 +98,7 @@ export const id: Strings = {
     "Agent Profiles berhenti secara tak terduga saat sedang menahan mode layar tertutup, dan pengaturan itu tetap bertahan setelah dimulai ulang.",
   "awake.restoreSleep": "Pulihkan mode tidur",
   "awake.needsPassword":
-    "Membutuhkan kata sandi administrator sekali setiap kali dijalankan. Sebuah helper mengaktifkan pengaturan ini selama agen bekerja, menonaktifkannya saat berhenti, dan ikut berhenti bersama Agent Profiles.",
+    "Membutuhkan kata sandi administrator sekali saja di Mac ini, bukan setiap kali dijalankan. Izin ini mencakup tepat dua perintah — menyalakan dan mematikan pengaturan layar tertutup — dan tidak lebih. Untuk mencabutnya nanti: sudo rm /etc/sudoers.d/agent-profiles",
 
   // Keep Awake — status card bands (unsupported, stranded, unauthorized, failed hold)
   "awake.band.unavailable": "Tidak tersedia di sini",

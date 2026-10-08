@@ -765,6 +765,11 @@ pub fn authorize_keep_awake(
     }
     let flag = crate::paths::keep_awake_flag(&handle.data_root);
     let breadcrumb = crate::paths::keep_awake_breadcrumb(&handle.data_root);
+    let failure = crate::paths::keep_awake_failure(&handle.data_root);
+    // Whatever the last run's loop failed at is not this run's news. Cleared
+    // before the new loop starts, so the only marker the sweep can read is one
+    // this loop wrote.
+    let _ = std::fs::remove_file(&failure);
     // Read, not taken. The spawn below asks for a password and the user can
     // cancel it; discarding the reclaim value before knowing whether a watchdog
     // actually took it on would leave a stranded machine with nothing to put
@@ -772,15 +777,47 @@ pub fn authorize_keep_awake(
     // user's own. It is forgotten only once a loop is running with it.
     let reclaimed_prior = handle.reclaimed_prior();
 
-    let result = state
-        .platform
-        .start_awake_watchdog(&crate::platform::Watchdog {
-            flag: &flag,
-            breadcrumb: &breadcrumb,
-            reclaimed_prior,
-            app_pid: std::process::id(),
-        })
-        .map_err(|e| e.to_string());
+    // The password, once — and only if this machine has not already paid it.
+    // Everything after this line is unprivileged, which is the point: the loop
+    // spends the grant rather than being root, so it costs nothing to start now
+    // and nothing to start again on every launch after this one.
+    let result = if state.platform.authorization_installed() {
+        Ok(())
+    } else {
+        state
+            .platform
+            .install_authorization()
+            .map_err(|e| e.to_string())
+            // Asked again rather than assumed. `install_authorization` reports
+            // whether the elevation ran, not whether `sudo` ended up honouring
+            // what it wrote — a drop-in can land and still not load, and this
+            // used to mark the run authorized over a loop whose every write
+            // would fail, then prompt again on every later launch with nothing
+            // on screen saying why. Failing here is the loud version.
+            .and_then(|()| {
+                if state.platform.authorization_installed() {
+                    Ok(())
+                } else {
+                    Err(
+                        "the authorization was installed but sudo does not report it; \
+                         keep-awake would not be able to hold this Mac"
+                            .to_string(),
+                    )
+                }
+            })
+    }
+    .and_then(|()| {
+        state
+            .platform
+            .start_awake_watchdog(&crate::platform::Watchdog {
+                flag: &flag,
+                breadcrumb: &breadcrumb,
+                failure: &failure,
+                reclaimed_prior,
+                app_pid: std::process::id(),
+            })
+            .map_err(|e| e.to_string())
+    });
     refocus_main_window(&app);
     result?;
 
@@ -789,13 +826,68 @@ pub fn authorize_keep_awake(
     Ok(handle.status())
 }
 
+/// Starts the loop for a launch that has nothing to ask.
+///
+/// The other half of #55. `Handle::new` already reports such a run as
+/// authorized, because the grant it depends on is on the machine rather than in
+/// this process — but that claim is only true once something is actually
+/// watching the flag file the sweep writes. This makes it true, without a
+/// prompt, because the grant is what removes the need for one.
+///
+/// Failure demotes the run rather than being swallowed: an authorized window
+/// over a loop that never started is exactly the "green light, sleeping machine"
+/// lie this feature has been burned by before.
+pub fn start_watchdog_if_authorized(state: &AppState) {
+    if !state.platform.needs_authorization() || !state.platform.authorization_installed() {
+        return;
+    }
+    let handle = &state.keep_awake;
+    if crate::paths::unquotable_refusal(&handle.data_root).is_some() {
+        return;
+    }
+    let flag = crate::paths::keep_awake_flag(&handle.data_root);
+    let breadcrumb = crate::paths::keep_awake_breadcrumb(&handle.data_root);
+    let failure = crate::paths::keep_awake_failure(&handle.data_root);
+    // Whatever the last run's loop failed at is not this run's news. Cleared
+    // before the new loop starts, so the only marker the sweep can read is one
+    // this loop wrote.
+    let _ = std::fs::remove_file(&failure);
+    match state
+        .platform
+        .start_awake_watchdog(&crate::platform::Watchdog {
+            flag: &flag,
+            breadcrumb: &breadcrumb,
+            failure: &failure,
+            reclaimed_prior: handle.reclaimed_prior(),
+            app_pid: std::process::id(),
+        }) {
+        // Deliberately does NOT clear `stranded`. The loop reclaims before its
+        // first poll, but it was spawned into the background, so this arm
+        // returning says only that a shell started — not that `disablesleep`
+        // came back. It used to clear the warning here, which put a reassuring
+        // window over a machine that could still be stuck awake. The sweep
+        // clears it once the OS reads back as not disabled.
+        //
+        // `reclaimed_prior` is still forgotten, because the durable copy is the
+        // breadcrumb: a reclaim that fails leaves that note untouched, so the
+        // next launch reads the same value out again.
+        Ok(()) => handle.clear_reclaimed_prior(),
+        Err(error) => {
+            eprintln!("could not start the keep-awake helper at startup: {error}");
+            handle.mark_unauthorized();
+        }
+    }
+}
+
 /// Puts sleep back after a run that died holding it, without starting a
 /// watchdog. The way out for someone who does not want the feature on.
 ///
 /// Disarms the trigger and drops the flag before restoring anything, because
-/// the way out has to stay out. It is tempting to argue that neither is needed
-/// — `stranded` and `authorized` cannot both be true inside one `Handle`, so
-/// this app's own sweep is writing a flag nothing is watching. That argument is
+/// the way out has to stay out. It used to be arguable that neither was needed
+/// — `stranded` and `authorized` could not both be true inside one `Handle`, so
+/// this app's own sweep was writing a flag nothing was watching. Since the grant
+/// outlives the process (#55) a launch can be both at once, with a loop already
+/// polling that flag. That argument is
 /// about a process, and `disablesleep` is a machine. Nothing stops a second
 /// copy of the app running — `cargo tauri dev` beside the installed build is
 /// the likeliest way, and both derive the same data root from `$HOME`. The

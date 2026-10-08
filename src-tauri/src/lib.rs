@@ -225,6 +225,7 @@ pub fn run() {
                     hold: platform.can_hold_awake(),
                     thermal: platform.can_read_thermal(),
                     needs_authorization: platform.needs_authorization(),
+                    authorization_installed: platform.authorization_installed(),
                 },
                 recovery,
             );
@@ -237,6 +238,15 @@ pub fn run() {
                 general,
                 schedule,
             });
+
+            // Before the sweep, deliberately: the sweep's first tick can decide
+            // to hold, and holding is writing a flag file that means nothing
+            // with nothing watching it. Silent and free wherever the one-time
+            // grant is already installed, and a no-op on every other platform
+            // and on a machine that has never authorized.
+            if let Some(state) = app.try_state::<AppState>() {
+                commands::start_watchdog_if_authorized(&state);
+            }
 
             // The sweep the guards depend on. Nothing else in this app runs on a
             // timer, and the lid-closed case is precisely the case where nobody

@@ -303,6 +303,38 @@ pub trait Platform: Send + Sync {
         false
     }
 
+    /// Whether the OS says sleep is disabled right now, where the platform can
+    /// tell at all.
+    ///
+    /// `None` means "cannot say", which is every platform but macOS, and is not
+    /// the same answer as `Some(false)`. Used in one direction only: to *clear*
+    /// a stranded warning once the machine is confirmed back. Never to raise
+    /// one — the loop takes up to its poll interval to act on a flag, so a
+    /// read taken straight after a hold was asked for would report a failure
+    /// that has not happened. Raising failures is the loop's own job, through
+    /// the marker it writes.
+    fn sleep_is_disabled(&self) -> Option<bool> {
+        None
+    }
+
+    /// Whether the one-time authorization has already been given on this
+    /// machine, so this run needs no prompt at all.
+    ///
+    /// The answer to issue #55. Where a hold needs a privilege the user must
+    /// grant, that grant is a property of the machine, not of the process that
+    /// asked for it — so a second launch has to be able to find it. Platforms
+    /// that never needed authorizing report `false` and are never asked, because
+    /// [`Platform::needs_authorization`] already gates every caller.
+    fn authorization_installed(&self) -> bool {
+        false
+    }
+
+    /// Ask for the administrator password once, and record the grant somewhere
+    /// the next launch will find it.
+    fn install_authorization(&self) -> Result<()> {
+        anyhow::bail!("this platform has nothing to authorize")
+    }
+
     /// Arm or release the hold.
     ///
     /// The default is the flag file the macOS root loop watches, which is also
@@ -386,6 +418,9 @@ pub struct Watchdog<'a> {
     pub flag: &'a Path,
     /// Where the loop records who owns the sleep setting.
     pub breadcrumb: &'a Path,
+    /// Where the loop records that a `sudo` of its own did not land. The one
+    /// channel by which a demoted, fallible loop can contradict the window.
+    pub failure: &'a Path,
     /// The `SleepDisabled` value from before a previous run died holding it,
     /// recovered from a stale breadcrumb. `Some` means the new loop must reset
     /// the setting to this value as its first act; `None` means read the live

@@ -21,6 +21,15 @@ the `--user-data-dir`. For the ChatGPT desktop app it is `CODEX_HOME`, which
 holds `auth.json` and the tokens the `codex` CLI also uses. Anything that leaks
 a path, reads the contents, or deletes the wrong directory is a security issue.
 
+### The sudoers drop-in
+
+`/etc/sudoers.d/agent-profiles`, `root:wheel`, mode `0440`. The only thing this
+app writes outside your home directory, the only thing it installs with an
+administrator password, and the only thing that survives deleting the app.
+Anything that widens what it grants, lets a path or an argument reach it
+unvalidated, or leaves `sudo` unable to parse `/etc/sudoers.d` is a security
+issue. Details under "Root on macOS" below.
+
 ### Deleting a profile
 
 `delete_profile` removes a directory tree recursively. Two guards stand in
@@ -51,22 +60,48 @@ sent anywhere.
 
 ### Root on macOS: Keep Awake and Schedule
 
-Keep Awake holds `pmset -a disablesleep`, which only root can set. After you
-enter an administrator password, the app starts a root shell loop through
-`osascript` with `with administrator privileges`. The loop polls every three
-seconds. It sets or restores `disablesleep` based on whether a flag file
-exists, and exits when the app's process (pid and start time) is gone. The
-script is built in memory and passed inline. It is never written to disk,
-because a root script under user-writable Application Support would be a
-standing privilege escalation. The loop tests the flag for existence and never
-reads it. A data root containing a quote, backslash, CR or LF is refused
-(`paths::unquotable_refusal`).
+Keep Awake holds `pmset -a disablesleep`, which only root can set. You enter an
+administrator password **once on this Mac**. The app spends it installing a
+`sudoers` drop-in at `/etc/sudoers.d/agent-profiles`, owned `root:wheel` and
+mode `0440`, granting this uid exactly two commands with no wildcard:
+`/usr/bin/pmset -a disablesleep 1` and `/usr/bin/pmset -a disablesleep 0`. The
+candidate file is validated with `visudo -cf` before it is ever in place, and
+the whole tree is re-validated afterwards and the file removed again if that
+fails — a malformed file in `/etc/sudoers.d` would break `sudo` machine-wide.
 
-The flag is user-writable, so any process running as you can keep the Mac
-awake while the loop runs. That costs battery. It does not grant root.
+The loop is then an ordinary process running as you, reaching `pmset` through
+`sudo -n`. It polls every three seconds, sets or restores `disablesleep` based
+on whether a flag file exists, and exits when the app's process (pid and start
+time) is gone. The script is built in memory and passed inline — which used to
+be load-bearing, because the loop was root and a root script under
+user-writable Application Support would have been a standing escalation. It is
+not load-bearing any more: the loop runs as you, and the grant already lets
+anything running as you set `disablesleep` directly, so where the body lives
+buys nothing either way. What is worth protecting is now the drop-in, and that
+is protected by being root-owned outside your home directory. The loop tests
+the flag for existence and never reads it. A data root containing a quote, backslash, CR or
+LF is refused (`paths::unquotable_refusal`).
 
-Schedule arms one-off `pmset schedule wake` events, which also need the
-administrator password through the same path. Opening the app at the set time
+The grant is pinned to one uid, so it reaches no other account on the machine.
+`/usr/bin/pmset` is `root:wheel` and SIP-`restricted`, so it cannot be replaced
+with a different program to run as root.
+
+**What the grant is worth to anything else running as you.** With it installed,
+any process running as your user can set `disablesleep 1` directly — no flag
+file, no loop, no password. What that buys is a Mac that stays awake and burns
+battery. It does not grant root and it cannot reach any other `pmset`
+setting. This is wider than the flag file it replaces, which only worked while
+a loop was watching, and it is the deliberate cost of not asking for a
+password on every launch.
+
+**Removing it.** The drop-in outlives the app; deleting Agent Profiles does not
+remove it. `sudo rm /etc/sudoers.d/agent-profiles` does, and the command is
+shown in the Keep Awake tab before the password is asked for. There is no
+in-app button for it.
+
+Schedule arms one-off `pmset schedule wake` events, which still ask for the
+administrator password each time the armed set changes — the grant above covers
+`disablesleep` only. Opening the app at the set time
 is a per-user LaunchAgent in `~/Library/LaunchAgents` that runs
 `/usr/bin/open`. That half needs no password.
 
