@@ -188,7 +188,14 @@ The official Windows install of Claude Desktop may be an MSIX package, which
 Windows can virtualize. Its data directory may be
 `%LOCALAPPDATA%\Packages\Claude_pzs8sxrjxfjjc\LocalCache\Roaming\Claude` or
 `%APPDATA%\Claude`. The binary may be `%LOCALAPPDATA%\AnthropicClaude\claude.exe`
-or the `WindowsApps` execution alias.
+or the `WindowsApps` execution alias. When neither exists, Windows is asked
+where the `Claude_pzs8sxrjxfjjc` package is installed
+(`GetPackagesByPackageFamily`) and `claude.exe` is looked for inside it. That
+folder, under `C:\Program Files\WindowsApps`, carries the version in its name,
+so it cannot be declared as a path; and the alias is missing on a machine
+where the user switched it off. A report of an installed Claude Desktop read
+as "not installed", with both declared binaries absent, is why the lookup
+exists.
 
 The app checks both data paths and takes the first that exists, with the MSIX
 path listed first. With neither present it uses the MSIX path.

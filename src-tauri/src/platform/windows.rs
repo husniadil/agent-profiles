@@ -44,6 +44,37 @@ pub fn pick_binary(candidates: &[PathBuf]) -> Option<PathBuf> {
         .cloned()
 }
 
+/// How deep below a package root the executable may sit. Store packages put it
+/// at the root or one folder down (`app\claude.exe`); two levels covers that
+/// without walking a whole Electron tree.
+const PACKAGE_EXE_DEPTH: usize = 2;
+
+/// Finds `exe` inside an installed MSIX package, matched case-insensitively
+/// because Windows file names are. Shallowest match wins. The subfolder is
+/// searched for rather than declared: it is the package's own layout and can
+/// move between releases without the app's id changing.
+pub fn find_in_package(root: &Path, exe: &str) -> Option<PathBuf> {
+    let mut level = vec![root.to_path_buf()];
+    for _ in 0..=PACKAGE_EXE_DEPTH {
+        let mut next = Vec::new();
+        for dir in level {
+            let Ok(entries) = std::fs::read_dir(&dir) else {
+                continue;
+            };
+            for entry in entries.flatten() {
+                let path = entry.path();
+                if path.is_dir() {
+                    next.push(path);
+                } else if path.is_file() && entry.file_name().eq_ignore_ascii_case(exe) {
+                    return Some(path);
+                }
+            }
+        }
+        level = next;
+    }
+    None
+}
+
 pub fn looked_in(candidates: &[PathBuf]) -> String {
     candidates
         .iter()
@@ -167,6 +198,73 @@ mod imp {
             .ok_or_else(|| anyhow!("{product} has not been declared for Windows"))
     }
 
+    /// Install folders of every package in `family` for this user: usually
+    /// one, two while an update is staged. Asked of Windows because the folder
+    /// name carries the version and `C:\Program Files\WindowsApps` cannot be
+    /// listed by a user. No package, or a Windows that cannot answer, gives an
+    /// empty list — the caller then reports the app as not installed, which
+    /// is what it reported before this lookup existed.
+    fn package_roots(family: &str) -> Vec<PathBuf> {
+        use std::ffi::OsString;
+        use std::os::windows::ffi::OsStringExt;
+        use windows::core::{HSTRING, PCWSTR, PWSTR};
+        use windows::Win32::Foundation::{ERROR_INSUFFICIENT_BUFFER, ERROR_SUCCESS};
+        use windows::Win32::Storage::Packaging::Appx::{
+            GetPackagePathByFullName, GetPackagesByPackageFamily,
+        };
+
+        let family = HSTRING::from(family);
+        let (mut count, mut chars) = (0u32, 0u32);
+        // SAFETY: the sizing call only writes the two counts into locals.
+        let status =
+            unsafe { GetPackagesByPackageFamily(&family, &mut count, None, &mut chars, None) };
+        // No package answers ERROR_SUCCESS with a count of 0.
+        if status != ERROR_INSUFFICIENT_BUFFER || count == 0 {
+            return Vec::new();
+        }
+        let mut names = vec![PWSTR::null(); count as usize];
+        let mut buffer = vec![0u16; chars as usize];
+        // SAFETY: both buffers are the sizes the previous call asked for, and
+        // the pointers written into `names` point into `buffer`, which outlives
+        // every use of them below.
+        let status = unsafe {
+            GetPackagesByPackageFamily(
+                &family,
+                &mut count,
+                Some(names.as_mut_ptr()),
+                &mut chars,
+                Some(PWSTR(buffer.as_mut_ptr())),
+            )
+        };
+        if status != ERROR_SUCCESS {
+            return Vec::new();
+        }
+        names
+            .iter()
+            .take(count as usize)
+            .filter_map(|name| {
+                let name = PCWSTR(name.0);
+                let mut len = 0u32;
+                // SAFETY: a sizing call; `name` is a NUL-terminated string in
+                // `buffer`, and only `len` is written.
+                let _ = unsafe { GetPackagePathByFullName(name, &mut len, None) };
+                if len == 0 {
+                    return None;
+                }
+                let mut path = vec![0u16; len as usize];
+                // SAFETY: `path` holds the `len` characters just asked for.
+                let status = unsafe {
+                    GetPackagePathByFullName(name, &mut len, Some(PWSTR(path.as_mut_ptr())))
+                };
+                if status != ERROR_SUCCESS {
+                    return None;
+                }
+                let end = path.iter().position(|&c| c == 0).unwrap_or(path.len());
+                Some(PathBuf::from(OsString::from_wide(&path[..end])))
+            })
+            .collect()
+    }
+
     /// Whether Windows still has a process under this id.
     ///
     /// An unanswerable question is treated as "yes". Being unable to run
@@ -211,16 +309,25 @@ mod imp {
 
         fn binary(&self, locations: &Locations, product: &str) -> Result<PathBuf> {
             let (local, roaming) = roots()?;
-            let candidates = expand(here(locations, product)?.binaries, &local, &roaming);
-            pick_binary(&candidates).ok_or_else(|| {
-                anyhow!(Unavailable::new(
-                    format!("{product} is not installed"),
-                    format!(
-                        "{product} was not found. Looked in: {}",
-                        looked_in(&candidates)
-                    ),
-                ))
-            })
+            let windows = here(locations, product)?;
+            let candidates = expand(windows.binaries, &local, &roaming);
+            if let Some(found) = pick_binary(&candidates) {
+                return Ok(found);
+            }
+            let mut looked = looked_in(&candidates);
+            if let Some(family) = windows.package_family {
+                if let Some(found) = package_roots(family)
+                    .iter()
+                    .find_map(|root| find_in_package(root, windows.process_name))
+                {
+                    return Ok(found);
+                }
+                looked.push_str(&format!(", the {family} package"));
+            }
+            Err(anyhow!(Unavailable::new(
+                format!("{product} is not installed"),
+                format!("{product} was not found. Looked in: {looked}"),
+            )))
         }
 
         fn process_marker(&self, locations: &Locations) -> Result<String> {
@@ -682,6 +789,43 @@ mod tests {
         let dir_named_like_exe = d.path().join("claude.exe");
         std::fs::create_dir_all(&dir_named_like_exe).unwrap();
         assert_eq!(pick_binary(&[dir_named_like_exe]), None);
+    }
+
+    #[test]
+    fn a_package_executable_is_found_one_folder_down_whatever_its_case() {
+        let d = tempfile::tempdir().unwrap();
+        std::fs::create_dir_all(d.path().join("app/resources")).unwrap();
+        std::fs::write(d.path().join("app/Claude.exe"), b"").unwrap();
+        assert_eq!(
+            find_in_package(d.path(), "claude.exe"),
+            Some(d.path().join("app/Claude.exe"))
+        );
+    }
+
+    #[test]
+    fn the_shallowest_package_executable_wins() {
+        let d = tempfile::tempdir().unwrap();
+        std::fs::create_dir_all(d.path().join("app/nested")).unwrap();
+        std::fs::write(d.path().join("app/nested/claude.exe"), b"").unwrap();
+        std::fs::write(d.path().join("claude.exe"), b"").unwrap();
+        assert_eq!(
+            find_in_package(d.path(), "claude.exe"),
+            Some(d.path().join("claude.exe"))
+        );
+    }
+
+    #[test]
+    fn a_package_without_the_executable_yields_none() {
+        let d = tempfile::tempdir().unwrap();
+        // A directory with the right name, and the file itself too deep.
+        std::fs::create_dir_all(d.path().join("claude.exe")).unwrap();
+        std::fs::create_dir_all(d.path().join("a/b/c")).unwrap();
+        std::fs::write(d.path().join("a/b/c/claude.exe"), b"").unwrap();
+        assert_eq!(find_in_package(d.path(), "claude.exe"), None);
+        assert_eq!(
+            find_in_package(&d.path().join("missing"), "claude.exe"),
+            None
+        );
     }
 
     #[test]

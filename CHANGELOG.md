@@ -6,6 +6,7 @@ Notable changes, newest first. This project follows [Semantic Versioning](https:
 
 ### Fixed
 
+- **Windows: Claude Desktop installed from the Store is found where Windows put it.** The app only looked for `claude.exe` at two fixed places, the classic installer's folder and the Store's execution alias, so a Store install with the alias switched off read as "not installed". When neither exists, it now asks Windows where the Claude package is installed and looks there. Not yet confirmed on a real Windows machine.
 - **An app that is not installed no longer gets a row in the tray.** 0.6.2 gave every uninstalled app a disabled "X is not installed" row beside the ones that work, so the menu for someone with one app installed carried up to six rows naming nothing they could launch. The tray now drops that row again — the reason still has somewhere to live, in the window's greyed section and the empty-state list — and a menu with nothing installed at all shows no rows above Settings…/Quit rather than one per declared app.
 
 ## [0.7.0] — 2026-09-02
