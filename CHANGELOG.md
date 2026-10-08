@@ -2,7 +2,9 @@
 
 Notable changes, newest first. This project follows [Semantic Versioning](https://semver.org).
 
-## [Unreleased]
+## [0.7.1] — 2026-10-08
+
+Two fixes. Keep Awake stops asking for a password every time the app starts, and the tray stops listing apps that are not installed.
 
 ### Fixed
 
