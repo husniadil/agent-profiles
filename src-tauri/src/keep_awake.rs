@@ -975,6 +975,23 @@ pub enum HoldStep {
     /// error the write returned so the window can report it.
     Applied(Option<String>),
 }
+/// What the loop last failed at, if anything.
+///
+/// Read, never written. Its contents choose a message and nothing else: the
+/// file sits in a user-writable directory, so the text is evidence that the
+/// loop wrote something, never evidence of what is true. Any value it does not
+/// recognise still reports a failed hold rather than silence.
+fn loop_failure(data_root: &Path) -> Option<String> {
+    let raw = std::fs::read_to_string(crate::paths::keep_awake_failure(data_root)).ok()?;
+    let what = match raw.trim() {
+        "reclaim" => "could not put the sleep setting back after a run that died holding it",
+        "release" => "could not hand the sleep setting back",
+        _ => "could not disable sleep",
+    };
+    Some(format!(
+        "{what} — the one-time authorization may have been removed"
+    ))
+}
 
 /// The one step of a sweep iteration that can re-arm the hold, pulled out of
 /// [`watch`] so the re-arm guard can be exercised on its own.
@@ -1010,24 +1027,6 @@ pub enum HoldStep {
 /// strand the lid. The two are separate because they end differently: `stopping`
 /// ends the loop, a pause only skips this step, so the sweep is still there to
 /// re-arm the moment a failed install clears it.
-/// What the loop last failed at, if anything.
-///
-/// Read, never written. Its contents choose a message and nothing else: the
-/// file sits in a user-writable directory, so the text is evidence that the
-/// loop wrote something, never evidence of what is true. Any value it does not
-/// recognise still reports a failed hold rather than silence.
-fn loop_failure(data_root: &Path) -> Option<String> {
-    let raw = std::fs::read_to_string(crate::paths::keep_awake_failure(data_root)).ok()?;
-    let what = match raw.trim() {
-        "reclaim" => "could not put the sleep setting back after a run that died holding it",
-        "release" => "could not hand the sleep setting back",
-        _ => "could not disable sleep",
-    };
-    Some(format!(
-        "{what} — the one-time authorization may have been removed"
-    ))
-}
-
 pub fn hold_step(
     handle: &Handle,
     platform: &dyn crate::platform::Platform,

@@ -72,10 +72,14 @@ fails — a malformed file in `/etc/sudoers.d` would break `sudo` machine-wide.
 The loop is then an ordinary process running as you, reaching `pmset` through
 `sudo -n`. It polls every three seconds, sets or restores `disablesleep` based
 on whether a flag file exists, and exits when the app's process (pid and start
-time) is gone. The script is built in memory and passed inline. It is never
-written to disk, because a root script under user-writable Application Support
-would be a standing privilege escalation. The loop tests the flag for
-existence and never reads it. A data root containing a quote, backslash, CR or
+time) is gone. The script is built in memory and passed inline — which used to
+be load-bearing, because the loop was root and a root script under
+user-writable Application Support would have been a standing escalation. It is
+not load-bearing any more: the loop runs as you, and the grant already lets
+anything running as you set `disablesleep` directly, so where the body lives
+buys nothing either way. What is worth protecting is now the drop-in, and that
+is protected by being root-owned outside your home directory. The loop tests
+the flag for existence and never reads it. A data root containing a quote, backslash, CR or
 LF is refused (`paths::unquotable_refusal`).
 
 The grant is pinned to one uid, so it reaches no other account on the machine.

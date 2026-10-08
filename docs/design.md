@@ -276,9 +276,15 @@ separates this from the same pattern in yabai (#1318) and battery (#443),
 where the granted binary sat in a user-writable directory and the rule became
 a root shell.
 
-The loop body still never lands on disk, for the reason it never did: a script
-under user-writable Application Support run as root would be a standing
-escalation.
+The loop body is still built in memory rather than written to disk, but the
+reason it used to have is gone. A script under user-writable Application
+Support run **as root** would have been a standing escalation; this one runs as
+the user, and the grant already lets anything running as the user set
+`disablesleep`, so a file on disk would hand over nothing a caller did not
+already have. It stays inline because there is no reason to put it on disk, not
+because putting it there would be dangerous. The thing that now needs
+protecting is the drop-in, and what protects it is being root-owned in
+`/etc/sudoers.d` rather than anything about the loop.
 
 ### What the demotion cost
 

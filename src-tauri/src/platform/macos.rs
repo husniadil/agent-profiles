@@ -59,6 +59,29 @@ fn here<'a>(locations: &'a Locations, product: &str) -> Result<&'a crate::app_sp
 ///
 /// ponytail: shells out once per sweep. Swap for `IOPSCopyPowerSourcesInfo` if
 /// the process spawn ever shows up in a profile.
+/// Whether `IOPMrootDomain` says sleep is disabled, from `ioreg` output.
+///
+/// Pure so both states can be asserted against captured output, which is what
+/// the `pmset -g` version could not be: it inferred 0 from a line's absence,
+/// and the absence had two causes — the setting really being 0, and the
+/// command not having run. `None` here means only the second.
+///
+/// The value prints as `Yes` or `No`. Anything else is a format this build has
+/// not seen, and is reported as unknown rather than guessed in either
+/// direction: read as "not disabled" it would retire a warning about a machine
+/// that may still be stuck awake.
+fn parse_sleep_disabled(raw: &str) -> Option<bool> {
+    raw.lines()
+        .filter_map(|line| line.split_once("\"SleepDisabled\""))
+        .filter_map(|(_, rest)| rest.split_once('='))
+        .map(|(_, value)| value.trim())
+        .find_map(|value| match value {
+            "Yes" => Some(true),
+            "No" => Some(false),
+            _ => None,
+        })
+}
+
 fn parse_batt(raw: &str) -> Power {
     let external = raw.contains("'AC Power'");
     // Only the battery line is trusted for the number. The remaining-time field
@@ -226,15 +249,20 @@ impl Platform for MacOs {
     }
 
     fn sleep_is_disabled(&self) -> Option<bool> {
-        // `pmset -g` prints `SleepDisabled` to anyone; only writing it is
-        // privileged. A read that fails answers "cannot say" rather than "not
-        // disabled", because the caller uses a false to retire a warning.
-        let out = std::process::Command::new(PMSET).arg("-g").output().ok()?;
-        String::from_utf8_lossy(&out.stdout)
-            .lines()
-            .filter_map(|line| line.split_once("SleepDisabled"))
-            .map(|(_, rest)| rest.trim() == "1")
-            .next()
+        // `ioreg`, not `pmset -g`. `pmset -g` lists the system-wide settings
+        // that are *not* at their default, so on macOS 27 it omits
+        // `SleepDisabled` entirely when it is 0 — the exact answer this caller
+        // needs most, since a false is what retires the stranded warning. Read
+        // that way, a machine the reclaim had just fixed kept the warning for
+        // the rest of the run, and its only button turns the trigger off.
+        //
+        // `IOPMrootDomain` carries the key in both states, as `Yes` or `No`,
+        // and reading the registry needs no privilege.
+        let out = std::process::Command::new("/usr/sbin/ioreg")
+            .args(["-r", "-k", "SleepDisabled", "-d", "1"])
+            .output()
+            .ok()?;
+        parse_sleep_disabled(&String::from_utf8_lossy(&out.stdout))
     }
 
     fn authorization_installed(&self) -> bool {
@@ -1305,21 +1333,17 @@ User yudha may run the following commands on host:
         let failed = dir.path().join("keep-awake.failed");
         std::fs::write(&crumb, "prior=1\n").unwrap();
 
-        // Long-lived on purpose. The loop's liveness check is `kill -0` plus a
-        // start-time compare, and a child this test reaped would still answer
-        // `kill -0` as a zombie — so the script is bounded below by killing the
-        // script, never by letting the watched pid go.
-        let mut sleeper = std::process::Command::new("sleep")
-            .arg("30")
-            .spawn()
-            .unwrap();
         let script = watchdog_script(&crate::platform::Watchdog {
             flag: &flag,
             breadcrumb: &crumb,
             failure: &failed,
             // Reclaiming means the previous run left it on; put it back to 0.
             reclaimed_prior: Some(0),
-            app_pid: sleeper.id(),
+            // Our own pid: alive for the whole test by definition, and
+            // always visible to `ps`. A spawned helper is not — the script
+            // reads `ps` microseconds after the spawn, and an empty read makes
+            // it exit before the step under test ever runs.
+            app_pid: std::process::id(),
         });
         let mut run = std::process::Command::new("sh")
             .arg("-c")
@@ -1334,8 +1358,6 @@ User yudha may run the following commands on host:
         wait_until(std::time::Duration::from_secs(30), || failed.exists());
         let _ = run.kill();
         let _ = run.wait();
-        let _ = sleeper.kill();
-        let _ = sleeper.wait();
         assert_eq!(
             std::fs::read_to_string(&crumb).unwrap(),
             "prior=1\n",
@@ -1363,16 +1385,16 @@ User yudha may run the following commands on host:
         let failed = dir.path().join("keep-awake.failed");
         std::fs::write(&failed, "hold\n").unwrap();
 
-        let mut sleeper = std::process::Command::new("sleep")
-            .arg("30")
-            .spawn()
-            .unwrap();
         let script = watchdog_script(&crate::platform::Watchdog {
             flag: &flag,
             breadcrumb: &crumb,
             failure: &failed,
             reclaimed_prior: None,
-            app_pid: sleeper.id(),
+            // Our own pid: alive for the whole test by definition, and
+            // always visible to `ps`. A spawned helper is not — the script
+            // reads `ps` microseconds after the spawn, and an empty read makes
+            // it exit before the step under test ever runs.
+            app_pid: std::process::id(),
         });
         let mut loop_process = std::process::Command::new("sh")
             .arg("-c")
@@ -1383,8 +1405,6 @@ User yudha may run the following commands on host:
         let cleared = wait_until(std::time::Duration::from_secs(30), || !failed.exists());
         let _ = loop_process.kill();
         let _ = loop_process.wait();
-        let _ = sleeper.kill();
-        let _ = sleeper.wait();
 
         assert!(
             cleared,
@@ -1420,17 +1440,16 @@ User yudha may run the following commands on host:
         let crumb = dir.path().join("keep-awake.owned");
         let failed = dir.path().join("keep-awake.failed");
 
-        // A pid that is alive for the whole run, ended by the timeout below.
-        let mut sleeper = std::process::Command::new("sleep")
-            .arg("30")
-            .spawn()
-            .unwrap();
         let script = watchdog_script(&crate::platform::Watchdog {
             flag: &flag,
             breadcrumb: &crumb,
             failure: &failed,
             reclaimed_prior: None,
-            app_pid: sleeper.id(),
+            // Our own pid: alive for the whole test by definition, and
+            // always visible to `ps`. A spawned helper is not — the script
+            // reads `ps` microseconds after the spawn, and an empty read makes
+            // it exit before the step under test ever runs.
+            app_pid: std::process::id(),
         });
         let mut loop_process = std::process::Command::new("sh")
             .arg("-c")
@@ -1450,8 +1469,6 @@ User yudha may run the following commands on host:
         let retried = wait_until(std::time::Duration::from_secs(30), || tally_lines() > 1);
         let _ = loop_process.kill();
         let _ = loop_process.wait();
-        let _ = sleeper.kill();
-        let _ = sleeper.wait();
 
         let attempts = tally_lines();
         assert!(
@@ -1501,6 +1518,62 @@ User yudha may run the following commands on host:
             "got: {spawned}"
         );
         assert!(!spawned.contains("osascript"), "got: {spawned}");
+    }
+
+    /// `ioreg -r -k SleepDisabled -d 1`, trimmed, captured on macOS 27.0.1
+    /// arm64 with the setting on. The key sits inside `IOPMrootDomain`
+    /// alongside dozens of others; two neighbours are kept so the parser is
+    /// exercised against the `"Key" = Value` shape it really meets, including
+    /// one whose value is also `Yes`.
+    const IOREG_DISABLED: &str = r#"+-o IOPMrootDomain  <class IOPMrootDomain, id 0x100000307, registered>
+    {
+      "IOPMUserTriggeredFullWake" = Yes
+      "SleepDisabled" = Yes
+      "Standby Enabled" = Yes
+    }"#;
+
+    /// The same read with the setting off. This is the state `pmset -g` omits
+    /// on macOS 27, which is the whole reason the read moved to `ioreg`.
+    const IOREG_ENABLED: &str = r#"+-o IOPMrootDomain  <class IOPMrootDomain, id 0x100000307, registered>
+    {
+      "IOPMUserTriggeredFullWake" = Yes
+      "SleepDisabled" = No
+      "Standby Enabled" = Yes
+    }"#;
+
+    #[test]
+    fn both_states_of_the_sleep_setting_are_read_from_a_real_capture() {
+        // The defect this replaces: the old reader inferred 0 from a missing
+        // `pmset -g` line, and on macOS 27 that line is missing exactly when
+        // the setting is 0 — so it answered "cannot say" for the one state the
+        // caller acts on, and a machine the reclaim had just fixed kept its
+        // stranded warning for the rest of the run.
+        assert_eq!(parse_sleep_disabled(IOREG_DISABLED), Some(true));
+        assert_eq!(parse_sleep_disabled(IOREG_ENABLED), Some(false));
+    }
+
+    #[test]
+    fn a_read_that_said_nothing_is_not_read_as_not_disabled() {
+        // `None` has to stay distinguishable from `Some(false)`: the caller
+        // retires a warning on a false, and a failed `ioreg` is not evidence
+        // that a machine stuck awake has been fixed.
+        assert_eq!(parse_sleep_disabled(""), None);
+        assert_eq!(parse_sleep_disabled("ioreg: not found"), None);
+        // A value in a shape this build has never seen is unknown, not false.
+        assert_eq!(
+            parse_sleep_disabled(r#"      "SleepDisabled" = 0"#),
+            None,
+            "an unrecognised value must not be guessed at"
+        );
+    }
+
+    #[test]
+    fn a_neighbouring_key_whose_name_contains_ours_is_not_mistaken_for_it() {
+        // The registry is a flat list of quoted keys, so the match is anchored
+        // on the quotes rather than on a substring.
+        let decoy = r#"      "PreviousSleepDisabledState" = No
+      "SleepDisabled" = Yes"#;
+        assert_eq!(parse_sleep_disabled(decoy), Some(true));
     }
 
     #[test]
