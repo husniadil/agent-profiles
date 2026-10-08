@@ -6,6 +6,7 @@ Notable changes, newest first. This project follows [Semantic Versioning](https:
 
 ### Fixed
 
+- **Windows: an app installed from the Store is found again.** The Microsoft Store copy of an app (Claude Desktop, for one) starts from a shortcut in `%LOCALAPPDATA%\Microsoft\WindowsApps` that Rust cannot open, so the check for the app's executable read it as missing and the app showed as not installed. The check now looks at the shortcut itself.
 - **An app that is not installed no longer gets a row in the tray.** 0.6.2 gave every uninstalled app a disabled "X is not installed" row beside the ones that work, so the menu for someone with one app installed carried up to six rows naming nothing they could launch. The tray now drops that row again — the reason still has somewhere to live, in the window's greyed section and the empty-state list — and a menu with nothing installed at all shows no rows above Settings…/Quit rather than one per declared app.
 
 ## [0.7.0] — 2026-09-02

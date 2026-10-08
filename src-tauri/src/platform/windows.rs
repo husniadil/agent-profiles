@@ -40,8 +40,16 @@ pub fn default_profile_or_canonical(candidates: &[PathBuf]) -> Option<PathBuf> {
 pub fn pick_binary(candidates: &[PathBuf]) -> Option<PathBuf> {
     candidates
         .iter()
-        .find(|candidate| candidate.is_file())
+        .find(|candidate| is_launchable(candidate))
         .cloned()
+}
+
+/// Not `is_file()`: that follows reparse points, and the MSIX app execution
+/// alias in `%LOCALAPPDATA%\Microsoft\WindowsApps` is one Rust cannot open
+/// (os error 1920), so an installed app read as missing. Look at the entry
+/// itself instead and only rule out a directory.
+fn is_launchable(path: &Path) -> bool {
+    std::fs::symlink_metadata(path).is_ok_and(|meta| !meta.is_dir())
 }
 
 pub fn looked_in(candidates: &[PathBuf]) -> String {
@@ -682,6 +690,15 @@ mod tests {
         let dir_named_like_exe = d.path().join("claude.exe");
         std::fs::create_dir_all(&dir_named_like_exe).unwrap();
         assert_eq!(pick_binary(&[dir_named_like_exe]), None);
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn a_binary_that_is_a_link_is_found_without_following_it() {
+        let d = tempfile::tempdir().unwrap();
+        let alias = d.path().join("claude.exe");
+        std::os::unix::fs::symlink("/nowhere/real.exe", &alias).unwrap();
+        assert_eq!(pick_binary(std::slice::from_ref(&alias)), Some(alias));
     }
 
     #[test]
