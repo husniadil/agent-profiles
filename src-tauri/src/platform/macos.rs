@@ -50,15 +50,6 @@ fn here<'a>(locations: &'a Locations, product: &str) -> Result<&'a crate::app_sp
         .ok_or_else(|| anyhow!("{product} has not been declared for macOS"))
 }
 
-/// Reads `pmset -g batt`.
-///
-/// Shelling out rather than reaching for IOKit through `objc2`: this is two
-/// lines of text asked for once every sweep, and the IOKit version is a
-/// `CFDictionary` walk that would have to be kept correct across macOS releases
-/// for the same two numbers.
-///
-/// ponytail: shells out once per sweep. Swap for `IOPSCopyPowerSourcesInfo` if
-/// the process spawn ever shows up in a profile.
 /// Whether `IOPMrootDomain` says sleep is disabled, from `ioreg` output.
 ///
 /// Pure so both states can be asserted against captured output, which is what
@@ -82,6 +73,15 @@ fn parse_sleep_disabled(raw: &str) -> Option<bool> {
         })
 }
 
+/// Reads `pmset -g batt`.
+///
+/// Shelling out rather than reaching for IOKit through `objc2`: this is two
+/// lines of text asked for once every sweep, and the IOKit version is a
+/// `CFDictionary` walk that would have to be kept correct across macOS releases
+/// for the same two numbers.
+///
+/// ponytail: shells out once per sweep. Swap for `IOPSCopyPowerSourcesInfo` if
+/// the process spawn ever shows up in a profile.
 fn parse_batt(raw: &str) -> Power {
     let external = raw.contains("'AC Power'");
     // Only the battery line is trusted for the number. The remaining-time field
