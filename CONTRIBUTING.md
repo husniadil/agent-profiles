@@ -73,19 +73,26 @@ stays invisible until CI reports it, and each recipe finds one in minutes.
 
 ### Check the Windows build from macOS
 
-Tauri's build script compiles a Windows resource file, so it needs `llvm-rc`:
+`ring`, which the updater's TLS stack pulls in, compiles C against the Windows
+C runtime headers, and macOS has none. A plain `cargo clippy --target` stops in
+its build script with `fatal error: 'assert.h' file not found`. `cargo-xwin`
+downloads the MSVC CRT and Windows SDK headers and points the C compiler at
+them. Tauri's build script compiles a Windows resource file, so it also needs
+`llvm-rc`, and `cargo-xwin` uses `clang` from the same LLVM:
 
 ```bash
 brew install llvm
 export PATH="$(brew --prefix llvm)/bin:$PATH"
 rustup target add x86_64-pc-windows-msvc
+cargo install --locked cargo-xwin
 
 cd src-tauri
-cargo clippy --target x86_64-pc-windows-msvc --all-targets -- -D warnings
+cargo xwin clippy --target x86_64-pc-windows-msvc --all-targets -- -D warnings
 ```
 
-This type-checks and lints everything, tests included. It does not link, and
-it cannot run the tests.
+The first run downloads about 1 GB of headers into
+`~/Library/Caches/cargo-xwin`. This type-checks and lints everything, tests
+included. It does not link, and it cannot run the tests.
 
 ### Run the Linux gate in a container
 
