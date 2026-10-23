@@ -2,6 +2,12 @@
 
 Notable changes, newest first. This project follows [Semantic Versioning](https://semver.org).
 
+## [Unreleased]
+
+### Fixed
+
+- **Windows: Claude Desktop installed from the Store is found where Windows put it.** The app only looked for `claude.exe` at two fixed places, the classic installer's folder and the Store's execution alias, so a Store install with the alias switched off read as "not installed". When neither exists, it now asks Windows where the Claude package is installed and looks there. Not yet confirmed on a real Windows machine.
+
 ## [0.7.1] — 2026-10-08
 
 Two fixes. Keep Awake stops asking for a password every time the app starts, and the tray stops listing apps that are not installed.
